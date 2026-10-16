@@ -502,7 +502,7 @@ private struct SettingsField<Content: View>: View {
   }
 }
 
-private struct SettingsToggle: View {
+struct SettingsToggle: View {
   let title: String
   let detail: String
   @Binding var isOn: Bool

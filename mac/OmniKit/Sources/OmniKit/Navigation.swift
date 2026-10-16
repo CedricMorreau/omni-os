@@ -61,3 +61,12 @@ extension Route {
     if case .channel(let id, _, _) = self { .channel(id: id) } else { .home }
   }
 }
+
+extension Route {
+  /// The thread a clicked notification opens, which selects its channel in the sidebar too. nil for a
+  /// notification that is not Omni's.
+  public init?(notification userInfo: [AnyHashable: Any]) {
+    guard let id = userInfo[AttentionAlert.InfoKey.thread] as? String, !id.isEmpty else { return nil }
+    self = .thread(id: id)
+  }
+}

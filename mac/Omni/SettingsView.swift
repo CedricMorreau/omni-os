@@ -20,6 +20,10 @@ struct SettingsView: View {
         SyncSettings(model: model)
           .frame(width: z(560), height: 680)
       }
+      Tab("Notifications", systemImage: "bell", value: .notifications) {
+        NotificationSettingsView(model: model, attention: model.attention)
+          .frame(width: z(560), height: 600)
+      }
       Tab("Appearance", systemImage: "circle.lefthalf.filled", value: .appearance) {
         AppearanceSettingsView(appearance: appearance, zoom: UIZoom.settings)
           .frame(width: 560, height: 360)

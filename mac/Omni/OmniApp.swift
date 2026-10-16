@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private(set) lazy var updater = Updater(model: model)
   private var quitting = false
   private var events: SystemEvents?
+  private var notifications: SystemNotifications?
 
   #if DEBUG
   private let qa = QARunner.launch()
@@ -64,6 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     model.launch()
     updater.start()
     events = SystemEvents(model: model)
+    let notifications = SystemNotifications(model: model)
+    self.notifications = notifications
+    model.attention.poster = notifications
+    Task { await model.attention.refreshPermission() }
     #if DEBUG
     if let qa { QARunner.start(qa, model: model) }
     #endif
@@ -71,12 +76,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidBecomeActive(_ notification: Notification) {
     model.banners.windowActive = true
+    model.attention.windowActive = true
+    Task { await model.attention.refreshPermission() }
     model.didBecomeActive()
     Task { await updater.check() }
   }
 
   func applicationDidResignActive(_ notification: Notification) {
     model.banners.windowActive = false
+    model.attention.windowActive = false
   }
 
   /// Quit asks while turns run. With none, an app-started server stops and a hand-started one is left alone.
