@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { threadDir } from '../config.ts';
@@ -49,6 +49,8 @@ export interface FileSyncOptions {
   /** Home dir the harness folders are under. Tests pass a temp dir. */
   home?: string;
   env?: NodeJS.ProcessEnv;
+  /** Once aborted, a download writes nothing more: the runner stopped waiting and the harness owns the files now. */
+  signal?: AbortSignal;
 }
 
 const manifestPath = (threadId: string) => `manifests/${threadId}.json`;
@@ -83,13 +85,41 @@ function remember(state: LocalState, key: string, path: string, sha: string) {
   state[key] = { size: st.size, mtime: Math.trunc(st.mtimeMs), sha };
 }
 
-/** The file's sha, from the state when it has not changed since. */
-function hashOf(state: LocalState, key: string, path: string): { sha: string; size: number; mtime: number } {
+/**
+ * One read of a file: its bytes, their sha, and the size and mtime it had just before the read. What gets uploaded is
+ * these bytes, so the sha always names them, even when the file changes while the upload waits on the relay.
+ */
+interface Snapshot extends FileEntry {
+  body: Uint8Array;
+}
+
+function snapshot(path: string): Snapshot {
+  const st = statSync(path);
+  const body = readFileSync(path);
+  return { body, sha: sha256(body), size: body.length, mtime: Math.trunc(st.mtimeMs) };
+}
+
+/** The file's sha, from the state when it has not changed since: no read. Otherwise a snapshot of it. */
+function hashOf(state: LocalState, key: string, path: string): FileEntry | Snapshot {
   const st = statSync(path);
   const mtime = Math.trunc(st.mtimeMs);
   const known = state[key];
   if (known && known.size === st.size && known.mtime === mtime) return { sha: known.sha, size: st.size, mtime };
-  return { sha: sha256(readFileSync(path)), size: st.size, mtime };
+  return snapshot(path);
+}
+
+/** Record the file as synced at f, unless it changed since f was taken: then it stays dirty for the next pass. */
+function rememberIf(state: LocalState, key: string, path: string, f: FileEntry) {
+  const st = statSync(path, { throwIfNoEntry: false });
+  if (st && st.size === f.size && Math.trunc(st.mtimeMs) === f.mtime) state[key] = { size: f.size, mtime: f.mtime, sha: f.sha };
+}
+
+const entryOf = (f: FileEntry): FileEntry => ({ sha: f.sha, size: f.size, mtime: f.mtime });
+
+/** The file's size and mtime, or null when there is none. */
+function fingerprint(path: string): string | null {
+  const st = statSync(path, { throwIfNoEntry: false });
+  return st ? `${st.size}:${st.mtimeMs}` : null;
 }
 
 /** True when the local file is as it was last synced. */
@@ -100,14 +130,26 @@ function unchanged(state: LocalState, key: string, path: string) {
   return known.size === st.size && known.mtime === Math.trunc(st.mtimeMs);
 }
 
-/** Write a file whole: a reader never sees half of it. The temp file is a dotfile, so no watcher or push picks it up. */
-function writeAtomic(path: string, body: Uint8Array, mtime?: unknown) {
+/**
+ * Write a file whole: a reader never sees half of it. The temp file is a dotfile, so no watcher or push picks it up.
+ * `still` is asked last, right before the rename: false leaves the file as it is and returns null. Otherwise returns
+ * the size and mtime the file landed with, read from the temp file, so a write to it after the rename is not taken
+ * for the download.
+ */
+function writeAtomic(path: string, body: Uint8Array, mtime?: unknown, still: () => boolean = () => true): Omit<FileEntry, 'sha'> | null {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = join(dirname(path), `.${basename(path)}.omni-sync-${process.pid}`);
-  writeFileSync(tmp, body);
-  // The mtime comes from the relay's manifest: one that is not a time is left out, not a failed download.
-  if (typeof mtime === 'number' && Number.isFinite(mtime) && mtime > 0) utimesSync(tmp, new Date(mtime), new Date(mtime));
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, body);
+    // The mtime comes from the relay's manifest: one that is not a time is left out, not a failed download.
+    if (typeof mtime === 'number' && Number.isFinite(mtime) && mtime > 0) utimesSync(tmp, new Date(mtime), new Date(mtime));
+    if (!still()) return null;
+    const st = statSync(tmp);
+    renameSync(tmp, path);
+    return { size: st.size, mtime: Math.trunc(st.mtimeMs) };
+  } finally {
+    rmSync(tmp, { force: true });
+  }
 }
 
 // ---------- thread files ----------
@@ -152,16 +194,19 @@ export async function pushThreadFiles(threadId: string, opts: FileSyncOptions): 
       result.skipped++;
       continue;
     }
-    const f = hashOf(state, key, path);
+    let f = hashOf(state, key, path);
     if (manifest.files[rel]?.sha !== f.sha) {
-      if (!(await transport.hasObject(blobPath(f.sha)))) {
-        await transport.putObject(blobPath(f.sha), readFileSync(path));
+      // Hash and upload one read of the file, never the file as it is after the await.
+      const snap = 'body' in f ? f : snapshot(path);
+      f = snap;
+      if (!(await transport.hasObject(blobPath(snap.sha)))) {
+        await transport.putObject(blobPath(snap.sha), snap.body);
         result.count++;
       }
-      manifest.files[rel] = f;
+      manifest.files[rel] = entryOf(f);
       changed = true;
     }
-    remember(state, key, path, f.sha);
+    rememberIf(state, key, path, f);
   }
   if (changed) await writeManifest(transport, threadId, manifest);
   kv.set(stateKey(threadId), state);
@@ -177,6 +222,7 @@ export async function pullThreadFiles(threadId: string, opts: FileSyncOptions): 
   const manifest = await readManifest(transport, threadId);
   const state = readState(threadId);
   for (const [rel, entry] of Object.entries(manifest.files)) {
+    if (opts.signal?.aborted) break;
     const listed = !!entry && typeof entry === 'object' && typeof entry.sha === 'string';
     if (!listed || !safeRel(rel) || !(FILE_AREAS as readonly string[]).includes(rel.split('/')[0]) || rel.split('/').length < 2) {
       result.skipped++;
@@ -189,8 +235,10 @@ export async function pullThreadFiles(threadId: string, opts: FileSyncOptions): 
       result.skipped++;
       continue;
     }
-    writeAtomic(path, body, entry.mtime);
-    remember(state, `f:${rel}`, path, entry.sha);
+    // The download stopped mattering, or the file appeared here while it ran: keep this Mac's.
+    const landed = writeAtomic(path, body, entry.mtime, () => !opts.signal?.aborted && !existsSync(path));
+    if (!landed) continue;
+    state[`f:${rel}`] = { ...landed, sha: entry.sha };
     result.count++;
   }
   if (result.count) kv.set(stateKey(threadId), state);
@@ -276,13 +324,15 @@ export async function pushSession(t: Thread, opts: FileSyncOptions): Promise<num
     const path = join(root, rel);
     if (statSync(path).size > MAX_FILE_BYTES) continue;
     const skey = `s:${key}:${rel}`;
-    const f = hashOf(state, skey, path);
+    let f = hashOf(state, skey, path);
     if (entry.files[rel]?.sha !== f.sha) {
-      await opts.transport.putObject(sessionObject(t.harness, t.session_id, rel), readFileSync(path));
-      entry.files[rel] = f;
+      const snap = 'body' in f ? f : snapshot(path);
+      f = snap;
+      await opts.transport.putObject(sessionObject(t.harness, t.session_id, rel), snap.body);
+      entry.files[rel] = entryOf(f);
       uploaded++;
     }
-    remember(state, skey, path, f.sha);
+    rememberIf(state, skey, path, f);
   }
   if (uploaded) {
     manifest.sessions[key] = entry;
@@ -306,10 +356,14 @@ export async function pullSession(t: Thread, opts: FileSyncOptions): Promise<num
   const state = readState(t.id);
   let written = 0;
   let learned = false;
+  const fetched: { path: string; skey: string; before: string | null; sha: string; body: Uint8Array; mtime: unknown }[] = [];
   for (const [rel, remote] of Object.entries(entry.files ?? {})) {
     if (!remote || typeof remote !== 'object' || typeof remote.sha !== 'string' || !sessionRel(t, rel)) continue;
+    if (opts.signal?.aborted) break;
     const path = join(root, rel);
     const skey = `s:${key}:${rel}`;
+    // What the local file is now. The harness may write it while the download below waits on the relay.
+    const before = fingerprint(path);
     if (existsSync(path)) {
       const synced = unchanged(state, skey, path);
       // In sync already.
@@ -328,9 +382,20 @@ export async function pullSession(t: Thread, opts: FileSyncOptions): Promise<num
     const sha = sha256(body);
     // Cursor records the cwd in the chat's meta.json; make it this machine's.
     if (t.harness === 'cursor' && rel === 'meta.json') body = withCwd(body, t.cwd);
-    writeAtomic(path, body, remote.mtime);
-    remember(state, skey, path, sha);
-    written++;
+    fetched.push({ path, skey, before, sha, body, mtime: remote.mtime });
+  }
+  // Put the downloads in place together, with no await between the checks and the renames, or not at all: Cursor's
+  // store.db and its -wal must not end up from different Macs, and a fenced-off job writes nothing.
+  if (fetched.length && !opts.signal?.aborted) {
+    if (fetched.some((f) => fingerprint(f.path) !== f.before)) {
+      console.error(`[sync] kept this Mac's ${t.harness} session for ${t.id}: it changed here during the download`);
+    } else {
+      for (const f of fetched) {
+        const landed = writeAtomic(f.path, f.body, f.mtime);
+        if (landed) state[f.skey] = { ...landed, sha: f.sha };
+        written++;
+      }
+    }
   }
   if (written || learned) kv.set(stateKey(t.id), state);
   return written;
@@ -381,9 +446,9 @@ const logFailure = (what: string, threadId: string) => (err: unknown) =>
   console.error(`[sync] ${what} for ${threadId} failed:`, (err as Error)?.message ?? err);
 
 /** Wait for p, but no longer than ms. */
-async function within(p: Promise<unknown>, ms: number, onLate: () => void = () => {}) {
+async function within(p: Promise<unknown>, ms: number) {
   let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<void>((resolve) => (timer = setTimeout(() => (onLate(), resolve()), ms)));
+  const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)));
   await Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
@@ -446,20 +511,41 @@ export function turnFinished(threadId: string): Promise<void> {
 }
 
 /**
- * The runner is about to start a process for this thread: bring its session file (and files) from the other Mac
- * first, so the harness resumes where that Mac left off. Waits at most resumeTimeoutMs; a failure only logs.
+ * How the session download before a resume ended. `ready`: it finished, whether or not there was anything to bring.
+ * `failed`: it threw, and the harness starts on what is here. `timed-out`: it outlived resumeTimeoutMs, queued or
+ * running, and was cancelled. `skipped`: sync is off, the thread never ran, or Hermes keeps its session.
  */
-export async function beforeResume(t: Thread): Promise<void> {
+export type ResumeOutcome = 'ready' | 'failed' | 'timed-out' | 'skipped';
+
+/**
+ * The runner is about to start a process for this thread: bring its session file (and files) from the other Mac
+ * first, so the harness resumes where that Mac left off. Waits at most resumeTimeoutMs. Once this returns the harness
+ * owns the files: the download is fenced off, so nothing it fetches later is written.
+ */
+export async function beforeResume(t: Thread): Promise<ResumeOutcome> {
   const opts = hookOpts();
   // A thread that never ran has no session anywhere; Hermes keeps its own on its server.
-  if (!opts || !t.has_run || t.harness === 'hermes') return;
-  const job = serial(t.id, async () => {
-    await pullSession(t, opts);
-    await pullThreadFiles(t.id, opts);
-  }).catch(logFailure('session download', t.id));
-  await within(job, hookDefaults.resumeTimeoutMs, () =>
-    console.error(`[sync] session download for ${t.id} is slow; starting without waiting`),
-  );
+  if (!opts || !t.has_run || t.harness === 'hermes') return 'skipped';
+  const fence = new AbortController();
+  const fenced = { ...opts, signal: fence.signal };
+  // A job still queued behind another of this thread's jobs when the fence closes never starts.
+  const job: Promise<ResumeOutcome> = serial(t.id, async () => {
+    if (fence.signal.aborted) return 'timed-out' as const;
+    await pullSession(t, fenced);
+    if (fence.signal.aborted) return 'timed-out' as const;
+    await pullThreadFiles(t.id, fenced);
+    return 'ready' as const;
+  }).catch((err) => (logFailure('session download', t.id)(err), 'failed' as const));
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<ResumeOutcome>((resolve) => (timer = setTimeout(() => resolve('timed-out'), hookDefaults.resumeTimeoutMs)));
+  try {
+    const outcome = await Promise.race([job, late]);
+    if (outcome === 'timed-out') console.error(`[sync] session download for ${t.id} is slow; starting without it`);
+    return outcome;
+  } finally {
+    clearTimeout(timer);
+    fence.abort();
+  }
 }
 
 let backfilling: Promise<void> | null = null;

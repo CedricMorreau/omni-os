@@ -268,3 +268,144 @@ describe('a malformed manifest from the relay', () => {
     expect(readdirSync(dir).filter((n) => n.startsWith('.'))).toEqual([]);
   });
 });
+
+// The relay call is where the time goes, so these make the local edit inside it: the same interleaving every run.
+describe('files that change here while the relay is slow', () => {
+  it('keeps a session the harness wrote while the newer one was downloading', async () => {
+    const sid = 'c0ffee00-0000-4000-8000-0000000000aa';
+    const cwdA = join(a.home, 'race');
+    const cwdB = join(b.home, 'race');
+    const local = a.put(`home/.claude/projects/${a.files.claudeProjectDir(cwdA)}/${sid}.jsonl`, 'turn 1\n');
+    await a.files.pushSession(thread('r1', cwdA, { session_id: sid }), a.opts);
+    const onB = thread('r1', cwdB, { session_id: sid });
+    expect(await b.files.pullSession(onB, b.opts)).toBe(1);
+    writeFileSync(local, 'turn 1\nremote turn\n');
+    expect(await a.files.pushSession(thread('r1', cwdA, { session_id: sid }), a.opts)).toBe(1);
+
+    // B's copy is unchanged since it synced, so B starts the download; the harness appends a turn before it lands.
+    const there = join(b.home, '.claude', 'projects', b.files.claudeProjectDir(cwdB), `${sid}.jsonl`);
+    const get = relay.getObject.bind(relay);
+    const slow = vi.spyOn(relay, 'getObject').mockImplementation(async (p) => {
+      if (p === `sessions/claude-code/${sid}.jsonl`) writeFileSync(there, 'turn 1\nlocal turn on B\n');
+      return get(p);
+    });
+    try {
+      expect(await b.files.pullSession(onB, b.opts)).toBe(0);
+    } finally {
+      slow.mockRestore();
+    }
+    expect(readFileSync(there, 'utf8')).toBe('turn 1\nlocal turn on B\n');
+    expect(readdirSync(dirname(there)).filter((n) => n.startsWith('.'))).toEqual([]);
+    // Not recorded as synced either: the next pull still keeps it.
+    expect(await b.files.pullSession(onB, b.opts)).toBe(0);
+    expect(readFileSync(there, 'utf8')).toBe('turn 1\nlocal turn on B\n');
+  });
+
+  it('writes none of a Cursor chat when one of its files changed here while the rest downloaded', async () => {
+    const sid = '06da61e9-a772-4ee1-9270-768dc1c8aaaa';
+    const md5 = (s: string) => createHash('md5').update(s).digest('hex');
+    const cwdA = join(a.home, 'race-cursor');
+    const cwdB = join(b.home, 'race-cursor');
+    const onA = thread('r5', cwdA, { harness: 'cursor', session_id: sid });
+    const onB = thread('r5', cwdB, { harness: 'cursor', session_id: sid });
+    const chatA = `home/.cursor/chats/${md5(cwdA)}/${sid}`;
+    a.put(`${chatA}/meta.json`, JSON.stringify({ schemaVersion: 1, cwd: cwdA }));
+    a.put(`${chatA}/store.db`, 'db 1');
+    a.put(`${chatA}/store.db-wal`, 'wal 1');
+    expect(await a.files.pushSession(onA, a.opts)).toBe(3);
+    expect(await b.files.pullSession(onB, b.opts)).toBe(3);
+    a.put(`${chatA}/store.db`, 'db 2');
+    a.put(`${chatA}/store.db-wal`, 'wal 2');
+    expect(await a.files.pushSession(onA, a.opts)).toBe(2);
+
+    // Cursor on B writes its database while B is still fetching the newer -wal: a db and -wal from two Macs would be
+    // a corrupt chat, so B keeps both of its own.
+    const chatB = join(b.home, '.cursor', 'chats', md5(cwdB), sid);
+    const get = relay.getObject.bind(relay);
+    const asked: string[] = [];
+    const slow = vi.spyOn(relay, 'getObject').mockImplementation(async (p) => {
+      asked.push(p);
+      if (p === `sessions/cursor/${sid}/store.db-wal`) writeFileSync(join(chatB, 'store.db'), 'db written on B');
+      return get(p);
+    });
+    try {
+      expect(await b.files.pullSession(onB, b.opts)).toBe(0);
+    } finally {
+      slow.mockRestore();
+    }
+    expect(asked).toContain(`sessions/cursor/${sid}/store.db`);
+    expect(readFileSync(join(chatB, 'store.db'), 'utf8')).toBe('db written on B');
+    expect(readFileSync(join(chatB, 'store.db-wal'), 'utf8')).toBe('wal 1');
+    expect(readdirSync(chatB).filter((n) => n.startsWith('.'))).toEqual([]);
+  });
+
+  it('keeps a thread file made here while the other Mac\'s copy was downloading', async () => {
+    const body = Buffer.from('from the other Mac');
+    relay.objects.set(`blobs/${sha(body)}`, body);
+    relay.objects.set('manifests/r2.json', Buffer.from(JSON.stringify({
+      v: 1, sessions: {}, files: { 'artifacts/plan.html': { sha: sha(body), size: body.length, mtime: Date.now() } },
+    })));
+    const path = join(b.config.threadDir('r2'), 'artifacts', 'plan.html');
+    const get = relay.getObject.bind(relay);
+    const slow = vi.spyOn(relay, 'getObject').mockImplementation(async (p) => {
+      if (p.startsWith('blobs/')) mkdirSync(dirname(path), { recursive: true }), writeFileSync(path, 'written here');
+      return get(p);
+    });
+    try {
+      expect((await b.files.pullThreadFiles('r2', b.opts)).count).toBe(0);
+    } finally {
+      slow.mockRestore();
+    }
+    expect(readFileSync(path, 'utf8')).toBe('written here');
+  });
+
+  it('stores an artifact edited during the upload under the hash of the bytes it sent', async () => {
+    const dir = a.config.threadDir('r3');
+    const path = join(dir, 'artifacts', 'report.html');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'version-one');
+    const has = relay.hasObject.bind(relay);
+    const slow = vi.spyOn(relay, 'hasObject').mockImplementationOnce(async (p) => {
+      writeFileSync(path, 'version-two-with-edit');
+      return has(p);
+    });
+    try {
+      expect((await a.files.pushThreadFiles('r3', a.opts)).count).toBe(1);
+    } finally {
+      slow.mockRestore();
+    }
+    const listed = JSON.parse(Buffer.from(relay.objects.get('manifests/r3.json')!).toString()).files['artifacts/report.html'];
+    const stored = relay.objects.get(`blobs/${listed.sha}`)!;
+    expect(sha(Buffer.from(stored))).toBe(listed.sha);
+    expect(listed.size).toBe(stored.length);
+    // The other Mac accepts it, since the bytes match their hash.
+    expect(await b.files.pullThreadFiles('r3', b.opts)).toEqual({ count: 1, skipped: 0 });
+
+    // The edit was not recorded as synced, so the next push sends it.
+    expect((await a.files.pushThreadFiles('r3', a.opts)).count).toBe(1);
+    const next = JSON.parse(Buffer.from(relay.objects.get('manifests/r3.json')!).toString()).files['artifacts/report.html'];
+    expect(next.sha).toBe(sha('version-two-with-edit'));
+    expect(Buffer.from(relay.objects.get(`blobs/${next.sha}`)!).toString()).toBe('version-two-with-edit');
+  });
+
+  it('lists a session edited during the upload under the hash of the bytes it sent', async () => {
+    const sid = 'c0ffee00-0000-4000-8000-0000000000bb';
+    const cwd = join(a.home, 'race-push');
+    const onA = thread('r4', cwd, { session_id: sid });
+    const local = a.put(`home/.claude/projects/${a.files.claudeProjectDir(cwd)}/${sid}.jsonl`, 'turn 1\n');
+    const put = relay.putObject.bind(relay);
+    const slow = vi.spyOn(relay, 'putObject').mockImplementationOnce(async (p, body) => {
+      writeFileSync(local, 'turn 1\nturn 2 still being written\n');
+      return put(p, body);
+    });
+    try {
+      expect(await a.files.pushSession(onA, a.opts)).toBe(1);
+    } finally {
+      slow.mockRestore();
+    }
+    const listed = JSON.parse(Buffer.from(relay.objects.get('manifests/r4.json')!).toString()).sessions[`claude-code:${sid}`].files[`${sid}.jsonl`];
+    expect(listed.sha).toBe(sha(Buffer.from(relay.objects.get(`sessions/claude-code/${sid}.jsonl`)!)));
+    expect(await a.files.pushSession(onA, a.opts)).toBe(1);
+    expect(Buffer.from(relay.objects.get(`sessions/claude-code/${sid}.jsonl`)!).toString()).toBe('turn 1\nturn 2 still being written\n');
+  });
+});
