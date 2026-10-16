@@ -1,7 +1,7 @@
 // Files Ben attaches to a message. They live next to the thread's artifacts, in
 // data/threads/<id>/uploads, so the agent (which already has --add-dir on the thread dir)
 // can read them by absolute path.
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { config, uploadsDir } from './config.ts';
 
@@ -107,4 +107,9 @@ export function messageContent(text: string, images: { mime: string; data: strin
     ...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })),
     { type: 'text', text },
   ];
+}
+
+/** Deletes files `saveUploads` wrote that nothing ended up using. */
+export function removeUploads(files: Attachment[]) {
+  for (const f of files) rmSync(f.path, { force: true });
 }

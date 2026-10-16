@@ -72,8 +72,19 @@ private struct ThreadView: View {
           ReplyComposerHost(model: model, store: store, thread: thread)
         }
         #if DEBUG
-        .onAppear { QAProbe.expand = { ui.expandAll(store.transcript.items) } }
-        .onDisappear { QAProbe.expand = nil }
+        .onAppear {
+          QAProbe.expand = { ui.expandAll(store.transcript.items) }
+          QAProbe.editPending = { text in
+            guard let m = store.pending.first(where: \.isEditable) else { return false }
+            store.edits.open(m)
+            store.edits.update(m.uuid) { $0.prompt = text }
+            return true
+          }
+        }
+        .onDisappear {
+          QAProbe.expand = nil
+          QAProbe.editPending = nil
+        }
         #endif
         .threadInspector(model: model, store: store)
       }
@@ -429,10 +440,13 @@ private struct TranscriptRows: View {
         WorkingLine(text: line)
       }
       if store.pending.contains(where: { !$0.isParked }) {
-        QueuedMessagesView(items: store.pending.filter { !$0.isParked }, starting: store.betweenTurns)
+        QueuedMessagesView(store: store, client: model.client, items: store.pending.filter { !$0.isParked }, starting: store.betweenTurns)
       }
       if store.pending.contains(where: \.isParked) {
         ParkedMessagesView(store: store, client: model.client, items: store.pending.filter(\.isParked))
+      }
+      if !store.edits.stale.isEmpty {
+        StaleEditsView(store: store, client: model.client)
       }
       if store.pending.isEmpty, let t = store.thread, t.status == .done, let title = t.nextTitle, let prompt = t.nextPrompt {
         NextThreadCard(model: model, store: store, thread: t, title: title, prompt: prompt)
@@ -526,6 +540,8 @@ enum QAProbe {
   static var scroller: Scroller?
   static var expand: (() -> Void)?
   static var openMeter: (() -> Void)?
+  /// Opens the edit of the first editable unsent message with this text. false when there is none.
+  static var editPending: ((String) -> Bool)?
 
   static func laidOut(_ store: ThreadStore, _ g: ScrollPin.Geometry) {
     guard shownThread != store.id, store.loadState == .loaded, g.contentHeight > 0 else { return }

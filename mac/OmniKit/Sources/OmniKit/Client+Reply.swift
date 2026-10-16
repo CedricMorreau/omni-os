@@ -65,10 +65,44 @@ public struct PendingRequest: Hashable, Sendable {
 public struct RecoveryAnswer: Decodable, Hashable, Sendable {
   public let thread: OmniThread
   public let pending: [PendingMsg]
+
+  public init(thread: OmniThread, pending: [PendingMsg]) {
+    self.thread = thread
+    self.pending = pending
+  }
 }
 
 private struct RequestIDs: Encodable, Sendable {
   let ids: [String]?
+}
+
+/// The body of an edit: the text and the names of the files it keeps. New files go as multipart parts.
+struct EditBody: Encodable, Sendable {
+  let prompt: String
+  let keep: [String]
+}
+
+/// A saved request, as the server keeps it (server/db/repos/requests.ts).
+public struct SavedRequest: Decodable, Hashable, Sendable, Identifiable {
+  public let id: String
+  public let requestID: String
+  public let prompt: String
+  public let state: DeliveryState
+  /// Queue order.
+  public let pos: Int
+  public let attachments: [Attachment]?
+
+  enum CodingKeys: String, CodingKey {
+    case id, prompt, state, pos, attachments
+    case requestID = "request_id"
+  }
+}
+
+/// What an edit answers: the thread, its pending messages now, and the saved request.
+public struct EditAnswer: Decodable, Hashable, Sendable {
+  public let thread: OmniThread
+  public let pending: [PendingMsg]
+  public let request: SavedRequest
 }
 
 /// A `multipart/form-data` body, as the browser's FormData writes it.
@@ -108,9 +142,13 @@ extension OmniClient {
   /// starts the next turn. With files the body is multipart: a `payload` field with the JSON, one `files`
   /// part per file. Without, plain JSON.
   public func reply(to id: String, prompt: String, mode: SendMode?, files: [UploadFile], requestID: String?) async throws(OmniAPIError) -> OmniThread {
-    let path = "/api/threads/\(uriComponent(id))/messages"
     let body = ReplyBody(prompt: prompt, mode: mode, requestID: requestID)
-    guard !files.isEmpty else { return try await send("POST", path, body: body) }
+    return try await send("POST", "/api/threads/\(uriComponent(id))/messages", body: body, files: files)
+  }
+
+  /// A JSON body, or with files a multipart one: a `payload` field with the JSON and one `files` part per file.
+  func send<T: Decodable>(_ method: String, _ path: String, body: some Encodable & Sendable, files: [UploadFile]) async throws(OmniAPIError) -> T {
+    guard !files.isEmpty else { return try await send(method, path, body: body) }
     let json: Data
     do {
       json = try OmniJSON.encoder().encode(body)
@@ -121,7 +159,28 @@ extension OmniClient {
     form.field("payload", json)
     for f in files { form.file("files", filename: f.name, mime: f.mime, f.data) }
     form.finish()
-    return try await send("POST", path, raw: (form.data, form.contentType))
+    return try await send(method, path, raw: (form.data, form.contentType))
+  }
+
+  /// Edits a message that is queued, held or parked and not sent yet: its text, the files it keeps (by name) and
+  /// new files. A 409 means the runner sent it first; the edit was not saved.
+  public func editRequest(in id: String, request: String, prompt: String, keep: [String], files: [UploadFile]) async throws(OmniAPIError) -> EditAnswer {
+    try await send("PATCH", "/api/threads/\(uriComponent(id))/requests/\(uriComponent(request))", body: EditBody(prompt: prompt, keep: keep), files: files)
+  }
+
+  /// Takes unsent messages out of the queue. The transcript never shows them; `requests(in:)` keeps the record.
+  public func cancelRequests(in id: String, ids: [String]) async throws(OmniAPIError) -> RecoveryAnswer {
+    try await send("POST", "/api/threads/\(uriComponent(id))/requests/cancel", body: RequestIDs(ids: ids))
+  }
+
+  /// A new order for every unsent message, as the app last saw them. A queue that changed since is a 409.
+  public func reorderRequests(in id: String, ids: [String]) async throws(OmniAPIError) -> RecoveryAnswer {
+    try await send("POST", "/api/threads/\(uriComponent(id))/requests/reorder", body: RequestIDs(ids: ids))
+  }
+
+  /// The thread's saved requests, newest first, with where each one went.
+  public func requests(in id: String) async throws(OmniAPIError) -> [SavedRequest] {
+    try await send("GET", "/api/threads/\(uriComponent(id))/requests")
   }
 
   /// Sends messages a restart parked again, in the order they came. Nil: every recovered one. An uncertain

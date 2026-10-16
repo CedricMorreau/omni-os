@@ -15,7 +15,7 @@ import { resolveRun } from '../harness/resolve.ts';
 import type { CommandUse } from '../harness/adapter.ts';
 import { assembling, deliver, settleTeam } from './queue.ts';
 import { fallbackTitle, generateTitle } from './aux.ts';
-import { addEvent, emitThread, isShuttingDown, runsHere, threadCommands, type SendMode } from './state.ts';
+import { addEvent, emitThread, isShuttingDown, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
 
 // ---------- slash commands ----------
 
@@ -233,12 +233,22 @@ export function sendMessage(
   // Synced threads: not while the other Mac runs it, nor with its folder missing here (postMessage makes it first).
   const blocked = turnBlocked(thread, runsHere(threadId));
   if (blocked) throw Object.assign(new Error(blocked), { status: 409 });
+  deliver(threadId, messageFor(thread, prompt, { ...opts, uuid: opts.request?.id ?? randomUUID(), requestId: opts.request?.request_id }));
+  return threads.get(threadId)!;
+}
+
+/** Ben's message as the runner carries it: slash commands resolved, Mentions added, files attached. */
+export function messageFor(
+  thread: Thread,
+  prompt: string,
+  opts: { uuid: string; requestId?: string; from?: 'ben' | 'conductor'; mode?: SendMode; attachments?: Attachment[] },
+): Msg {
   const attachments = opts.attachments?.length ? opts.attachments : undefined;
-  const { text, slash, commands } = slashFor(prompt, () => (threadCommands(threadId) ?? peekCommands(thread.harness as HarnessId, thread.cwd)).commands);
-  deliver(threadId, {
-    uuid: opts.request?.id ?? randomUUID(),
-    requestId: opts.request?.request_id,
-    text: withMentions(text, { cwd: thread.cwd, threadId }),
+  const { text, slash, commands } = slashFor(prompt, () => (threadCommands(thread.id) ?? peekCommands(thread.harness as HarnessId, thread.cwd)).commands);
+  return {
+    uuid: opts.uuid,
+    requestId: opts.requestId,
+    text: withMentions(text, { cwd: thread.cwd, threadId: thread.id }),
     mode: opts.mode ?? 'steer',
     attachments,
     commands,
@@ -246,8 +256,7 @@ export function sendMessage(
       kind: 'user',
       payload: { text: prompt, source: opts.from ?? 'ben', ...(slash && { slash }), ...(attachments && { attachments }) },
     },
-  });
-  return threads.get(threadId)!;
+  };
 }
 
 /** Each thread's last posted message, until it is sent. */

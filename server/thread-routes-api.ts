@@ -9,26 +9,29 @@ import { z } from 'zod';
 import { commentsPrompt, isArtifactUrl } from '../shared/published.ts';
 import { bus } from './bus.ts';
 import { uploadsDir } from './config.ts';
-import { artifacts, channels, events, fileDigests, publicChannel, requestFingerprint, threads, type Thread } from './db.ts';
+import { artifacts, channels, events, fileDigests, messageRequests, publicChannel, requestFingerprint, threads, type Thread } from './db.ts';
 import { readBody } from './read-body.ts';
 import { compactBlocked, contextView } from './context.ts';
 import {
   acceptedAgain,
   activeMods,
+  cancelRequests,
   createTeam,
   createThread,
   discardRequests,
+  editRequest,
   interruptThread,
   isLive,
   pendingFor,
   postMessage,
   refreshContext,
+  reorderRequests,
   resumeRequests,
   runsHere,
 } from './runner.ts';
 import { threadFilesReady, threadOpened } from './sync/files.ts';
 import { turnBlocked } from './sync/guard.ts';
-import { checkUploads, imageMime, safeName, saveUploads } from './uploads.ts';
+import { checkUploads, imageMime, removeUploads, safeName, saveUploads } from './uploads.ts';
 
 /** List, create, detail, and summary. Registered before PATCH and the terminal routes. */
 export const threadRoutesApi = new Hono();
@@ -158,7 +161,7 @@ threadActionsApi.post('/:id/messages', async (c) => {
 
 const requestIds = z.object({ ids: z.array(z.string().min(1)).min(1).max(200) });
 
-/** The thread and its pending messages, after a resume or discard. */
+/** The thread and its pending messages, after a resume, discard, edit, cancel or reorder. */
 const afterRecovery = (id: string) => ({ thread: threads.get(id), pending: pendingFor(id) });
 
 /**
@@ -180,6 +183,53 @@ threadActionsApi.post('/:id/requests/discard', async (c) => {
   if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
   discardRequests(id, ids);
   return c.json(afterRecovery(id));
+});
+
+/**
+ * Edit a message that is queued, held or parked and not sent yet: its text, the files it keeps (`keep`, by name;
+ * left out keeps them all) and new files (multipart, as for /messages). The same request and queue position. A 409
+ * once the runner has started sending it: the edit is not saved, and the client keeps Ben's text.
+ */
+threadActionsApi.patch('/:id/requests/:rid', async (c) => {
+  const id = c.req.param('id');
+  const { data, files } = await readBody(c);
+  const { prompt, keep } = z.object({ prompt: z.string().min(1), keep: z.array(z.string()).max(100).optional() }).parse(data);
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  checkUploads(files);
+  const added = await saveUploads(id, files);
+  try {
+    const request = editRequest(id, c.req.param('rid'), { prompt, keep, added });
+    return c.json({ ...afterRecovery(id), request });
+  } catch (err) {
+    // Refused: the files this edit saved belong to nothing.
+    removeUploads(added);
+    throw err;
+  }
+});
+
+/** Take unsent messages out of the queue. The transcript never shows them; GET /requests keeps the record. */
+threadActionsApi.post('/:id/requests/cancel', async (c) => {
+  const id = c.req.param('id');
+  const { ids } = requestIds.parse(await c.req.json().catch(() => ({})));
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  cancelRequests(id, ids);
+  return c.json(afterRecovery(id));
+});
+
+/** A new order for every unsent message, as the client saw them. A queue that changed since is a 409. Never resumes. */
+threadActionsApi.post('/:id/requests/reorder', async (c) => {
+  const id = c.req.param('id');
+  const { ids } = requestIds.parse(await c.req.json().catch(() => ({})));
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  reorderRequests(id, ids);
+  return c.json(afterRecovery(id));
+});
+
+/** The thread's requests, newest first, with their delivery state: what was sent, dropped, discarded or cancelled. */
+threadActionsApi.get('/:id/requests', (c) => {
+  const id = c.req.param('id');
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  return c.json(messageRequests.forThread(id, Math.min(Number(c.req.query('limit') ?? 100) || 100, 500)));
 });
 
 /** Ask the thread to act on the comments on a page it published. Queued, so it never cuts into a running turn. */

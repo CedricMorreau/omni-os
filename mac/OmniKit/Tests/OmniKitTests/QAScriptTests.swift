@@ -46,6 +46,7 @@ import OmniKit
         {"scroll": "through"},
         {"expand": true},
         {"meter": true},
+        {"editPending": "then write it up properly"},
         {"imageZoom": 2},
         {"imageZoom": "fit"},
         {"openThread": "t2"}
@@ -60,6 +61,7 @@ import OmniKit
       .scroll(.through),
       .expand,
       .meter,
+      .editPending("then write it up properly"),
       .imageZoom(2),
       .imageZoom(nil),
       .openThread("t2"),

@@ -1,0 +1,36 @@
+[
+  {
+    "seq": 6,
+    "pos": 6,
+    "id": "00000000-0000-4000-8000-000000000011",
+    "thread_id": "00000000-0000-4000-8000-000000000009",
+    "request_id": "req-2",
+    "prompt": "and check the totals twice",
+    "mode": "steer",
+    "source": "ben",
+    "attachments": null,
+    "fingerprint": "ef4197b5ea75c071ddd2cf0924072b0f55777db7834349d0e727e6f8ee155acb",
+    "state": "cancelled",
+    "machine_id": null,
+    "event_id": null,
+    "created_at": "2026-01-05T09:00:00.000Z",
+    "updated_at": "2026-01-05T09:00:00.000Z"
+  },
+  {
+    "seq": 5,
+    "pos": 5,
+    "id": "00000000-0000-4000-8000-000000000010",
+    "thread_id": "00000000-0000-4000-8000-000000000009",
+    "request_id": "req-1",
+    "prompt": "then write it up",
+    "mode": "queue",
+    "source": "ben",
+    "attachments": null,
+    "fingerprint": "2e83bd8a226e86e980591bce108f23482ea8351ee827917586b00db9b453a185",
+    "state": "waiting",
+    "machine_id": null,
+    "event_id": null,
+    "created_at": "2026-01-05T09:00:00.000Z",
+    "updated_at": "2026-01-05T09:00:00.000Z"
+  }
+]

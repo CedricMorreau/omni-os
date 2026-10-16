@@ -24,6 +24,6 @@ export { ARTIFACT_COLUMNS, artifacts } from './db/repos/artifacts.ts';
 export { automationRuns } from './db/repos/automation-runs.ts';
 export { kv } from './db/repos/kv.ts';
 export type { DeliveryState, FileDigest, MessageRequest } from './db/repos/requests.ts';
-export { PARKED, fileDigests, messageRequests, requestFingerprint } from './db/repos/requests.ts';
+export { EDITABLE, PARKED, fileDigests, messageRequests, requestFingerprint } from './db/repos/requests.ts';
 export type { SyncEntity, SyncOp, OutboxRow } from './db/sync.ts';
 export { SEED_TS, outbox, syncMeta } from './db/sync.ts';

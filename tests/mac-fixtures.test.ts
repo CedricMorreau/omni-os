@@ -57,6 +57,13 @@ const NAMES = [
   'message-queued-request.json',
   'thread-recovered.json',
   'requests-resumed.json',
+  // Then the uncertain one is edited, reordered and removed, which leaves a record.
+  'request-edit-request.json',
+  'request-edited.json',
+  'requests-reordered.json',
+  'requests-cancelled.json',
+  'requests-record.json',
+  'error-already-sent.json',
 ] as const;
 type Name = (typeof NAMES)[number];
 
@@ -330,7 +337,21 @@ async function scenario() {
   base = `http://127.0.0.1:${await boot()}`;
   const recovered = keep('thread-recovered.json', await detail(long.id)) as { pending: { delivery?: string }[] };
   expect(recovered.pending.map((p) => p.delivery)).toEqual(['recovered', 'uncertain']);
-  keep('requests-resumed.json', await call('POST', `/threads/${long.id}/requests/resume`, {}));
+  const resumed = keep('requests-resumed.json', await call('POST', `/threads/${long.id}/requests/resume`, {})) as { pending: { uuid: string; request_id?: string }[] };
+
+  // Ben edits the uncertain one, puts it in order (alone in its group), then removes it. Nothing reaches the transcript.
+  const parked = resumed.pending.find((p) => p.request_id === 'req-2')!.uuid;
+  const editBody = request('request-edit-request.json', { prompt: 'and check the totals twice', keep: [] });
+  const edited = keep('request-edited.json', await call('PATCH', `/threads/${long.id}/requests/${parked}`, editBody)) as { request: { prompt: string; pos: number } };
+  expect(edited.request.prompt).toBe('and check the totals twice');
+  keep('requests-reordered.json', await call('POST', `/threads/${long.id}/requests/reorder`, { ids: [parked] }));
+  const cancelled = keep('requests-cancelled.json', await call('POST', `/threads/${long.id}/requests/cancel`, { ids: [parked] })) as { pending: unknown[] };
+  expect(cancelled.pending.some((p) => (p as { uuid: string }).uuid === parked)).toBe(false);
+  const record = keep('requests-record.json', await get(`/threads/${long.id}/requests`)) as { request_id: string; state: string }[];
+  expect(record.find((r) => r.request_id === 'req-2')?.state).toBe('cancelled');
+  // An edit that arrives after its message was sent (the resumed one): refused, so the app keeps Ben's text.
+  const resumedId = resumed.pending.find((p) => p.request_id === 'req-1')!.uuid;
+  keep('error-already-sent.json', await call('PATCH', `/threads/${long.id}/requests/${resumedId}`, editBody, false));
 }
 
 /** A request body the app sends: the recorded one, so the server is checked against what the Swift tests expect. */

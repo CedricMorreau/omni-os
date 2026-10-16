@@ -280,13 +280,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body: unknown = {}) => request<T>('POST', path, body),
-  /** Same body as `post`, plus attachments. Falls back to plain JSON when there are none. */
-  send: <T>(path: string, body: Record<string, unknown>, files: File[]) => {
-    if (!files.length) return request<T>('POST', path, body);
+  /** Same body as `post` (or `patch`), plus attachments. Falls back to plain JSON when there are none. */
+  send: <T>(path: string, body: Record<string, unknown>, files: File[], method: 'POST' | 'PATCH' = 'POST') => {
+    if (!files.length) return request<T>(method, path, body);
     const fd = new FormData();
     fd.append('payload', JSON.stringify(body));
     for (const f of files) fd.append('files', f, f.name);
-    return request<T>('POST', path, fd);
+    return request<T>(method, path, fd);
   },
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),

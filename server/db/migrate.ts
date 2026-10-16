@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS sync_deferred (
 -- Messages accepted through the API (db/repos/requests.ts), saved before the client hears so. Local, not synced.
 CREATE TABLE IF NOT EXISTS message_requests (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Queue order, seq until Ben reorders.
+  pos INTEGER,
   id TEXT NOT NULL UNIQUE,
   thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   request_id TEXT NOT NULL,
@@ -145,7 +147,7 @@ CREATE TABLE IF NOT EXISTS message_requests (
   updated_at TEXT NOT NULL,
   UNIQUE (thread_id, request_id)
 );
-CREATE INDEX IF NOT EXISTS message_requests_open ON message_requests(thread_id, seq) WHERE state NOT IN ('delivered','dropped','discarded');
+CREATE INDEX IF NOT EXISTS message_requests_open ON message_requests(thread_id, seq) WHERE state NOT IN ('delivered','dropped','discarded','cancelled');
 
 -- A thread the other Mac filed in a folder that has not arrived here yet. The folder's arrival puts it there.
 CREATE TABLE IF NOT EXISTS sync_folder_wait (
@@ -193,6 +195,9 @@ export function migrate() {
   ensureColumn('artifacts', 'url', 'TEXT');
   ensureColumn('artifacts', 'description', 'TEXT');
   // Sync matches these rows on uid, never on the local integer id. Old rows get one once; the index then makes the check free.
+  // Queue order for durable requests (db/repos/requests.ts); a row saved before reordering existed keeps its arrival order.
+  ensureColumn('message_requests', 'pos', 'INTEGER');
+  db.exec('UPDATE message_requests SET pos = seq WHERE pos IS NULL');
   for (const table of ['events', 'artifacts', 'automation_runs']) {
     ensureColumn(table, 'uid', 'TEXT');
     db.exec(`UPDATE ${table} SET uid = ${UUID_SQL} WHERE uid IS NULL`);
