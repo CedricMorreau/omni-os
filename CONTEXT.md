@@ -35,6 +35,10 @@ A cron schedule that starts a new thread on every run.
 A message sent to a thread through the API, saved before the client hears it was accepted. It carries the client's request id, kept across retries: a retry with the same id gets the first acceptance back, and the same id with another message is refused. Local to the Mac that accepted it (`message_requests`, `server/db/repos/requests.ts`).
 _Avoid_: Job, task
 
+**Crew report**:
+A child thread's reply to the thread that delegated it, sent when its turn ends. Saved as a **Request** on the parent before the parent is woken, once per child turn, so a restart before the parent reads it keeps it for Resume. A team's go to its lead is saved the same way. Omni wrote both, so Ben can resume or discard them but not edit or move them.
+_Avoid_: Result, callback
+
 **Delivery state**:
 Where a **Request** is. `accepted` (saved), `waiting` (for a slot), `held` (runs after this turn), `sent` (written to the harness), then `delivered` (the harness read it; the transcript keeps it where it did), `dropped` (stopped first), `discarded` (Ben chose not to send it) or `cancelled` (Ben removed it from the queue; the row is the record, the transcript never shows it). A restart parks the rest: `recovered` when no harness got it, held with Resume, and `uncertain` when one may have, sent again only when Ben says so.
 _Avoid_: Status (a thread's), queue state
@@ -100,6 +104,7 @@ _Avoid_: Frontend, dashboard
 - A **Request** belongs to one **Thread** and the Mac that accepted it; only that Mac resumes it, through the same slots as any message, so each **Harness**'s concurrency cap holds
 - Resume sends a **Thread**'s `recovered` **Requests** in their saved order; an `uncertain` one is never sent again on its own
 - Ben can edit, reorder or remove a **Request** while it is `waiting`, `held`, `recovered` or `uncertain`; once the runner starts sending it, a change is refused and the client keeps his edited text. Editing or reordering never resumes anything
+- A **Crew report** for a parent Ben stopped waits as `recovered` with Resume instead of starting it again; a team lead still waits for every member's report before it runs
 - **Harness commands** work in any message a **Thread** gets, whether Ben, an **Automation** or the **Conductor** sent it; **Omni commands** only work from a thread's reply box, and anywhere else reach the harness as plain text
 
 ## Example dialogue

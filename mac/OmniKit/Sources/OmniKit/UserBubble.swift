@@ -82,14 +82,27 @@ extension PendingMsg {
     starting ? list.firstIndex { $0.state == .sent } : nil
   }
 
-  /// What the line over a message the agent has not read says, or the whole line for a crew report.
+  /// Omni wrote it, not Ben: a crew report, or the go a team's lead gets once its members have reported. As
+  /// `isOmnis` in web/src/requests.ts.
+  public var isOmnis: Bool { kind == "crew_report" || source == "team" || source == "crew" }
+
+  /// "Crew report T-1 from coder": who a crew report is from.
+  public var reportName: String {
+    var s = "Crew report"
+    if let taskID, !taskID.isEmpty { s += " \(taskID)" }
+    if let role, !role.isEmpty { s += " from \(role)" }
+    return s
+  }
+
+  /// What the line over a message the agent has not read says, or the whole line for a crew report. A held crew
+  /// report waits for Resume whether a restart or Ben's Stop kept it from the agent.
   public func label(lead: Bool) -> String {
+    if kind == "crew_report" && delivery == .recovered { return "\(reportName), held for Resume" }
+    if kind == "crew_report" && delivery == .uncertain { return "\(reportName), may have reached the agent before the restart" }
     if delivery == .recovered { return "Held after a restart, waiting for Resume" }
     if delivery == .uncertain { return "May have reached the agent before the restart" }
     if kind == "crew_report" {
-      var s = "Crew report"
-      if let taskID, !taskID.isEmpty { s += " \(taskID)" }
-      if let role, !role.isEmpty { s += " from \(role)" }
+      let s = reportName
       if lead { return s + ", starting now" }
       switch state {
       case .sent: return s + ", delivered at its next step"
@@ -120,4 +133,32 @@ public struct ParkedMessages: Hashable, Sendable {
   }
 
   public var isEmpty: Bool { recovered.isEmpty && uncertain.isEmpty }
+
+  /// The line over the parked list, as `parkedHeading` in web/src/requests.ts. Crew reports also wait there when
+  /// Ben stopped the thread, not only after a restart.
+  public static func heading(_ items: [PendingMsg]) -> String {
+    let n = items.count
+    let reports = items.filter { $0.kind == "crew_report" }.count
+    if reports == 0 { return n == 1 ? "1 message was waiting when Omni restarted" : "\(n) messages were waiting when Omni restarted" }
+    if reports == n { return n == 1 ? "1 crew report is waiting for Resume" : "\(n) crew reports are waiting for Resume" }
+    return "\(n) messages and crew reports are waiting for Resume"
+  }
+}
+
+extension PendingMsg {
+  /// Where each crew report the thread has not read is, by the thread that reported, for the delegation card's
+  /// rows. As `reportNotes` in web/src/requests.ts.
+  public static func reportNotes(_ items: [PendingMsg]) -> [String: String] {
+    var out: [String: String] = [:]
+    for m in items where m.kind == "crew_report" {
+      guard let id = m.threadID else { continue }
+      out[id] =
+        if m.delivery == .recovered { "report held for Resume" }
+        else if m.delivery == .uncertain { "report may not have arrived" }
+        else if m.state == .waiting { "report waiting for a slot" }
+        else if m.state == .held { "report queued" }
+        else { "report on its way" }
+    }
+    return out
+  }
 }

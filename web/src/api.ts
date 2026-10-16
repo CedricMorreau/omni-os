@@ -83,6 +83,8 @@ export interface PendingMsg {
   state: 'waiting' | 'sent' | 'held';
   task_id?: string | null;
   role?: string | null;
+  /** A crew report: the thread that reported. */
+  thread_id?: string;
   attachments?: Attachment[];
   /** Sent through the API: the client's request id, and where the server's saved copy is (server/db/repos/requests.ts). */
   request_id?: string;

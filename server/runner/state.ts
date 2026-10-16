@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import type { DeliveryPhase } from '../delivery.ts';
 import { config } from '../config.ts';
-import { events, messageRequests, threads, type DeliveryState } from '../db.ts';
+import { events, messageRequests, threads, type DeliveryState, type MessageRequest } from '../db.ts';
 import { publishFeed, publishThread } from '../bus.ts';
 import { describeAttachments, inlinable, messageContent, type Attachment } from '../uploads.ts';
 import type { CommandList } from '../commands.ts';
@@ -59,6 +59,8 @@ export interface Msg {
   commands?: CommandUse[];
   /** Recorded when the CLI replays this uuid, so it lands exactly where the agent saw it. */
   event: { kind: 'user' | 'crew_report'; payload: Record<string, unknown> };
+  /** Omni wrote it (a crew report, a team's go): Ben can resume or discard it, not edit or move it. */
+  byOmni?: boolean;
 }
 
 export interface PendingMsg {
@@ -71,6 +73,8 @@ export interface PendingMsg {
   state: 'waiting' | 'sent' | 'held';
   task_id?: string;
   role?: string;
+  /** A crew report: the thread that reported. */
+  thread_id?: string;
   /** Messages sent through the API: the client's request id, and where the durable row says it is (db/repos/requests.ts). */
   request_id?: string;
   delivery?: DeliveryState;
@@ -259,14 +263,36 @@ export function threadCommands(threadId: string): CommandList | null {
   return lives.get(threadId)?.commands ?? null;
 }
 
+type ShownPayload = { text?: string; source?: string; task_id?: string | null; role?: string | null; thread_id?: string | null };
+
+/** A pending row as the clients get it. Only a crew report names the thread that reported. */
+const pendingRow = (
+  base: Pick<PendingMsg, 'uuid' | 'kind' | 'text' | 'mode' | 'state'>,
+  p: ShownPayload,
+  rest: Pick<PendingMsg, 'request_id' | 'delivery' | 'attachments'>,
+): PendingMsg => ({
+  uuid: base.uuid, kind: base.kind, text: base.text, source: p.source, mode: base.mode, state: base.state, task_id: p.task_id ?? undefined, role: p.role ?? undefined,
+  ...(base.kind === 'crew_report' && p.thread_id && { thread_id: p.thread_id }),
+  ...rest,
+});
+
 const pendingView = (m: Msg, state: PendingMsg['state']): PendingMsg => {
-  const p = m.event.payload as { text?: string; source?: string; task_id?: string | null; role?: string | null };
-  return {
-    uuid: m.uuid, kind: m.event.kind, text: p.text ?? m.text, source: p.source, mode: m.mode, state, task_id: p.task_id ?? undefined, role: p.role ?? undefined,
+  const p = m.event.payload as ShownPayload;
+  return pendingRow({ uuid: m.uuid, kind: m.event.kind, text: p.text ?? m.text, mode: m.mode, state }, p, {
     ...(m.requestId && { request_id: m.requestId, delivery: state }),
     ...(m.attachments?.length && { attachments: m.attachments }),
-  };
+  });
 };
+
+/** A saved request as the runner carries it. Only for one Omni wrote itself; Ben's go through `messageFor` (api.ts). */
+export const requestMsg = (r: MessageRequest): Msg => ({
+  uuid: r.id,
+  requestId: r.request_id,
+  text: r.prompt,
+  mode: r.mode,
+  event: { kind: r.kind, payload: r.payload ?? { text: r.prompt, source: r.source } },
+  byOmni: true,
+});
 
 /**
  * Messages the agent has not seen yet. Not in the transcript until their replay arrives. Last, the ones a restart
@@ -279,15 +305,17 @@ export function pendingFor(threadId: string): PendingMsg[] {
     ...(live?.held ?? []).map((m) => pendingView(m, 'held')),
     ...(waitingMsgs.get(threadId) ?? []).map((m) => pendingView(m, 'waiting')),
     ...messageRequests.parked(threadId).map(
-      (r): PendingMsg => ({
-        uuid: r.id, kind: 'user', text: r.prompt, source: r.source, mode: r.mode, state: 'held', request_id: r.request_id, delivery: r.state,
-        ...(r.attachments?.length && { attachments: r.attachments }),
-      }),
+      (r): PendingMsg =>
+        pendingRow({ uuid: r.id, kind: r.kind, text: (r.payload?.text as string | undefined) ?? r.prompt, mode: r.mode, state: 'held' }, { source: r.source, ...r.payload }, {
+          request_id: r.request_id,
+          delivery: r.state,
+          ...(r.attachments?.length && { attachments: r.attachments }),
+        }),
     ),
   ];
 }
 
-/** Record where a durable message is now. A message without a request row (a crew report) has nothing to track. */
+/** Record where a durable message is now. A message without a request row (a thread's first prompt) has nothing to track. */
 export function track(m: Msg, state: DeliveryState, eventId?: number) {
   if (m.requestId) messageRequests.mark(m.uuid, state, eventId);
 }

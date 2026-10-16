@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { PendingMsg, ThreadDetail } from '../web/src/api.ts';
-import { isParked, parkedLabel, parkedOf, requestIdFor, sendKey } from '../web/src/requests.ts';
+import { isOmnis, isParked, parkedHeading, parkedLabel, parkedOf, reportNotes, requestIdFor, sendKey } from '../web/src/requests.ts';
+import { isEditable, movedOrder } from '../web/src/pending-edits.ts';
 
 // The Web UI's side of durable sends (web/src/requests.ts), against the same recorded server answers the Mac app's
 // Swift tests decode (tests/mac-fixtures.test.ts records them).
@@ -64,5 +65,46 @@ describe('messages a restart parked', () => {
       ['req-1', false],
       ['req-2', true],
     ]);
+  });
+});
+
+describe('crew reports held for the parent', () => {
+  it('reads a report kept for a stopped parent: held for Resume, not editable, noted on the delegation row', () => {
+    const d = fixture<ThreadDetail>('thread-report-held.json');
+    expect(d.thread.status).toBe('stopped');
+    const pending = d.pending ?? [];
+    expect(pending).toHaveLength(1);
+    const [r] = pending;
+    expect(r).toMatchObject({ kind: 'crew_report', state: 'held', delivery: 'recovered', text: 'ack: TOOL:300 check the stock' });
+    expect(r.thread_id).toBeTruthy();
+    expect(isParked(r)).toBe(true);
+    expect(isOmnis(r)).toBe(true);
+    expect(isEditable(r)).toBe(false);
+    expect(parkedOf(pending).recovered).toEqual([r]);
+    expect(parkedLabel(r)).toBe(`Crew report ${r.task_id}, held for Resume`);
+    expect(parkedHeading(pending)).toBe('1 crew report is waiting for Resume');
+    expect(reportNotes(pending)).toEqual(new Map([[r.thread_id!, 'report held for Resume']]));
+  });
+
+  it("says where each unread report is, and leaves Omni's messages out of Ben's reorder", () => {
+    const base = { mode: 'steer' as const, text: 'x' };
+    const items: PendingMsg[] = [
+      { ...base, uuid: 'a', kind: 'crew_report', state: 'sent', thread_id: 't1', request_id: 'r1', delivery: 'sent' },
+      { ...base, uuid: 'b', kind: 'crew_report', state: 'waiting', thread_id: 't2', request_id: 'r2', delivery: 'waiting' },
+      { ...base, uuid: 'c', kind: 'crew_report', state: 'held', thread_id: 't3', request_id: 'r3', delivery: 'uncertain', role: 'coder', task_id: 'T-3' },
+      { ...base, uuid: 'd', kind: 'user', source: 'team', state: 'held', request_id: 'r4', delivery: 'recovered' },
+      { ...base, uuid: 'e', kind: 'user', source: 'ben', state: 'held', request_id: 'r5', delivery: 'recovered' },
+      { ...base, uuid: 'f', kind: 'user', source: 'ben', state: 'held', request_id: 'r6', delivery: 'recovered' },
+    ];
+    expect([...reportNotes(items)]).toEqual([
+      ['t1', 'report on its way'],
+      ['t2', 'report waiting for a slot'],
+      ['t3', 'report may not have arrived'],
+    ]);
+    expect(parkedLabel(items[2])).toBe('Crew report T-3 from coder, may have reached the agent before the restart');
+    expect(items.filter(isEditable).map((m) => m.uuid)).toEqual(['e', 'f']);
+    expect(movedOrder(items, 'f', -1)).toEqual(['f', 'e']);
+    expect(parkedHeading(items.slice(2))).toBe('4 messages and crew reports are waiting for Resume');
+    expect(parkedHeading(items.slice(4))).toBe('2 messages were waiting when Omni restarted');
   });
 });

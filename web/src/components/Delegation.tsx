@@ -45,11 +45,12 @@ export function BranchFace({ role, title, status, children }: { role: string | n
   );
 }
 
-function BranchRow({ b }: { b: Branch }) {
+/** `report`: where this thread's crew report is while the parent has not read it (web/src/requests.ts `reportNotes`). */
+function BranchRow({ b, report }: { b: Branch; report?: string }) {
   useNow();
   const busy = b.status === 'running' || b.status === 'queued';
   const when = b.updated_at ? relTime(b.updated_at) : null;
-  const detail = busy ? (b.status === 'queued' ? 'waiting for a slot' : when && `started ${when}`) : when && `report in · ${when}`;
+  const detail = busy ? (b.status === 'queued' ? 'waiting for a slot' : when && `started ${when}`) : report ?? (when && `report in · ${when}`);
   return (
     <RailItem status={b.status}>
       <a href={href.thread(b.id)} className={ROW_CARD}>
@@ -58,7 +59,7 @@ function BranchRow({ b }: { b: Branch }) {
           {b.channel && <span>#{b.channel}</span>}
           <HarnessMark harness={b.harness} />
           {b.task_id && <span className="font-mono text-[11.5px] text-fg-2">{b.task_id}</span>}
-          {detail && <span className="text-fg-4">{detail}</span>}
+          {detail && <span className={report && !busy ? 'font-medium text-fg-2' : 'text-fg-4'}>{detail}</span>}
         </BranchFace>
       </a>
     </RailItem>
@@ -69,8 +70,22 @@ function BranchRow({ b }: { b: Branch }) {
  * `lead`: the team's lead thread, shown in the header with a link, as the Conductor sees it.
  * Without one it is a plain fan-out (the Conductor's delegate calls) or the lead's own view of its team.
  * `agents`: rows for sub-agents the thread's own run launched, which have no thread to link to.
+ * A row whose report the thread has not read yet says where it is: on its way, queued, or held for Resume.
  */
-export function DelegationCard({ branches = [], lead, team = false, agents = [] }: { branches?: Branch[]; lead?: Branch; team?: boolean; agents?: ReactNode[] }) {
+export function DelegationCard({
+  branches = [],
+  lead,
+  team = false,
+  agents = [],
+  reports,
+}: {
+  branches?: Branch[];
+  lead?: Branch;
+  team?: boolean;
+  agents?: ReactNode[];
+  /** Crew reports the thread has not read yet, by the thread that reported: shown on that thread's row. */
+  reports?: Map<string, string>;
+}) {
   if (!branches.length && !agents.length && !lead) return null;
   const ids = branches.map((b) => b.task_id).filter(Boolean);
   const n = branches.length + agents.length;
@@ -98,7 +113,7 @@ export function DelegationCard({ branches = [], lead, team = false, agents = [] 
       </header>
       <ol className="ml-2 flex flex-col gap-2 border-l-[1.5px] border-line pt-1">
         {branches.map((b) => (
-          <BranchRow key={b.id} b={b} />
+          <BranchRow key={b.id} b={b} report={reports?.get(b.id)} />
         ))}
         {agents}
       </ol>

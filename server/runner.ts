@@ -27,4 +27,5 @@ export {
 export { acceptedAgain, createTeam, createThread, discardRequests, postMessage, resumeRequests, sendMessage } from './runner/api.ts';
 export { ALREADY_SENT, cancelRequests, editRequest, reorderRequests } from './runner/pending.ts';
 export { interruptThread, shutdownAll, stopThread } from './runner/session.ts';
+export { reportToParent, settleTeam } from './runner/queue.ts';
 export { buildSystemPrompt } from './runner/prompts.ts';

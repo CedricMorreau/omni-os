@@ -54,6 +54,7 @@ func sseData(_ text: String) -> [String] {
     "requests-cancelled.json": { _ = try decodeFixture(RecoveryAnswer.self, "requests-cancelled.json") },
     "requests-record.json": { _ = try decodeFixture([SavedRequest].self, "requests-record.json") },
     "error-already-sent.json": { _ = try decodeFixture([String: String].self, "error-already-sent.json") },
+    "thread-report-held.json": { _ = try decodeFixture(ThreadDetail.self, "thread-report-held.json") },
     // Hand-made: tests/sync-setup.test.ts checks the server still sends its keys and types.
     "sync-status.json": { _ = try decodeFixture(SyncStatus.self, "sync-status.json") },
     // Request bodies the app sends. SecretsTests compares them with what the client encodes.
@@ -137,6 +138,30 @@ func sseData(_ text: String) -> [String] {
     #expect(resumed.pending.first?.requestID == "req-1")
     #expect(resumed.pending.first?.isParked == false)
     #expect(resumed.pending.last?.delivery == .uncertain)
+  }
+
+  @Test func readsACrewReportHeldForAStoppedParent() throws {
+    let d = try decodeFixture(ThreadDetail.self, "thread-report-held.json")
+    #expect(d.thread.status == .stopped)
+    let r = try #require(d.pending.first)
+    #expect(d.pending.count == 1)
+    #expect(r.kind == "crew_report")
+    #expect(r.delivery == .recovered)
+    #expect(r.isParked)
+    #expect(r.isOmnis)
+    #expect(!r.isEditable)
+    #expect(r.text == "ack: TOOL:300 check the stock")
+    let child = try #require(r.threadID)
+    #expect(r.label(lead: false) == "Crew report \(r.taskID ?? ""), held for Resume")
+    #expect(ParkedMessages(d.pending).recovered == [r])
+    #expect(ParkedMessages.heading(d.pending) == "1 crew report is waiting for Resume")
+    #expect(PendingMsg.reportNotes(d.pending) == [child: "report held for Resume"])
+    #expect(PendingOrder.moved(d.pending, uuid: r.uuid, step: -1) == nil)
+  }
+
+  @Test func readsTheKindOfASavedRequest() throws {
+    let record = try decodeFixture([SavedRequest].self, "requests-record.json")
+    #expect(record.allSatisfy { $0.kind == "user" })
   }
 
   @Test func readsAThreadMidTurnWithItsRequestIDs() throws {

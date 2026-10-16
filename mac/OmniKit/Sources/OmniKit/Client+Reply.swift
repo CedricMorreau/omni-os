@@ -91,9 +91,11 @@ public struct SavedRequest: Decodable, Hashable, Sendable, Identifiable {
   /// Queue order.
   public let pos: Int
   public let attachments: [Attachment]?
+  /// `user`, or `crew_report` for a child's report saved for its parent. Older servers leave it out.
+  public let kind: String?
 
   enum CodingKeys: String, CodingKey {
-    case id, prompt, state, pos, attachments
+    case id, prompt, state, pos, attachments, kind
     case requestID = "request_id"
   }
 }

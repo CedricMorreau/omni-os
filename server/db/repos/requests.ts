@@ -4,7 +4,8 @@ import type { Attachment } from '../../uploads.ts';
 
 // Durable delivery for messages sent through the API (server/runner/api.ts postMessage). A row is written before
 // the client hears "accepted", and its state follows the message through the runner, so a restart never loses it.
-// Local to this Mac: never synced, so another Mac can neither see nor run this one's queue.
+// Crew reports to a parent thread and a team's go to its lead (server/runner/queue.ts) are saved the same way before
+// the parent is woken. Local to this Mac: never synced, so another Mac can neither see nor run this one's queue.
 
 /**
  * Where an accepted message is. Live states: `accepted` (saved, not handed to the runner yet), `waiting` (for a
@@ -44,10 +45,19 @@ export interface MessageRequest {
   seq: number;
   /** Queue order: `seq` until Ben reorders. Recovered requests resume in it. */
   pos: number;
+  /** The text the harness gets. */
   prompt: string;
   mode: 'steer' | 'queue' | 'interrupt';
-  source: 'ben' | 'conductor';
+  /** crew: a child's report. team: the go a team's lead gets once its members have reported. */
+  source: 'ben' | 'conductor' | 'crew' | 'team';
   attachments: Attachment[] | null;
+  /** The transcript row it becomes: `user`, or `crew_report` for a child's report. */
+  kind: 'user' | 'crew_report';
+  /**
+   * For a message Omni wrote itself (a crew report, a team's go), the transcript payload, which is not the text the
+   * harness gets. Null for a message sent through the API. These are resumed or discarded, never edited or moved.
+   */
+  payload: Record<string, unknown> | null;
   /** What was sent, hashed: a retry must match it. */
   fingerprint: string;
   state: DeliveryState;
@@ -59,8 +69,9 @@ export interface MessageRequest {
   updated_at: string;
 }
 
-type Row = Omit<MessageRequest, 'attachments'> & { attachments: string | null };
-const parse = (r: Row | undefined): MessageRequest | undefined => r && { ...r, attachments: r.attachments ? JSON.parse(r.attachments) : null };
+type Row = Omit<MessageRequest, 'attachments' | 'payload'> & { attachments: string | null; payload: string | null };
+const parse = (r: Row | undefined): MessageRequest | undefined =>
+  r && { ...r, attachments: r.attachments ? JSON.parse(r.attachments) : null, payload: r.payload ? JSON.parse(r.payload) : null };
 const list = (sql: string, ...args: (string | number)[]) => (db.prepare(sql).all(...args) as unknown as Row[]).map((r) => parse(r)!);
 const marks = (states: readonly DeliveryState[]) => states.map((s) => `'${s}'`).join(',');
 
@@ -99,16 +110,22 @@ export const messageRequests = {
    * Save an accepted message, or return the one already saved under this request id. Nothing in between can
    * run, so two sends with one id never both insert.
    */
-  accept(r: Pick<MessageRequest, 'thread_id' | 'request_id' | 'prompt' | 'mode' | 'source' | 'attachments' | 'fingerprint' | 'machine_id'>) {
+  accept(
+    r: Pick<MessageRequest, 'thread_id' | 'request_id' | 'prompt' | 'mode' | 'source' | 'attachments' | 'fingerprint' | 'machine_id'> &
+      Partial<Pick<MessageRequest, 'kind' | 'payload'>>,
+  ) {
     return tx(() => {
       const had = messageRequests.byRequestId(r.thread_id, r.request_id);
       if (had) return { row: had, fresh: false };
       const id = randomUUID();
       const ts = now();
       db.prepare(
-        `INSERT INTO message_requests (id, thread_id, request_id, prompt, mode, source, attachments, fingerprint, state, machine_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)`,
-      ).run(id, r.thread_id, r.request_id, r.prompt, r.mode, r.source, r.attachments?.length ? JSON.stringify(r.attachments) : null, r.fingerprint, r.machine_id, ts, ts);
+        `INSERT INTO message_requests (id, thread_id, request_id, prompt, mode, source, attachments, kind, payload, fingerprint, state, machine_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)`,
+      ).run(
+        id, r.thread_id, r.request_id, r.prompt, r.mode, r.source, r.attachments?.length ? JSON.stringify(r.attachments) : null,
+        r.kind ?? 'user', r.payload ? JSON.stringify(r.payload) : null, r.fingerprint, r.machine_id, ts, ts,
+      );
       db.prepare('UPDATE message_requests SET pos = seq WHERE id = ?').run(id);
       return { row: messageRequests.get(id)!, fresh: true };
     });
@@ -129,7 +146,7 @@ export const messageRequests = {
   edit(id: string, r: Pick<MessageRequest, 'prompt' | 'attachments'>) {
     return (
       db
-        .prepare(`UPDATE message_requests SET prompt = ?, attachments = ?, updated_at = ? WHERE id = ? AND state IN (${marks(EDITABLE)})`)
+        .prepare(`UPDATE message_requests SET prompt = ?, attachments = ?, updated_at = ? WHERE id = ? AND payload IS NULL AND state IN (${marks(EDITABLE)})`)
         .run(r.prompt, r.attachments?.length ? JSON.stringify(r.attachments) : null, now(), id).changes > 0
     );
   },

@@ -170,6 +170,8 @@ public struct PendingMsg: Decodable, Hashable, Sendable, Identifiable {
   public let state: PendingState
   public let taskID: String?
   public let role: String?
+  /// A crew report: the thread that reported. Older servers leave it out.
+  public let threadID: String?
   public let attachments: [Attachment]?
   /// Sent through the API: the client's request id. Older servers leave it out.
   public let requestID: String?
@@ -184,6 +186,7 @@ public struct PendingMsg: Decodable, Hashable, Sendable, Identifiable {
   enum CodingKeys: String, CodingKey {
     case uuid, kind, text, source, mode, state, role, attachments, delivery
     case taskID = "task_id"
+    case threadID = "thread_id"
     case requestID = "request_id"
   }
 }

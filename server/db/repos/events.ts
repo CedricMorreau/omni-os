@@ -39,6 +39,8 @@ export const events = {
     });
     return { id, thread_id: threadId, kind, payload: json, created_at: ts };
   },
+  /** The thread's newest event id, 0 for none: where a run stood when it ended. */
+  lastId: (threadId: string) => Number((db.prepare('SELECT MAX(id) AS id FROM events WHERE thread_id = ?').get(threadId) as { id: number | null }).id ?? 0),
   since: (threadId: string, afterId = 0) =>
     db
       .prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE thread_id = ? AND id > ? ORDER BY id`)

@@ -64,6 +64,8 @@ const NAMES = [
   'requests-cancelled.json',
   'requests-record.json',
   'error-already-sent.json',
+  // A crew report for a parent Ben stopped, held for Resume.
+  'thread-report-held.json',
 ] as const;
 type Name = (typeof NAMES)[number];
 
@@ -205,7 +207,7 @@ function capture(url: string) {
 }
 
 type Thread = { id: string; status: string };
-type Detail = { thread: Thread; events: { kind: string }[]; pending?: unknown[] };
+type Detail = { thread: Thread; events: { kind: string }[]; pending?: { kind?: string }[] };
 
 async function scenario() {
   let base = `http://127.0.0.1:${await boot()}`;
@@ -352,6 +354,18 @@ async function scenario() {
   // An edit that arrives after its message was sent (the resumed one): refused, so the app keeps Ben's text.
   const resumedId = resumed.pending.find((p) => p.request_id === 'req-1')!.uuid;
   keep('error-already-sent.json', await call('PATCH', `/threads/${long.id}/requests/${resumedId}`, editBody, false));
+
+  // A child finishes after Ben stopped its parent: the report is kept for Resume rather than waking the parent.
+  const boss = (await call('POST', '/threads', { channel: 'acme', prompt: 'TOOL:30000 plan the launch', title: 'Plan the launch' })) as Thread;
+  await eventually(async () => count(await detail(boss.id), 'tool_use') === 1, 'the parent to run its tool');
+  const crew = (await call('POST', '/threads', { channel: 'acme', prompt: 'TOOL:300 check the stock', title: 'Check the stock', parent_id: boss.id })) as Thread;
+  await call('POST', `/threads/${boss.id}/stop`, {});
+  const held = await eventually(async () => {
+    const d = await detail(boss.id);
+    return d.thread.status === 'stopped' && !!d.pending?.some((p) => p.kind === 'crew_report') && d;
+  }, 'the report to be held on the stopped parent');
+  expect(held.pending).toMatchObject([{ kind: 'crew_report', delivery: 'recovered', thread_id: crew.id }]);
+  keep('thread-report-held.json', held);
 }
 
 /** A request body the app sends: the recorded one, so the server is checked against what the Swift tests expect. */
