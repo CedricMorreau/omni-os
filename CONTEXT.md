@@ -47,6 +47,14 @@ _Avoid_: Status (a thread's), queue state
 Making and checking a **Thread**'s own git worktree before anything runs in it, for a **Channel** with a worktree per thread. `preparing`, then ready, or `failed` with git's reason until Ben presses Retry, which uses the same thread, branch and **Session**. A worktree thread's first prompt and files are saved as its first **Request**, so they survive a restart while it waits.
 _Avoid_: Provisioning, bootstrap
 
+**Result**:
+How a **Turn** ended: `done`, `failed` or `stopped`. Each one is saved with an id of its own (`completions`), whatever ended the turn: the harness, Ben's stop, a restart or a failed **Setup**.
+_Avoid_: Completion (in UI text), outcome
+
+**Needs you**:
+One list across every thread not archived: each thread's newest unread **Result**, and what blocks a thread until Ben acts (a failed **Setup**, `recovered` or `uncertain` **Requests**). Opening a thread reads the **Result** it shows and only that one, so a later one stays unread. Read state is its own (`result_reads`): it never changes a thread's status, place in the lists or folder. Local to each Mac for now.
+_Avoid_: Inbox (in UI text), notifications, unread thread
+
 ### Harnesses
 
 **Harness**:
@@ -110,6 +118,7 @@ _Avoid_: Frontend, dashboard
 - Resume sends a **Thread**'s `recovered` **Requests** in their saved order; an `uncertain` one is never sent again on its own
 - Ben can edit, reorder or remove a **Request** while it is `waiting`, `held`, `recovered` or `uncertain`; once the runner starts sending it, a change is refused and the client keeps his edited text. Editing or reordering never resumes anything
 - A **Crew report** for a parent Ben stopped waits as `recovered` with Resume instead of starting it again; a team lead still waits for every member's report before it runs
+- A **Thread** has many **Results** and at most one unread one in **Needs you**: its newest, while the thread is not running again. A delegated thread's `done` **Result** went to its parent as a **Crew report**, so only its failures and stops are listed
 - **Harness commands** work in any message a **Thread** gets, whether Ben, an **Automation** or the **Conductor** sent it; **Omni commands** only work from a thread's reply box, and anywhere else reach the harness as plain text
 
 ## Example dialogue

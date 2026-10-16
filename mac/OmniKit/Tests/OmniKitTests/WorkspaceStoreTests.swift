@@ -55,6 +55,11 @@ final class FakeWorkspaceAPI: WorkspaceAPI {
     var recentLimits: [Int?] = []
     var channelsHold: Gate?
     var recentHold: Gate?
+    var needsYou = NeedsYou.empty
+    var reads: [String] = []
+    var readHold: Gate?
+    /// What the server does on a read, before it answers: by default nothing more.
+    var onRead: (@Sendable (String) -> Void)?
   }
   private let state = Mutex(State())
 
@@ -159,6 +164,47 @@ final class FakeWorkspaceAPI: WorkspaceAPI {
     state.withLock { s in
       s.calls["tasks", default: 0] += 1
       return s.tasks
+    }
+  }
+
+  var needsYouAnswer: NeedsYou {
+    get { state.withLock { $0.needsYou } }
+    set { state.withLock { $0.needsYou = newValue } }
+  }
+  var reads: [String] { state.withLock { $0.reads } }
+
+  /// The next read waits for the gate before the server takes it.
+  func holdNextRead() -> Gate {
+    let gate = Gate()
+    state.withLock { $0.readHold = gate }
+    return gate
+  }
+
+  func needsYou() async throws(OmniAPIError) -> NeedsYou {
+    state.withLock { s in
+      s.calls["needsYou", default: 0] += 1
+      return s.needsYou
+    }
+  }
+
+  /// As the server: the result and older ones of its thread leave; a newer one stays.
+  func readResult(_ uid: String) async throws(OmniAPIError) -> NeedsYouRead {
+    let gate = state.withLock { s in
+      defer { s.readHold = nil }
+      return s.readHold
+    }
+    await gate?.wait()
+    let threadID = state.withLock { s in
+      s.reads.append(uid)
+      let item = s.needsYou.items.first { $0.result?.uid == uid }
+      if item != nil { s.needsYou = s.needsYou.withoutResult(uid) }
+      return item?.thread.id
+    }
+    guard let threadID else { throw .http(status: 404, message: "No such result") }
+    do {
+      return try decode(NeedsYouRead.self, #"{"thread_id":"\#(threadID)","item":null}"#)
+    } catch {
+      throw .decoding("\(error)")
     }
   }
 }

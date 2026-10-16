@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, openSSE, errorText, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type Status, type ThreadStub } from './api.ts';
+import { api, openSSE, errorText, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type NeedsYou, type Status, type ThreadStub } from './api.ts';
+import { withoutResult } from './needs-you.ts';
 
 interface AppState {
   channels: ChannelWithRunning[];
@@ -18,6 +19,10 @@ interface AppState {
   mods: ModStatus[];
   subscribe: (fn: (e: FeedEvent) => void) => () => void;
   channel: (id: string) => ChannelWithRunning | undefined;
+  /** Unread results and blockers across every thread (GET /api/needs-you), null until the first load. */
+  needsYou: NeedsYou | null;
+  /** Ben saw this result: it leaves Needs you at once, and the server keeps it read. */
+  readResult: (uid: string) => void;
   /** The thread currently open, so the sidebar can list and highlight it under its channel. */
   openThread: ThreadStub | null;
   setOpenThread: (t: ThreadStub | null) => void;
@@ -36,6 +41,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
   const [mods, setMods] = useState<ModStatus[]>([]);
   const [openThread, setOpenThread] = useState<ThreadStub | null>(null);
+  const [needsYou, setNeedsYou] = useState<NeedsYou | null>(null);
+  /** Bumps on each read, so an inbox fetched before it cannot put the read result back. */
+  const needsYouEpoch = useRef(0);
   const listeners = useRef(new Set<(e: FeedEvent) => void>());
   const taskHosts = useRef('');
 
@@ -61,6 +69,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const reloadNeedsYou = useCallback(() => {
+    const epoch = needsYouEpoch.current;
+    api
+      .get<NeedsYou>('/needs-you')
+      .then((n) => epoch === needsYouEpoch.current && setNeedsYou(n))
+      .catch(() => {});
+  }, []);
+
+  const readResult = useCallback(
+    (uid: string) => {
+      needsYouEpoch.current++;
+      setNeedsYou((prev) => (prev ? withoutResult(prev, uid) : prev));
+      // Whatever the answer, the server's inbox is the truth: a newer result may have come in meanwhile.
+      api
+        .post('/needs-you/read', { uid })
+        .catch(() => {})
+        .finally(reloadNeedsYou);
+    },
+    [reloadNeedsYou],
+  );
+
   const reloadCrew = useCallback(() => {
     api
       .get<CrewRole[]>('/crew')
@@ -85,7 +114,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void reloadStatus();
     reloadCrew();
     reloadTasks();
-  }, [reloadChannels, reloadStatus, reloadCrew, reloadTasks]);
+    reloadNeedsYou();
+  }, [reloadChannels, reloadStatus, reloadCrew, reloadTasks, reloadNeedsYou]);
 
   // Thread events arrive in bursts; refresh running counts at most every ~0.5s.
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -95,8 +125,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshTimer.current = undefined;
       void reloadChannels();
       void reloadStatus();
+      reloadNeedsYou();
     }, 500);
-  }, [reloadChannels, reloadStatus]);
+  }, [reloadChannels, reloadStatus, reloadNeedsYou]);
 
   useEffect(() => {
     const emit = (e: FeedEvent) => listeners.current.forEach((fn) => fn(e));
@@ -118,6 +149,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         } else if (e.type === 'mods') {
           setMods(e.mods);
+        } else if (e.type === 'needs_you') {
+          reloadNeedsYou();
         }
         emit(e);
       },
@@ -136,7 +169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     );
     return () => h.close();
-  }, [scheduleRefresh, reloadCrew, reloadTasks]);
+  }, [scheduleRefresh, reloadCrew, reloadTasks, reloadNeedsYou]);
 
   const subscribe = useCallback((fn: (e: FeedEvent) => void) => {
     listeners.current.add(fn);
@@ -160,10 +193,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       mods,
       subscribe,
       channel: (id: string) => channels.find((c) => c.id === id),
+      needsYou,
+      readResult,
       openThread,
       setOpenThread,
     }),
-    [channels, channelsLoaded, channelsError, reloadChannels, crew, usage, status, feedLive, tasks, mods, subscribe, openThread],
+    [channels, channelsLoaded, channelsError, reloadChannels, crew, usage, status, feedLive, tasks, mods, subscribe, needsYou, readResult, openThread],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

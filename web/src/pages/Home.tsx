@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Thread } from '../api.ts';
 import { NewThreadComposer } from '../components/Composer.tsx';
+import { NeedsYouSection } from '../components/NeedsYou.tsx';
 import { ThreadGroups, useLiveThreads } from '../components/ThreadList.tsx';
 import { OmniMark } from '../components/brand.tsx';
 import { Empty, Segmented, StatusDot, glyphFor } from '../components/ui.tsx';
@@ -39,8 +40,8 @@ export function HomePage() {
   const all = recent.data;
   const shown = all?.filter(FILTERS[filter]);
   const count = (f: Filter) => all?.filter(FILTERS[f]).length ?? 0;
-  const { status } = useApp();
-  const markState = all?.some((t) => glyphFor(t.status) === 'needs') ? 'attention' : status && status.running > 0 ? 'thinking' : 'idle';
+  const { status, needsYou } = useApp();
+  const markState = needsYou?.items.length || all?.some((t) => glyphFor(t.status) === 'needs') ? 'attention' : status && status.running > 0 ? 'thinking' : 'idle';
   const badge = (n: number) => (n ? <span className="font-num text-[10.5px] text-fg-4 tabular-nums">{n}</span> : null);
 
   return (
@@ -55,6 +56,7 @@ export function HomePage() {
           <Pulse />
         </div>
         <NewThreadComposer big />
+        <NeedsYouSection inbox={needsYou} showChannel />
         <div className="mt-10">
           <div className="mb-2 flex items-center justify-between gap-3 px-1">
             <h2 className="font-display text-[17px]">Recent</h2>

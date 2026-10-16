@@ -1,7 +1,7 @@
 import OmniKit
 import SwiftUI
 
-/// The `#/` screen: a greeting, the new-thread composer and the recent threads, as Home.tsx.
+/// The `#/` screen: a greeting, the new-thread composer, Needs you and the recent threads, as Home.tsx.
 struct HomeScreen: View {
   let model: AppModel
   @State private var filter = ThreadFilter.all
@@ -15,6 +15,8 @@ struct HomeScreen: View {
           .padding(.top, z(40))
           .padding(.bottom, z(20))
         NewThreadComposerView(model: model, channelID: nil, big: true)
+        NeedsYouSection(model: model, inbox: model.store.needsYou, showChannel: true)
+          .padding(.top, z(40))
         HStack {
           Text("Recent")
             .font(.omni(size: 17, weight: .medium))

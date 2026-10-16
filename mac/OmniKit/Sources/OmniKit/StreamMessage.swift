@@ -56,10 +56,13 @@ public enum FeedEvent: Decodable, Hashable, Sendable {
   case mods([ModStatus])
   /// A channel changed on another Mac (sync): refetch the channel list.
   case channel(id: String)
+  /// Ben read a thread's result, here or in the Web UI: refetch Needs you. Nothing else about the thread changed.
+  case needsYou(threadID: String)
   case unknown(JSONValue)
 
   private enum CodingKeys: String, CodingKey {
     case type, thread, harness, usage, artifact, tasks, mods, id
+    case threadID = "thread_id"
   }
 
   public init(from decoder: any Decoder) throws {
@@ -83,6 +86,8 @@ public enum FeedEvent: Decodable, Hashable, Sendable {
       self = .mods(try c.decode([ModStatus].self, forKey: .mods))
     case "channel":
       self = .channel(id: try c.decode(String.self, forKey: .id))
+    case "needs_you":
+      self = .needsYou(threadID: try c.decode(String.self, forKey: .threadID))
     default:
       self = .unknown(try JSONValue(from: decoder))
     }

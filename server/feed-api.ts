@@ -1,10 +1,10 @@
-// /api/feed, /status, /tasks, /recent, /search: the global views across threads.
+// /api/feed, /status, /tasks, /recent, /needs-you, /search: the global views across threads.
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { about } from './about.ts';
-import { bus } from './bus.ts';
+import { bus, publishFeed } from './bus.ts';
 import { config } from './config.ts';
-import { search, threads } from './db.ts';
+import { needsYou, resultReads, search, threads } from './db.ts';
 import { activeMods, activeTasks, queuedCount, runningCount, slotsByHarness } from './runner.ts';
 import { usageByHarness } from './usage.ts';
 
@@ -47,3 +47,23 @@ feedApi.get('/mods', (c) => c.json(activeMods()));
 
 feedApi.get('/recent', (c) => c.json(threads.recent(Number(c.req.query('limit') ?? 60))));
 feedApi.get('/search', (c) => c.json(search(c.req.query('q') ?? '')));
+
+/**
+ * Needs you: unread results and blockers across every thread that is not archived, newest first. `channel` keeps
+ * one channel's, `thread` one thread's.
+ */
+feedApi.get('/needs-you', (c) => c.json(needsYou(c.req.query('channel') || undefined, c.req.query('thread') || undefined)));
+
+/**
+ * Ben saw a result: `{ uid }`, the result's uid as Needs you sent it. Only that result and older ones count as read,
+ * so a turn that ended after the client showed it stays unread. Answers with the thread's item as it is now, null
+ * when nothing about it needs Ben.
+ */
+feedApi.post('/needs-you/read', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { uid?: unknown } | null;
+  if (typeof body?.uid !== 'string' || !body.uid) return c.json({ error: 'uid is required' }, 400);
+  const read = resultReads.read(body.uid);
+  if (!read) return c.json({ error: 'No such result' }, 404);
+  publishFeed({ type: 'needs_you', thread_id: read.thread_id });
+  return c.json({ thread_id: read.thread_id, item: needsYou(undefined, read.thread_id).items[0] ?? null });
+});

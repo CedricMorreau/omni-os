@@ -71,6 +71,7 @@ private struct ThreadView: View {
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
           ReplyComposerHost(model: model, store: store, thread: thread)
         }
+        .readsShownResult(model: model, threadID: thread.id, status: thread.status)
         #if DEBUG
         .onAppear {
           QAProbe.expand = { ui.expandAll(store.transcript.items) }

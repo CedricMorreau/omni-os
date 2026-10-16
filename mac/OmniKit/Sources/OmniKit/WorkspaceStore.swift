@@ -12,11 +12,18 @@ public protocol WorkspaceAPI: Sendable {
   func tasks() async throws(OmniAPIError) -> [BackgroundTask]
   /// Every mod status line pinned now. `GET /api/mods`.
   func mods() async throws(OmniAPIError) -> [ModStatus]
+  /// Unread results and blockers. `GET /api/needs-you`.
+  func needsYou() async throws(OmniAPIError) -> NeedsYou
+  /// Ben saw this result. `POST /api/needs-you/read`.
+  func readResult(_ uid: String) async throws(OmniAPIError) -> NeedsYouRead
 }
 
 extension WorkspaceAPI {
   /// None, for a fake that does not model mods.
   public func mods() async throws(OmniAPIError) -> [ModStatus] { [] }
+  /// Nothing, for a fake that does not model Needs you.
+  public func needsYou() async throws(OmniAPIError) -> NeedsYou { .empty }
+  public func readResult(_ uid: String) async throws(OmniAPIError) -> NeedsYouRead { throw .unreachable("no Needs you") }
 }
 
 extension OmniClient: WorkspaceAPI {}
@@ -33,6 +40,9 @@ extension OmniClient: WorkspaceAPI {}
 ///   one when the start load failed: the server came up. That refetch is immediate. The Web UI debounces
 ///   channels and status and lets each list reload itself (see mac/NOTES.md).
 /// - After the app changes a channel itself, call `reloadChannels()`. The server sends no event for it.
+/// - Needs you (`needsYou`) reloads with channels and status after thread events, and at once on a `needs_you`
+///   event. `readResult(_:)` drops the result at once and tells the server; a load that started before it is
+///   dropped, so it cannot put the result back.
 ///
 /// `init(client:)` opens a feed of its own, for a store used on its own. `AppModel` owns the app's one
 /// feed and pushes it in with `apply(_:)`.
@@ -77,6 +87,8 @@ public final class WorkspaceStore {
   public private(set) var tasks: [BackgroundTask] = []
   /// Mod status lines pinned now, oldest first. One per plugin per thread.
   public private(set) var mods: [ModStatus] = []
+  /// Unread results and blockers across every thread. Nil until the first load.
+  public private(set) var needsYou: NeedsYou?
   /// Bumps when the feed archives a thread or shows one that is not in `recent`, which a restore does. A channel's
   /// lists refetch on it, since `recent` holds no archived threads to lay over them.
   public private(set) var archiveEpoch = 0
@@ -95,7 +107,7 @@ public final class WorkspaceStore {
   public func channel(_ id: String) -> ChannelWithRunning? { channels.first { $0.id == id } }
 
   private enum Part: CaseIterable {
-    case channels, status, crew, recent, harnesses, tasks, mods
+    case channels, status, crew, recent, harnesses, tasks, mods, needsYou
   }
 
   @ObservationIgnored private let api: any WorkspaceAPI
@@ -215,9 +227,20 @@ public final class WorkspaceStore {
     case .message(.mods(let list)):
       modsEpoch += 1
       if mods != list { mods = list }
+    case .message(.needsYou(_)):
+      Task { await load([.needsYou]) }
     case .message(.artifact(_)), .message(.unknown(_)):
       break
     }
+  }
+
+  /// Ben saw this result: it leaves Needs you at once, and the server keeps it read. The inbox loads again after,
+  /// since a newer result may have come in meanwhile.
+  public func readResult(_ uid: String) async {
+    tokens[.needsYou, default: 0] += 1
+    if let n = needsYou { needsYou = n.withoutResult(uid) }
+    _ = try? await api.readResult(uid)
+    await load([.needsYou])
   }
 
   private func upsertRecent(_ t: OmniThread) {
@@ -247,7 +270,7 @@ public final class WorkspaceStore {
       }
       guard let self else { return }
       self.refreshTimer = nil
-      await self.load([.channels, .status])
+      await self.load([.channels, .status, .needsYou])
     }
   }
 
@@ -309,6 +332,9 @@ public final class WorkspaceStore {
       let epoch = modsEpoch
       guard let list = try? await api.mods(), current(), modsEpoch == epoch else { return }
       if mods != list { mods = list }
+    case .needsYou:
+      guard let n = try? await api.needsYou(), current(), needsYou != n else { return }
+      needsYou = n
     }
   }
 }

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import type { Thread, Channel as ChannelRow, EventRow, Artifact, Folder, DeliveryState } from '../../server/db.ts';
+import type { Thread, Channel as ChannelRow, EventRow, Artifact, Folder, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult } from '../../server/db.ts';
 import type { Attachment } from '../../server/uploads.ts';
 import type { HarnessInfo, ModelEntry, HarnessId } from '../../server/harness/types.ts';
 import type { CommandList as HarnessCommands } from '../../server/commands.ts';
 import type { ContextView } from '../../server/context.ts';
 import type { ContextUsage } from '../../shared/context-meter.ts';
 
-export type { Thread, EventRow, Artifact, Attachment, HarnessInfo, ModelEntry, HarnessId, Folder, ContextUsage, ContextView, DeliveryState };
+export type { Thread, EventRow, Artifact, Attachment, HarnessInfo, ModelEntry, HarnessId, Folder, ContextUsage, ContextView, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult };
 
 /** A harness in the catalog, plus how many of its threads are running now. */
 export type HarnessWithRunning = HarnessInfo & { running: number };
@@ -233,6 +233,8 @@ export type FeedEvent =
   | { type: 'usage'; harness?: HarnessId; usage: Usage | null }
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'channel'; id: string }
+  /** Ben read a thread's result, here or in the Mac app: Needs you changed, nothing else did. */
+  | { type: 'needs_you'; thread_id: string }
   | { type: 'reconnect' };
 
 // ---------- fetch helpers ----------

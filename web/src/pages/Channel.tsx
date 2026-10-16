@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
 import { api, errorText, useApi, type ChannelWithRunning, type Thread } from '../api.ts';
 import { NewThreadComposer } from '../components/Composer.tsx';
+import { NeedsYouSection } from '../components/NeedsYou.tsx';
+import { inChannel } from '../needs-you.ts';
 import { ArchivedThreads, ThreadGroups, useLiveThreads, useThreadPRs } from '../components/ThreadList.tsx';
 import { Avatar, Button, Empty, StatusDot, Icon, LinkButton, Loading, Tabs } from '../components/ui.tsx';
 import { href, usePresetSeq, type ChannelTab } from '../router.ts';
@@ -13,10 +15,11 @@ function ThreadsTab({ id, isConductor }: { id: string; isConductor: boolean }) {
   const list = useLiveThreads(`/channels/${encodeURIComponent(id)}/threads`, accept);
   const prs = useThreadPRs(id);
   const presetSeq = usePresetSeq();
-  const { channel } = useApp();
+  const { channel, needsYou } = useApp();
   return (
     <div className="mx-auto max-w-3xl px-4 pt-6 pb-16 md:px-8">
       <NewThreadComposer key={presetSeq} channelId={id} placeholder={isConductor ? 'Ask the Conductor. It delegates to the crew.' : undefined} />
+      <NeedsYouSection inbox={inChannel(needsYou, id)} quiet />
       <div className="mt-8">
         <ThreadGroups
           threads={list.data}
