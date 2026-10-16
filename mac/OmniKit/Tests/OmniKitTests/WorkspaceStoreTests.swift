@@ -58,6 +58,7 @@ final class FakeWorkspaceAPI: WorkspaceAPI {
     var needsYou = NeedsYou.empty
     var reads: [String] = []
     var readHold: Gate?
+    var needsYouHold: Gate?
     /// What the server does on a read, before it answers: by default nothing more.
     var onRead: (@Sendable (String) -> Void)?
   }
@@ -180,11 +181,21 @@ final class FakeWorkspaceAPI: WorkspaceAPI {
     return gate
   }
 
+  /// The next inbox load waits for the gate, then answers with the inbox as it is by then.
+  func holdNextNeedsYou() -> Gate {
+    let gate = Gate()
+    state.withLock { $0.needsYouHold = gate }
+    return gate
+  }
+
   func needsYou() async throws(OmniAPIError) -> NeedsYou {
-    state.withLock { s in
+    let gate = state.withLock { s in
       s.calls["needsYou", default: 0] += 1
-      return s.needsYou
+      defer { s.needsYouHold = nil }
+      return s.needsYouHold
     }
+    await gate?.wait()
+    return state.withLock { $0.needsYou }
   }
 
   /// As the server: the result and older ones of its thread leave; a newer one stays.

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, openSSE, errorText, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type NeedsYou, type Status, type ThreadStub } from './api.ts';
-import { withoutResult } from './needs-you.ts';
+import { coalesced, withoutResult } from './needs-you.ts';
 
 interface AppState {
   channels: ChannelWithRunning[];
@@ -71,11 +71,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const reloadNeedsYou = useCallback(() => {
     const epoch = needsYouEpoch.current;
-    api
+    return api
       .get<NeedsYou>('/needs-you')
-      .then((n) => epoch === needsYouEpoch.current && setNeedsYou(n))
+      .then((n) => void (epoch === needsYouEpoch.current && setNeedsYou(n)))
       .catch(() => {});
   }, []);
+  /** On a `needs_you` event: a read or a result here, on another client or from the other Mac's sync, often in a burst. */
+  const needsYouChanged = useMemo(() => coalesced(reloadNeedsYou), [reloadNeedsYou]);
 
   const readResult = useCallback(
     (uid: string) => {
@@ -150,7 +152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else if (e.type === 'mods') {
           setMods(e.mods);
         } else if (e.type === 'needs_you') {
-          reloadNeedsYou();
+          needsYouChanged();
         }
         emit(e);
       },
@@ -169,7 +171,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     );
     return () => h.close();
-  }, [scheduleRefresh, reloadCrew, reloadTasks, reloadNeedsYou]);
+  }, [scheduleRefresh, reloadCrew, reloadTasks, needsYouChanged]);
 
   const subscribe = useCallback((fn: (e: FeedEvent) => void) => {
     listeners.current.add(fn);

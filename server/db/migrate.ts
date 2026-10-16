@@ -152,8 +152,10 @@ CREATE TABLE IF NOT EXISTS message_requests (
 );
 CREATE INDEX IF NOT EXISTS message_requests_open ON message_requests(thread_id, seq) WHERE state NOT IN ('delivered','dropped','discarded','cancelled');
 
--- Needs you (db/repos/needs-you.ts). A turn that ended done, failed or stopped, written by the trigger below whatever
--- wrote the status. Its uid is the result's identity; seq orders it on this Mac. Local, not synced yet.
+-- Needs you (db/repos/needs-you.ts). A turn that ended done, failed or stopped, written by the trigger below on the Mac
+-- that ran the turn, whatever wrote the status. Its uid is the result's identity on every Mac; n is its place among
+-- the thread's results, the same everywhere since it travels with the row. seq orders arrival on this Mac only.
+-- Synced, insert-only (server/sync/handlers/needs-you.ts).
 CREATE TABLE IF NOT EXISTS completions (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   uid TEXT NOT NULL UNIQUE,
@@ -164,11 +166,11 @@ CREATE TABLE IF NOT EXISTS completions (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS completions_thread ON completions(thread_id, seq);
--- The newest result Ben has seen per thread: read state, kept apart from the thread row so reading never moves
--- updated_at, status or its folder. Only ever moves forward. Local, not synced yet.
+-- The newest result Ben has seen per thread, by its (n, uid): read state, kept apart from the thread row so reading
+-- never moves updated_at, status or its folder. Only ever moves forward, here and when the other Mac's arrives.
 CREATE TABLE IF NOT EXISTS result_reads (
   thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
+  n INTEGER NOT NULL,
   uid TEXT NOT NULL,
   read_at TEXT NOT NULL
 );
@@ -233,13 +235,32 @@ export function migrate() {
     db.exec(`UPDATE ${table} SET uid = ${UUID_SQL} WHERE uid IS NULL`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${table}_uid ON ${table}(uid)`);
   }
-  // Every way a turn ends writes the thread's status (the runners, Setup, boot, sync): a turn leaving running or
-  // queued for done, failed or stopped is a result, whichever wrote it.
-  db.exec(`CREATE TRIGGER IF NOT EXISTS threads_completion AFTER UPDATE OF status ON threads
+  // A result's place among its thread's, the same on every Mac. Rows from before it synced count in arrival order.
+  ensureColumn('completions', 'n', 'INTEGER');
+  db.exec(`UPDATE completions SET n = (SELECT COUNT(*) FROM completions c WHERE c.thread_id = completions.thread_id AND c.seq <= completions.seq)
+    WHERE n IS NULL`);
+  db.exec('CREATE INDEX IF NOT EXISTS completions_order ON completions(thread_id, n, uid)');
+  // result_reads kept the local seq before read state synced: it names the result by (n, uid) now.
+  if ((db.prepare('PRAGMA table_info(result_reads)').all() as unknown as { name: string }[]).some((c) => c.name === 'seq')) {
+    db.exec(`ALTER TABLE result_reads RENAME TO result_reads_old;
+      CREATE TABLE result_reads (thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE, n INTEGER NOT NULL, uid TEXT NOT NULL, read_at TEXT NOT NULL);
+      INSERT INTO result_reads (thread_id, n, uid, read_at) SELECT r.thread_id, c.n, r.uid, r.read_at FROM result_reads_old r JOIN completions c ON c.uid = r.uid;
+      DROP TABLE result_reads_old;`);
+  }
+  // Every way a turn ends writes the thread's status (the runners, Setup, boot): a turn leaving running or queued for
+  // done, failed or stopped is a result. Only on the Mac that ran it (run_machine was this one, or none): another
+  // Mac's turn arrives with its status from sync, and its result comes as that Mac's completion, with the same uid.
+  // With sync armed the new row is queued for the relay in the same write.
+  db.exec('DROP TRIGGER IF EXISTS threads_completion');
+  db.exec(`CREATE TRIGGER threads_completion AFTER UPDATE OF status ON threads
     WHEN NEW.status IN ('done','failed','stopped') AND OLD.status IN ('running','queued')
+      AND (OLD.run_machine IS NULL OR OLD.run_machine = (SELECT json_extract(value, '$') FROM kv WHERE key = 'sync.machine_id'))
     BEGIN
-      INSERT INTO completions (uid, thread_id, status, event_uid, created_at)
-      VALUES (${UUID_SQL}, NEW.id, NEW.status, (SELECT uid FROM events WHERE thread_id = NEW.id ORDER BY id DESC LIMIT 1),
-        strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+      INSERT INTO completions (uid, thread_id, status, n, event_uid, created_at)
+      VALUES (${UUID_SQL}, NEW.id, NEW.status, COALESCE((SELECT MAX(n) FROM completions WHERE thread_id = NEW.id), 0) + 1,
+        (SELECT uid FROM events WHERE thread_id = NEW.id ORDER BY id DESC LIMIT 1), strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+      INSERT INTO sync_outbox (entity, entity_id, op, ts)
+      SELECT 'completion', uid, 'upsert', created_at FROM completions
+      WHERE seq = last_insert_rowid() AND EXISTS (SELECT 1 FROM kv WHERE key = 'sync.machine_id');
     END`);
 }

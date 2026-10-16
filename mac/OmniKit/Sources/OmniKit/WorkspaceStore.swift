@@ -41,8 +41,10 @@ extension OmniClient: WorkspaceAPI {}
 ///   channels and status and lets each list reload itself (see mac/NOTES.md).
 /// - After the app changes a channel itself, call `reloadChannels()`. The server sends no event for it.
 /// - Needs you (`needsYou`) reloads with channels and status after thread events, and at once on a `needs_you`
-///   event. `readResult(_:)` drops the result at once and tells the server; a load that started before it is
-///   dropped, so it cannot put the result back.
+///   event (a read or a result on another client, or from the other Mac's sync). Those come in bursts when a sync
+///   applies many: one load runs at a time, and one more after it if events came meanwhile. `readResult(_:)`
+///   drops the result at once and tells the server; a load that started before it is dropped, so it cannot put
+///   the result back.
 ///
 /// `init(client:)` opens a feed of its own, for a store used on its own. `AppModel` owns the app's one
 /// feed and pushes it in with `apply(_:)`.
@@ -120,6 +122,9 @@ public final class WorkspaceStore {
   @ObservationIgnored private var opened = false
   /// The latest load of each part. An answer to an older one is dropped.
   @ObservationIgnored private var tokens: [Part: Int] = [:]
+  /// A `needs_you` load is out, and whether events came in since it started.
+  @ObservationIgnored private var needsYouLoading = false
+  @ObservationIgnored private var needsYouAgain = false
   /// Feed threads that came in while `recent` loaded, by id. nil while no load is out.
   @ObservationIgnored private var recentSinceLoad: [String: OmniThread]?
   /// Bumps on each `tasks` event, so a list fetch that started earlier cannot overwrite it.
@@ -228,9 +233,25 @@ public final class WorkspaceStore {
       modsEpoch += 1
       if mods != list { mods = list }
     case .message(.needsYou(_)):
-      Task { await load([.needsYou]) }
+      needsYouChanged()
     case .message(.artifact(_)), .message(.unknown(_)):
       break
+    }
+  }
+
+  /// One load at a time for `needs_you` events, and one more after it when more came while it was out.
+  private func needsYouChanged() {
+    guard !needsYouLoading else {
+      needsYouAgain = true
+      return
+    }
+    needsYouLoading = true
+    Task {
+      repeat {
+        needsYouAgain = false
+        await load(.needsYou)
+      } while needsYouAgain
+      needsYouLoading = false
     }
   }
 
