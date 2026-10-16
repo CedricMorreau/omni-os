@@ -6,6 +6,7 @@ import './runner/aux.ts';
 import './runner/prompts.ts';
 import './runner/api.ts';
 import './runner/pending.ts';
+import './runner/setup.ts';
 
 export type { ActiveTask, ModStatus, PendingMsg, SendMode } from './runner/state.ts';
 export type { Acceptance, CreateThreadInput, PostedThread } from './runner/api.ts';
@@ -27,5 +28,6 @@ export {
 export { acceptedAgain, createTeam, createThread, discardRequests, postMessage, resumeRequests, sendMessage } from './runner/api.ts';
 export { ALREADY_SENT, cancelRequests, editRequest, reorderRequests } from './runner/pending.ts';
 export { interruptThread, shutdownAll, stopThread } from './runner/session.ts';
+export { retrySetup } from './runner/setup.ts';
 export { reportToParent, settleTeam } from './runner/queue.ts';
 export { buildSystemPrompt } from './runner/prompts.ts';

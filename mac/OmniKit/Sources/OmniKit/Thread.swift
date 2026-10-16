@@ -41,6 +41,17 @@ public struct ThreadSource: OpenEnum {
   public static let team: Self = "team"
 }
 
+/// A worktree thread's preparation (server/runner/setup.ts). Nil on the thread once its worktree is ready.
+public struct ThreadSetup: OpenEnum {
+  public let rawValue: String
+  public init(rawValue: String) { self.rawValue = rawValue }
+
+  /// Omni is making and checking the worktree. Nothing runs yet.
+  public static let preparing: Self = "preparing"
+  /// It could not: `setupError` says why, and Retry tries again on the same thread, branch and session.
+  public static let failed: Self = "failed"
+}
+
 /// A thread row. Field names follow `Thread` in server/db.ts; named OmniThread so it never clashes with Foundation.Thread.
 public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
   public let id: String
@@ -70,11 +81,16 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
   public let archived: Bool
   /// The sidebar folder it sits in, nil for the channel's ungrouped list.
   public let folderID: String?
+  /// Nil once its folder is ready, which is always for a thread that needs no worktree. Older servers leave it out.
+  public let setup: ThreadSetup?
+  /// Why the worktree could not be prepared, while `setup` is failed.
+  public let setupError: String?
   public let createdAt: Date
   public let updatedAt: Date
 
   enum CodingKeys: String, CodingKey {
-    case id, title, status, role, model, harness, effort, cwd, branch, source, automation, suggestion, archived
+    case id, title, status, role, model, harness, effort, cwd, branch, source, automation, suggestion, archived, setup
+    case setupError = "setup_error"
     case folderID = "folder_id"
     case nextTitle = "next_title"
     case nextPrompt = "next_prompt"
@@ -112,6 +128,8 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
     nextPrompt = try c.decodeIfPresent(String.self, forKey: .nextPrompt)
     archived = (try? c.decodeFlag(.archived)) ?? false
     folderID = try c.decodeIfPresent(String.self, forKey: .folderID)
+    setup = try c.decodeIfPresent(ThreadSetup.self, forKey: .setup)
+    setupError = try c.decodeIfPresent(String.self, forKey: .setupError)
     createdAt = try c.decode(Date.self, forKey: .createdAt)
     updatedAt = try c.decode(Date.self, forKey: .updatedAt)
   }

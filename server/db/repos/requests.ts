@@ -104,6 +104,8 @@ export const messageRequests = {
   /** A thread's requests waiting on Ben after a restart, in the order they arrived. */
   parked: (threadId: string) =>
     list(`SELECT * FROM message_requests WHERE thread_id = ? AND state IN (${marks(PARKED)}) ORDER BY pos, seq`, threadId),
+  /** A thread's requests saved but not handed to the runner yet: a worktree thread's first prompt while it is prepared. */
+  unstarted: (threadId: string) => list(`SELECT * FROM message_requests WHERE thread_id = ? AND state = 'accepted' ORDER BY pos, seq`, threadId),
   /** A thread's requests, newest first: the record of what was sent, dropped, discarded or cancelled. */
   forThread: (threadId: string, limit = 100) => list('SELECT * FROM message_requests WHERE thread_id = ? ORDER BY seq DESC LIMIT ?', threadId, limit),
   /**

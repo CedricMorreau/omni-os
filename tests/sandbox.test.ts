@@ -9,7 +9,7 @@ vi.mock('../server/db.ts', () => {
   throw new Error('db.ts must not be imported by sandbox tests');
 });
 
-import { buildMcpConfig, prepareWorkdir } from '../server/sandbox.ts';
+import { buildMcpConfig, needsWorktree, plannedWorktree, prepareWorkdir } from '../server/sandbox.ts';
 import { config, paths, browserOutDir, threadDir } from '../server/config.ts';
 import type { Channel } from '../server/db.ts';
 import type { CrewRole } from '../server/crew.ts';
@@ -148,5 +148,28 @@ describe('buildMcpConfig: omni conductor server', () => {
     config.browser = false;
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: role(['omni']), browserBusy: true, omniUrl: OMNI_URL });
     expect(Object.keys(cfg.mcpServers)).toEqual(['omni']);
+  });
+});
+
+describe('prepareWorkdir', () => {
+  it('names a worktree thread its planned folder and branch, and makes nothing in the repo', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'omni-plan-repo-'));
+    const id = 'planned-wd-123456';
+    try {
+      const ch = channel({ repo_path: repo, use_worktree: 1 });
+      expect(needsWorktree(ch)).toBe(true);
+      expect(await prepareWorkdir(ch, id)).toEqual(plannedWorktree(id));
+      expect(plannedWorktree(id)).toEqual({ cwd: join(paths.worktrees, id), branch: 'omni/planned-' });
+      expect(existsSync(join(paths.worktrees, id))).toBe(false);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(threadDir(id), { recursive: true, force: true });
+    }
+  });
+
+  it('needs no worktree with worktrees off, without a repo, or for a remote harness', () => {
+    expect(needsWorktree(channel({ repo_path: '/r', use_worktree: 0 }))).toBe(false);
+    expect(needsWorktree(channel({ repo_path: null, use_worktree: 1 }))).toBe(false);
+    expect(needsWorktree(channel({ repo_path: '/r', use_worktree: 1 }), { remote: true })).toBe(false);
   });
 });

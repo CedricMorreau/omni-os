@@ -1,0 +1,42 @@
+{
+  "thread": {
+    "id": "00000000-0000-4000-8000-000000000015",
+    "channel_id": "widgets",
+    "title": "Fix the widget",
+    "status": "queued",
+    "role": null,
+    "model": null,
+    "harness": "claude-code",
+    "effort": "",
+    "session_id": "00000000-0000-4000-8000-000000000015",
+    "has_run": 0,
+    "cwd": "/tmp/omni-fixtures/data/worktrees/00000000-0000-4000-8000-000000000015",
+    "branch": "omni/42816f6d",
+    "parent_id": null,
+    "task_id": null,
+    "source": "manual",
+    "automation": null,
+    "last_text": null,
+    "suggestion": null,
+    "next_title": null,
+    "next_prompt": null,
+    "archived": 0,
+    "folder_id": null,
+    "setup": "preparing",
+    "setup_error": null,
+    "created_at": "2026-01-05T09:00:00.000Z",
+    "updated_at": "2026-01-05T09:00:00.000Z"
+  },
+  "pending": [
+    {
+      "uuid": "00000000-0000-4000-8000-000000000016",
+      "kind": "user",
+      "text": "TOOL:20 fix the widget",
+      "source": "ben",
+      "mode": "steer",
+      "state": "held",
+      "request_id": "thread-start",
+      "delivery": "recovered"
+    }
+  ]
+}

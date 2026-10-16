@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { config, paths, threadDir, artifactsDir, browserOutDir, designSystemFile } from './config.ts';
@@ -22,11 +22,22 @@ async function isGitRepo(dir: string) {
   }
 }
 
+/** A thread that must run in a worktree of its own: a repo channel with worktrees on, for a harness on this Mac. */
+export function needsWorktree(channel: Channel, opts?: { remote?: boolean }) {
+  return !opts?.remote && !!channel.repo_path && !!channel.use_worktree;
+}
+
+/** Where a thread's worktree goes and the branch it is cut on. Fixed per thread, so a retry finds the same ones. */
+export function plannedWorktree(threadId: string): { cwd: string; branch: string } {
+  return { cwd: join(paths.worktrees, threadId), branch: `omni/${threadId.slice(0, 8)}` };
+}
+
 /**
- * Where a thread's agent runs.
- * - repo channel + worktrees on: a fresh git worktree on branch omni/<id>, so parallel threads never collide
+ * Where a thread's agent runs, for a thread that needs no worktree (needsWorktree is false):
+ * - Hermes: the thread's own data folder; it runs on its own server
  * - repo channel, worktrees off: the repo itself
  * - otherwise: the channel's base dir, falling back to the brain (phillbert) so skills and context load
+ * A worktree thread gets plannedWorktree's folder, which prepareWorktree makes before anything runs there.
  */
 export async function prepareWorkdir(channel: Channel, threadId: string, opts?: { remote?: boolean }): Promise<Workdir> {
   mkdirSync(artifactsDir(threadId), { recursive: true });
@@ -34,23 +45,76 @@ export async function prepareWorkdir(channel: Channel, threadId: string, opts?: 
 
   // Hermes runs on its own server. A worktree here would pin a branch nothing on this Mac commits to.
   if (opts?.remote) return { cwd: threadDir(threadId), branch: null };
+  if (needsWorktree(channel)) return plannedWorktree(threadId);
 
-  if (channel.repo_path && existsSync(channel.repo_path)) {
-    if (channel.use_worktree && (await isGitRepo(channel.repo_path))) {
-      const branch = `omni/${threadId.slice(0, 8)}`;
-      const dir = join(paths.worktrees, threadId);
-      try {
-        await run('git', ['-C', channel.repo_path, 'worktree', 'add', '-b', branch, dir, 'HEAD']);
-        return { cwd: dir, branch };
-      } catch (err) {
-        console.warn(`[sandbox] worktree failed for ${channel.id}, using repo directly:`, (err as Error).message);
-      }
-    }
-    return { cwd: channel.repo_path, branch: null };
-  }
+  if (channel.repo_path && existsSync(channel.repo_path)) return { cwd: channel.repo_path, branch: null };
   if (channel.base_dir && existsSync(channel.base_dir)) return { cwd: channel.base_dir, branch: null };
   if (existsSync(config.brainDir)) return { cwd: config.brainDir, branch: null };
   return { cwd: threadDir(threadId), branch: null };
+}
+
+const real = (p: string) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/**
+ * Why dir is not a usable worktree of repo checked out on branch, or null when it is. Never the repo itself or the
+ * brain: a harness started there would work on Ben's own checkout.
+ */
+export async function worktreeProblem(repo: string, dir: string, branch: string): Promise<string | null> {
+  if (!existsSync(dir)) return `The worktree ${dir} does not exist.`;
+  const at = real(dir);
+  if (at === real(repo) || at === real(config.brainDir)) return `${dir} is the channel's own checkout, not a worktree.`;
+  const git = (...args: string[]) => run('git', ['-C', dir, ...args], { timeout: 30_000 }).then((r) => r.stdout.trim(), () => null);
+  const top = await git('rev-parse', '--show-toplevel');
+  if (!top || real(top) !== at) return `${dir} is not a git worktree.`;
+  const common = await git('rev-parse', '--path-format=absolute', '--git-common-dir');
+  const repoCommon = await run('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir']).then((r) => r.stdout.trim(), () => null);
+  if (!common || !repoCommon || real(common) !== real(repoCommon)) return `${dir} is not a worktree of ${repo}.`;
+  const on = await git('branch', '--show-current');
+  if (on !== branch) return `${dir} is on ${on ? `branch ${on}` : 'a detached HEAD'}, not ${branch}.`;
+  return null;
+}
+
+/**
+ * Make a thread's worktree at dir on branch and check it, or throw saying why. Safe to run again: a worktree an
+ * earlier try made is checked and kept, a branch it made is checked out again, and a folder that is in the way is
+ * never deleted.
+ */
+export async function prepareWorktree(repo: string | null, dir: string, branch: string): Promise<void> {
+  if (!repo) throw new Error('The channel has no repository set.');
+  if (!existsSync(repo)) throw new Error(`The channel's repository is not on this Mac: ${repo}`);
+  if (!(await isGitRepo(repo))) throw new Error(`${repo} is not a git repository. Turn off "Worktree per thread" in the channel's settings to run threads in it directly.`);
+  if (!(await worktreeProblem(repo, dir, branch))) return;
+  // Never wait on a credential prompt or a pager.
+  const git = (...args: string[]) => run('git', ['-C', repo, ...args], { timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  if (existsSync(dir) && readdirSync(dir).length) throw new Error(`${dir} is in the way: it is not this thread's worktree on ${branch}. Move it, then retry.`);
+  // A worktree removed by hand is still registered until pruned, and add refuses its path.
+  await git('worktree', 'prune').catch(() => {});
+  const hasBranch = await git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).then(() => true, () => false);
+  try {
+    await git('worktree', 'add', ...(hasBranch ? [dir, branch] : ['-b', branch, dir, 'HEAD']));
+  } catch (err) {
+    throw new Error(`git worktree add failed: ${gitMessage(err)}`);
+  }
+  const problem = await worktreeProblem(repo, dir, branch);
+  if (problem) {
+    // Made just now and not usable: take it out again, so a retry starts clean. The branch stays for it.
+    await removeWorktree(repo, dir);
+    throw new Error(problem);
+  }
+}
+
+/** The part of a git failure worth showing: its stderr, without the hint lines. */
+function gitMessage(err: unknown): string {
+  const e = err as { stderr?: string; message?: string; killed?: boolean; signal?: string | null };
+  if (e.killed) return 'it took longer than a minute and was stopped (a slow checkout or a hook that hangs).';
+  const lines = (e.stderr || e.message || String(err)).split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('hint:'));
+  return lines.slice(-3).join(' ') || 'unknown error';
 }
 
 /**

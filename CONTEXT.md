@@ -43,6 +43,10 @@ _Avoid_: Result, callback
 Where a **Request** is. `accepted` (saved), `waiting` (for a slot), `held` (runs after this turn), `sent` (written to the harness), then `delivered` (the harness read it; the transcript keeps it where it did), `dropped` (stopped first), `discarded` (Ben chose not to send it) or `cancelled` (Ben removed it from the queue; the row is the record, the transcript never shows it). A restart parks the rest: `recovered` when no harness got it, held with Resume, and `uncertain` when one may have, sent again only when Ben says so.
 _Avoid_: Status (a thread's), queue state
 
+**Setup**:
+Making and checking a **Thread**'s own git worktree before anything runs in it, for a **Channel** with a worktree per thread. `preparing`, then ready, or `failed` with git's reason until Ben presses Retry, which uses the same thread, branch and **Session**. A worktree thread's first prompt and files are saved as its first **Request**, so they survive a restart while it waits.
+_Avoid_: Provisioning, bootstrap
+
 ### Harnesses
 
 **Harness**:
@@ -102,6 +106,7 @@ _Avoid_: Frontend, dashboard
 - A Claude Code **Thread** lists its MCP prompts only while it is warm, once its MCP servers have connected; while warm, its `/` menu lists exactly what that session can run
 - In Claude Code a **Mention** is best effort (the model decides whether to load it); Codex and Cursor load every one
 - A **Request** belongs to one **Thread** and the Mac that accepted it; only that Mac resumes it, through the same slots as any message, so each **Harness**'s concurrency cap holds
+- A **Thread** in a **Channel** with a worktree per thread runs only in its own worktree, on its own branch. When **Setup** fails, nothing runs in the channel's repo or the brain instead; channels with worktrees off still run in the repo, and a Hermes **Thread** never gets one
 - Resume sends a **Thread**'s `recovered` **Requests** in their saved order; an `uncertain` one is never sent again on its own
 - Ben can edit, reorder or remove a **Request** while it is `waiting`, `held`, `recovered` or `uncertain`; once the runner starts sending it, a change is refused and the client keeps his edited text. Editing or reordering never resumes anything
 - A **Crew report** for a parent Ben stopped waits as `recovered` with Resume instead of starting it again; a team lead still waits for every member's report before it runs

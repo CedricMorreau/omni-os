@@ -50,7 +50,8 @@ private struct ThreadInspector: ViewModifier {
         // .primaryAction is the leading cluster, right after Back and Forward. Interrupt and the
         // panel belong to this thread, so the spacer takes them to the trailing edge, Interrupt first.
         ToolbarSpacer(.flexible, placement: .primaryAction)
-        if store.running {
+        // Nothing runs while the worktree is prepared, so there is nothing to interrupt.
+        if store.running && store.thread?.setup == nil {
           ToolbarItem(placement: .primaryAction) { InterruptButton(store: store) }
         }
         ToolbarItem(placement: .primaryAction) {
