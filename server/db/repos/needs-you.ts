@@ -1,5 +1,5 @@
 import { db, now, tx } from '../connection.ts';
-import { outbox } from '../sync.ts';
+import { outbox, record } from '../sync.ts';
 import { PARKED } from './requests.ts';
 import { THREAD_COLUMNS, type Thread } from './threads.ts';
 
@@ -7,15 +7,20 @@ import { THREAD_COLUMNS, type Thread } from './threads.ts';
 // list. Three states stay apart here: execution (the thread's status, and the `completions` its turns left),
 // read state (`result_reads`, the newest result Ben has seen per thread) and filing (folder_id, never read here).
 // Reading a result writes only `result_reads`, so a thread's updated_at, status and place in the lists stay.
+// Both sync between Macs (server/sync/handlers/needs-you.ts). A result is the same row everywhere: only the Mac that
+// ran the turn writes it, and its uid and n travel with it. Results are ordered by (n, uid), never by a local seq or
+// a clock, so a read made on either Mac names the same place in the thread's results on both.
 
 /** How a turn ended: the thread's status when it did. */
 export type CompletionStatus = 'done' | 'failed' | 'stopped';
 
 /** One ended turn. `uid` is its identity, the one a client sends back to say it showed it. */
 export interface Completion {
-  /** Order on this Mac. Never sent: a client names a result by its uid. */
+  /** Arrival order on this Mac. Never sent: a client names a result by its uid. */
   seq: number;
   uid: string;
+  /** Its place among the thread's results, the same on every Mac. A tie (two Macs ran a turn apart) goes by uid. */
+  n: number;
   thread_id: string;
   status: CompletionStatus;
   /** The synced uid of the thread's newest event when the turn ended. */
@@ -71,32 +76,55 @@ export const completions = {
   get: (uid: string) => db.prepare('SELECT * FROM completions WHERE uid = ?').get(uid) as unknown as Completion | undefined,
   /** A thread's ended turns, oldest first. */
   forThread: (threadId: string) =>
-    db.prepare('SELECT * FROM completions WHERE thread_id = ? ORDER BY seq').all(threadId) as unknown as Completion[],
+    db.prepare('SELECT * FROM completions WHERE thread_id = ? ORDER BY n, uid').all(threadId) as unknown as Completion[],
   latest: (threadId: string) =>
-    db.prepare('SELECT * FROM completions WHERE thread_id = ? ORDER BY seq DESC LIMIT 1').get(threadId) as unknown as Completion | undefined,
+    db.prepare('SELECT * FROM completions WHERE thread_id = ? ORDER BY n DESC, uid DESC LIMIT 1').get(threadId) as unknown as Completion | undefined,
 };
 
 export const resultReads = {
   get: (threadId: string) =>
     db.prepare('SELECT * FROM result_reads WHERE thread_id = ?').get(threadId) as unknown as
-      | { thread_id: string; seq: number; uid: string; read_at: string }
+      | ResultRead
       | undefined,
   /**
    * Ben saw this result. The watermark moves to it and never back: reading an older one after a newer one is a
-   * no-op, and a turn that ended after the one shown stays unread. Null for a result this Mac does not have.
+   * no-op, and a turn that ended after the one shown stays unread. A move goes to the other Mac. Null for a result
+   * this Mac does not have.
    */
   read(uid: string) {
     return tx(() => {
       const c = completions.get(uid);
       if (!c) return null;
-      db.prepare(
-        `INSERT INTO result_reads (thread_id, seq, uid, read_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(thread_id) DO UPDATE SET seq = excluded.seq, uid = excluded.uid, read_at = excluded.read_at WHERE excluded.seq > result_reads.seq`,
-      ).run(c.thread_id, c.seq, c.uid, now());
+      if (advanceRead({ thread_id: c.thread_id, n: c.n, uid: c.uid, read_at: now() })) record('result_read', c.thread_id);
       return c;
     });
   },
 };
+
+/** A thread's read watermark: the newest result Ben has seen there. */
+export interface ResultRead {
+  thread_id: string;
+  n: number;
+  uid: string;
+  read_at: string;
+}
+
+/**
+ * Move a thread's watermark to this result when it is newer by (n, uid), the order every Mac agrees on. True when it
+ * moved. Reading here and a read arriving from the other Mac both go through it, so the watermark is the newest read
+ * either Mac made, in whatever order they arrive. Fails on a thread that is not here.
+ */
+export function advanceRead(r: ResultRead): boolean {
+  return (
+    db
+      .prepare(
+        `INSERT INTO result_reads (thread_id, n, uid, read_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(thread_id) DO UPDATE SET n = excluded.n, uid = excluded.uid, read_at = excluded.read_at
+         WHERE (excluded.n, excluded.uid) > (result_reads.n, result_reads.uid)`,
+      )
+      .run(r.thread_id, r.n, r.uid, r.read_at).changes > 0
+  );
+}
 
 type ResultRow = Thread & { r_uid: string | null; r_status: CompletionStatus | null; r_event_uid: string | null; r_at: string | null };
 
@@ -110,9 +138,9 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
     .prepare(
       `SELECT ${prefixed}, c.uid AS r_uid, c.status AS r_status, c.event_uid AS r_event_uid, c.created_at AS r_at
        FROM threads t
-       JOIN completions c ON c.seq = (SELECT MAX(seq) FROM completions WHERE thread_id = t.id)
+       JOIN completions c ON c.uid = (SELECT uid FROM completions WHERE thread_id = t.id ORDER BY n DESC, uid DESC LIMIT 1)
        LEFT JOIN result_reads r ON r.thread_id = t.id
-       WHERE ${LISTED} ${scope} AND t.status IN ('done','failed','stopped') AND c.seq > COALESCE(r.seq, 0)
+       WHERE ${LISTED} ${scope} AND t.status IN ('done','failed','stopped') AND (r.thread_id IS NULL OR (c.n, c.uid) > (r.n, r.uid))
          AND NOT (c.status = 'done' AND t.parent_id IS NOT NULL)`,
     )
     .all(...args) as unknown as ResultRow[];

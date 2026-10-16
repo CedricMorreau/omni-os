@@ -50,3 +50,24 @@ export function withoutResult(all: NeedsYou, uid: string): NeedsYou {
   const items = all.items.flatMap((i) => (i.result?.uid !== uid ? [i] : i.blockers.length ? [{ ...i, result: null }] : []));
   return { items, unread: items.filter((i) => i.result).length, blocked: items.filter((i) => i.blockers.length).length };
 }
+
+/**
+ * A load that runs one at a time: a call while one is out runs it once more after, however many calls came. A sync
+ * that applies many results and reads at once sends a `needs_you` event for each; the inbox loads twice, not once
+ * per event, and the last load starts after the last event.
+ */
+export function coalesced(load: () => Promise<unknown>): () => void {
+  let busy = false;
+  let again = false;
+  const run = () => {
+    busy = true;
+    again = false;
+    load()
+      .catch(() => {})
+      .finally(() => (again ? run() : (busy = false)));
+  };
+  return () => {
+    if (busy) again = true;
+    else run();
+  };
+}

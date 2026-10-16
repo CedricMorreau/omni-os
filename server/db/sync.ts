@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { db, now, tx } from './connection.ts';
 
-/** What the sync relay carries. Events, artifacts and automation runs are keyed by their uid, the rest by id or key. */
-export type SyncEntity = 'channel' | 'folder' | 'thread' | 'event' | 'artifact' | 'automation_run' | 'kv';
+/**
+ * What the sync relay carries. Events, artifacts, automation runs and completions are keyed by their uid, a
+ * result_read by its thread's id, the rest by id or key.
+ */
+export type SyncEntity = 'channel' | 'folder' | 'thread' | 'event' | 'artifact' | 'automation_run' | 'kv' | 'completion' | 'result_read';
 export type SyncOp = 'upsert' | 'delete';
 
 export interface OutboxRow {
@@ -15,7 +18,10 @@ export interface OutboxRow {
 
 // ---------- sync outbox ----------
 
-/** Rows where the newest write wins. Events and automation runs are insert-only. */
+/**
+ * Rows where the newest write wins. Events, automation runs and completions are insert-only; a result_read keeps
+ * the newest result read, whenever the write was (db/repos/needs-you.ts).
+ */
 const LWW = new Set<SyncEntity>(['channel', 'folder', 'thread', 'kv', 'artifact']);
 /** kv keys that stay on this machine: the sync cursor, machine id, switches and path map. */
 export const localKey = (key: string) => key.startsWith('sync.');
@@ -64,6 +70,8 @@ function seed(machineId: string) {
   q('event', 'SELECT uid AS k FROM events ORDER BY id');
   q('artifact', 'SELECT uid AS k FROM artifacts ORDER BY id');
   q('automation_run', 'SELECT uid AS k FROM automation_runs ORDER BY id');
+  q('completion', 'SELECT uid AS k FROM completions ORDER BY seq');
+  q('result_read', 'SELECT thread_id AS k FROM result_reads ORDER BY thread_id');
   q('kv', `SELECT key AS k FROM kv WHERE key NOT LIKE 'sync.%' ORDER BY key`);
   db.prepare(
     `INSERT OR REPLACE INTO sync_meta (entity, entity_id, ts, machine_id)

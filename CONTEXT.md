@@ -48,11 +48,11 @@ Making and checking a **Thread**'s own git worktree before anything runs in it, 
 _Avoid_: Provisioning, bootstrap
 
 **Result**:
-How a **Turn** ended: `done`, `failed` or `stopped`. Each one is saved with an id of its own (`completions`), whatever ended the turn: the harness, Ben's stop, a restart or a failed **Setup**.
+How a **Turn** ended: `done`, `failed` or `stopped`. Each one is saved with an id of its own (`completions`), whatever ended the turn: the harness, Ben's stop, a restart or a failed **Setup**. Only the Mac that ran the turn saves it; the other Mac gets that same row by sync, so a **Result** has one id on both.
 _Avoid_: Completion (in UI text), outcome
 
 **Needs you**:
-One list across every thread not archived: each thread's newest unread **Result**, and what blocks a thread until Ben acts (a failed **Setup**, `recovered` or `uncertain` **Requests**). Opening a thread reads the **Result** it shows and only that one, so a later one stays unread. Read state is its own (`result_reads`): it never changes a thread's status, place in the lists or folder. Local to each Mac for now.
+One list across every thread not archived: each thread's newest unread **Result**, and what blocks a thread until Ben acts (a failed **Setup**, `recovered` or `uncertain` **Requests**). Opening a thread reads the **Result** it shows and only that one, so a later one stays unread. Read state is its own (`result_reads`): it never changes a thread's status, place in the lists or folder. It syncs, and only moves forward: each thread keeps the newest **Result** read on either Mac, ordered by the place each one has in its thread, never by a clock.
 _Avoid_: Inbox (in UI text), notifications, unread thread
 
 ### Harnesses

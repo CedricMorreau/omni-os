@@ -137,6 +137,36 @@ private func store(_ api: FakeWorkspaceAPI) -> (WorkspaceStore, AsyncStream<SSEE
     try await waitFor("the inbox after the burst") { s.needsYou == api.needsYouAnswer }
   }
 
+  @Test func aBurstFromSyncLoadsTwice() async throws {
+    let api = try FakeWorkspaceAPI.standard()
+    api.needsYouAnswer = try inbox()
+    let (s, feed, _) = store(api)
+    defer { s.stop(); feed.finish() }
+    try await waitFor("the inbox") { s.needsYou != nil }
+    let calls = api.calls("needsYou")
+    var seen = 0
+    s.onFeed = { _ in seen += 1 }
+
+    // The other Mac's reads land in one sync, an event each, while the first load is out.
+    let gate = api.holdNextNeedsYou()
+    let done = try item(api.needsYouAnswer, "Audit the checkout")
+    feed.yield(.message(.needsYou(threadID: done.id)))
+    try await waitFor("the first load") { api.calls("needsYou") == calls + 1 }
+    for _ in 0..<20 { feed.yield(.message(.needsYou(threadID: done.id))) }
+    try await waitFor("every event") { seen == 21 }
+    await settle()
+    #expect(api.calls("needsYou") == calls + 1)
+    api.needsYouAnswer = api.needsYouAnswer.withoutResult(try #require(done.result?.uid))
+    gate.open()
+    try await waitFor("one more load, with the reads") { api.calls("needsYou") >= calls + 2 && s.needsYou == api.needsYouAnswer }
+    await settle()
+    #expect(api.calls("needsYou") == calls + 2)
+
+    // Quiet again: the next event loads at once.
+    feed.yield(.message(.needsYou(threadID: done.id)))
+    try await waitFor("the next event's load") { api.calls("needsYou") >= calls + 3 }
+  }
+
   @Test func readsTheShownResultAndKeepsALaterOneUnread() async throws {
     let api = try FakeWorkspaceAPI.standard()
     api.needsYouAnswer = try inbox()

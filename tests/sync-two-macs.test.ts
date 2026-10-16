@@ -141,4 +141,29 @@ describe('a thread started on one Mac, continued on the other', () => {
     expect(relay.changes.length).toBe(before);
     expect(existsSync(a.sessionFile(a.thread(threadId)))).toBe(true);
   });
+  it('Needs you lists the same results on both, and reading on B clears it on A', async () => {
+    const inbox = async (m: typeof a) =>
+      ((await (await m.app.request('/api/needs-you')).json()) as { items: { thread: { id: string }; result: { uid: string } | null }[] }).items.find(
+        (i) => i.thread.id === threadId,
+      );
+    // One result per turn, each written by the Mac that ran it, the same rows on both.
+    const uids = (m: typeof a) => m.db.completions.forThread(threadId).map((c) => [c.uid, c.n]);
+    expect(uids(a)).toHaveLength(2);
+    expect(uids(b)).toEqual(uids(a));
+    const newest = a.db.completions.latest(threadId)!.uid;
+    expect((await inbox(a))?.result?.uid).toBe(newest);
+    expect((await inbox(b))?.result?.uid).toBe(newest);
+
+    const before = a.thread(threadId);
+    const read = await b.app.request('/api/needs-you/read', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ uid: newest }),
+    });
+    expect(read.status).toBe(200);
+    clean(await b.worker.syncNow());
+    clean(await a.worker.syncNow());
+    expect(await inbox(a)).toBeUndefined();
+    expect(a.thread(threadId)).toEqual(before);
+  });
 });
