@@ -151,6 +151,8 @@ public struct DeliveryState: OpenEnum {
   public static let delivered: Self = "delivered"
   public static let dropped: Self = "dropped"
   public static let discarded: Self = "discarded"
+  /// Ben removed it from the queue before it was sent. The row is the record; the transcript never shows it.
+  public static let cancelled: Self = "cancelled"
   /// Accepted before a restart and never reached a harness: waits for Resume.
   public static let recovered: Self = "recovered"
   /// Written to a harness before a restart, so it may have been read: sent again only when Ben says so.

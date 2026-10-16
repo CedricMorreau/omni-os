@@ -34,8 +34,12 @@ public final class ThreadStore {
   public private(set) var events: [EventRow] = []
   public private(set) var transcript = Transcript()
   public private(set) var artifacts: [Artifact] = []
-  /// Messages Ben sent that the agent has not read yet.
-  public private(set) var pending: [PendingMsg] = []
+  /// Messages Ben sent that the agent has not read yet. Every new list is checked against the open edits.
+  public private(set) var pending: [PendingMsg] = [] {
+    didSet { if pending != oldValue { edits.reconcile(pending) } }
+  }
+  /// Open edits of unsent messages, and the actions on them.
+  public let edits: PendingEditsModel
   /// A CLI process is attached, so the next message starts at once. nil until the server says.
   public private(set) var warm: Bool?
   public private(set) var loadState = LoadState.loading
@@ -124,6 +128,7 @@ public final class ThreadStore {
   ) {
     self.id = id
     self.api = api
+    self.edits = PendingEditsModel(threadID: id)
     self.ticker = Ticker(clock)
     self.frame = frame
     self.makeStream = stream
@@ -182,12 +187,17 @@ public final class ThreadStore {
     merge(t, pending: nil, live: nil, isReply: isReply)
   }
 
-  /// What a resume or discard of parked messages answered: the thread, and its pending list before the stream
-  /// brings it.
+  /// What a resume, discard, cancel or reorder of unsent messages answered: the thread, and its pending list
+  /// before the stream brings it.
   public func apply(recovery a: RecoveryAnswer) {
     guard a.thread.id == id else { return }
     merge(a.thread, pending: nil, live: nil, isReply: false)
     pending = a.pending
+  }
+
+  /// What a saved edit answered, as `apply(recovery:)`.
+  public func apply(edit a: EditAnswer) {
+    apply(recovery: RecoveryAnswer(thread: a.thread, pending: a.pending))
   }
 
   /// Keeps children, their team members and the parent current.

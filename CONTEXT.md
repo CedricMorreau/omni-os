@@ -36,7 +36,7 @@ A message sent to a thread through the API, saved before the client hears it was
 _Avoid_: Job, task
 
 **Delivery state**:
-Where a **Request** is. `accepted` (saved), `waiting` (for a slot), `held` (runs after this turn), `sent` (written to the harness), then `delivered` (the harness read it; the transcript keeps it where it did), `dropped` (stopped first) or `discarded` (Ben chose not to send it). A restart parks the rest: `recovered` when no harness got it, held with Resume, and `uncertain` when one may have, sent again only when Ben says so.
+Where a **Request** is. `accepted` (saved), `waiting` (for a slot), `held` (runs after this turn), `sent` (written to the harness), then `delivered` (the harness read it; the transcript keeps it where it did), `dropped` (stopped first), `discarded` (Ben chose not to send it) or `cancelled` (Ben removed it from the queue; the row is the record, the transcript never shows it). A restart parks the rest: `recovered` when no harness got it, held with Resume, and `uncertain` when one may have, sent again only when Ben says so.
 _Avoid_: Status (a thread's), queue state
 
 ### Harnesses
@@ -98,7 +98,8 @@ _Avoid_: Frontend, dashboard
 - A Claude Code **Thread** lists its MCP prompts only while it is warm, once its MCP servers have connected; while warm, its `/` menu lists exactly what that session can run
 - In Claude Code a **Mention** is best effort (the model decides whether to load it); Codex and Cursor load every one
 - A **Request** belongs to one **Thread** and the Mac that accepted it; only that Mac resumes it, through the same slots as any message, so each **Harness**'s concurrency cap holds
-- Resume sends a **Thread**'s `recovered` **Requests** in the order they came; an `uncertain` one is never sent again on its own
+- Resume sends a **Thread**'s `recovered` **Requests** in their saved order; an `uncertain` one is never sent again on its own
+- Ben can edit, reorder or remove a **Request** while it is `waiting`, `held`, `recovered` or `uncertain`; once the runner starts sending it, a change is refused and the client keeps his edited text. Editing or reordering never resumes anything
 - **Harness commands** work in any message a **Thread** gets, whether Ben, an **Automation** or the **Conductor** sent it; **Omni commands** only work from a thread's reply box, and anywhere else reach the harness as plain text
 
 ## Example dialogue

@@ -162,6 +162,9 @@ final class QARunner {
           guard let open = QAProbe.openMeter else { throw QAScriptError("no context meter on screen") }
           open()
           try? await Task.sleep(for: .milliseconds(800))
+        case .editPending(let text):
+          guard let edit = QAProbe.editPending, edit(text) else { throw QAScriptError("no editable unsent message on screen") }
+          try? await Task.sleep(for: .milliseconds(500))
         case .imageZoom(let scale):
           guard let zoom = QAProbe.imageZoom else { throw QAScriptError("no image preview on screen") }
           if let scale { zoom.step(scale / zoom.scale) } else { zoom.fit() }
@@ -412,6 +415,7 @@ final class QARunner {
     case .scroll(let scroll): "scroll \(scroll.rawValue)"
     case .expand: "expand"
     case .meter: "meter"
+    case .editPending(let text): "editPending \(text.prefix(40))"
     case .imageZoom(let scale): "imageZoom \(scale.map { "\($0)" } ?? "fit")"
     case .type(let text): "type \(text.prefix(40))"
     case .send(let mode): "send \(mode?.rawValue ?? "reply")"

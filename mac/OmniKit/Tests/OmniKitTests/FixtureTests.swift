@@ -49,6 +49,11 @@ func sseData(_ text: String) -> [String] {
     "automation-enabled.json": { _ = try decodeFixture([String: Bool].self, "automation-enabled.json") },
     "thread-recovered.json": { _ = try decodeFixture(ThreadDetail.self, "thread-recovered.json") },
     "requests-resumed.json": { _ = try decodeFixture(RecoveryAnswer.self, "requests-resumed.json") },
+    "request-edited.json": { _ = try decodeFixture(EditAnswer.self, "request-edited.json") },
+    "requests-reordered.json": { _ = try decodeFixture(RecoveryAnswer.self, "requests-reordered.json") },
+    "requests-cancelled.json": { _ = try decodeFixture(RecoveryAnswer.self, "requests-cancelled.json") },
+    "requests-record.json": { _ = try decodeFixture([SavedRequest].self, "requests-record.json") },
+    "error-already-sent.json": { _ = try decodeFixture([String: String].self, "error-already-sent.json") },
     // Hand-made: tests/sync-setup.test.ts checks the server still sends its keys and types.
     "sync-status.json": { _ = try decodeFixture(SyncStatus.self, "sync-status.json") },
     // Request bodies the app sends. SecretsTests compares them with what the client encodes.
@@ -57,6 +62,8 @@ func sseData(_ text: String) -> [String] {
     "automation-enabled-request.json": { _ = try decodeFixture([String: Bool].self, "automation-enabled-request.json") },
     // ReplyRequestTests compares it with what the client encodes.
     "message-queued-request.json": { _ = try decodeFixture([String: String].self, "message-queued-request.json") },
+    // PendingEditsTests compares it with what the client encodes.
+    "request-edit-request.json": { _ = try decodeFixture(JSONValue.self, "request-edit-request.json") },
   ]
 
   static func threadStream() throws -> [ThreadStreamMessage] {

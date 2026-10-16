@@ -10,16 +10,29 @@ import type { Attachment } from '../../uploads.ts';
  * Where an accepted message is. Live states: `accepted` (saved, not handed to the runner yet), `waiting` (for a
  * free slot), `held` (runs after this turn), `sent` (written to the harness, not read back yet). Terminal states:
  * `delivered` (the harness read it, and the transcript has it where it did), `dropped` (stopped before it was
- * read), `discarded` (Ben chose not to send a recovered one). After a restart: `recovered` (it never reached a
+ * read), `discarded` (Ben chose not to send a recovered one), `cancelled` (Ben removed it from the queue before it
+ * was sent; the row stays as the record, and the transcript never shows it). After a restart: `recovered` (it never reached a
  * harness, so it waits for Resume) and `uncertain` (it may have reached one, so it is never sent again on its own).
  */
-export type DeliveryState = 'accepted' | 'waiting' | 'held' | 'sent' | 'delivered' | 'dropped' | 'discarded' | 'recovered' | 'uncertain';
+export type DeliveryState =
+  | 'accepted'
+  | 'waiting'
+  | 'held'
+  | 'sent'
+  | 'delivered'
+  | 'dropped'
+  | 'discarded'
+  | 'cancelled'
+  | 'recovered'
+  | 'uncertain';
 
 /** Waiting on Ben after a restart. */
 export const PARKED: readonly DeliveryState[] = ['recovered', 'uncertain'];
 /** Still in the runner's hands. A restart parks these. */
 const LIVE: readonly DeliveryState[] = ['accepted', 'waiting', 'held', 'sent'];
-const FINAL: readonly DeliveryState[] = ['delivered', 'dropped', 'discarded'];
+const FINAL: readonly DeliveryState[] = ['delivered', 'dropped', 'discarded', 'cancelled'];
+/** Not sent yet, so Ben can still edit, reorder or remove it: queued in the runner, or parked after a restart. */
+export const EDITABLE: readonly DeliveryState[] = ['waiting', 'held', 'recovered', 'uncertain'];
 
 export interface MessageRequest {
   /** Also the runner's message uuid, which the harness echoes back when it reads the message. */
@@ -27,8 +40,10 @@ export interface MessageRequest {
   thread_id: string;
   /** The client's id for the send. A retry with the same one gets this row back. */
   request_id: string;
-  /** Arrival order within the server; recovered requests resume in it. */
+  /** Arrival order within the server. */
   seq: number;
+  /** Queue order: `seq` until Ben reorders. Recovered requests resume in it. */
+  pos: number;
   prompt: string;
   mode: 'steer' | 'queue' | 'interrupt';
   source: 'ben' | 'conductor';
@@ -77,7 +92,9 @@ export const messageRequests = {
     parse(db.prepare('SELECT * FROM message_requests WHERE thread_id = ? AND request_id = ?').get(threadId, requestId) as Row | undefined),
   /** A thread's requests waiting on Ben after a restart, in the order they arrived. */
   parked: (threadId: string) =>
-    list(`SELECT * FROM message_requests WHERE thread_id = ? AND state IN (${marks(PARKED)}) ORDER BY seq`, threadId),
+    list(`SELECT * FROM message_requests WHERE thread_id = ? AND state IN (${marks(PARKED)}) ORDER BY pos, seq`, threadId),
+  /** A thread's requests, newest first: the record of what was sent, dropped, discarded or cancelled. */
+  forThread: (threadId: string, limit = 100) => list('SELECT * FROM message_requests WHERE thread_id = ? ORDER BY seq DESC LIMIT ?', threadId, limit),
   /**
    * Save an accepted message, or return the one already saved under this request id. Nothing in between can
    * run, so two sends with one id never both insert.
@@ -92,6 +109,7 @@ export const messageRequests = {
         `INSERT INTO message_requests (id, thread_id, request_id, prompt, mode, source, attachments, fingerprint, state, machine_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)`,
       ).run(id, r.thread_id, r.request_id, r.prompt, r.mode, r.source, r.attachments?.length ? JSON.stringify(r.attachments) : null, r.fingerprint, r.machine_id, ts, ts);
+      db.prepare('UPDATE message_requests SET pos = seq WHERE id = ?').run(id);
       return { row: messageRequests.get(id)!, fresh: true };
     });
   },
@@ -102,6 +120,27 @@ export const messageRequests = {
         .prepare(`UPDATE message_requests SET state = ?, event_id = COALESCE(?, event_id), updated_at = ? WHERE id = ? AND state NOT IN (${marks(FINAL)})`)
         .run(state, eventId ?? null, now(), id).changes > 0
     );
+  },
+  /**
+   * Ben edited a request that has not been sent. Only while it is still editable, so a request the runner has
+   * started cannot change after it did. The fingerprint stays the first send's, so a late retry of that send is
+   * still answered as a duplicate.
+   */
+  edit(id: string, r: Pick<MessageRequest, 'prompt' | 'attachments'>) {
+    return (
+      db
+        .prepare(`UPDATE message_requests SET prompt = ?, attachments = ?, updated_at = ? WHERE id = ? AND state IN (${marks(EDITABLE)})`)
+        .run(r.prompt, r.attachments?.length ? JSON.stringify(r.attachments) : null, now(), id).changes > 0
+    );
+  },
+  /** New queue positions, as `id -> pos`. Only for requests still editable; returns false, changing nothing, otherwise. */
+  reposition(order: { id: string; pos: number }[]) {
+    return tx(() => {
+      const set = db.prepare(`UPDATE message_requests SET pos = ?, updated_at = ? WHERE id = ? AND state IN (${marks(EDITABLE)})`);
+      const ts = now();
+      for (const o of order) if (!set.run(o.pos, ts, o.id).changes) throw Object.assign(new Error('Some of these messages have already been sent.'), { status: 409 });
+      return true;
+    });
   },
   /** A send that failed before the runner took it was never accepted: a retry starts over. */
   remove: (id: string) => db.prepare(`DELETE FROM message_requests WHERE id = ? AND state = 'accepted'`).run(id).changes > 0,
