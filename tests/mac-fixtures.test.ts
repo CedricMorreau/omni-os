@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -66,6 +66,9 @@ const NAMES = [
   'error-already-sent.json',
   // A crew report for a parent Ben stopped, held for Resume.
   'thread-report-held.json',
+  // A worktree that could not be made: the reason and the first prompt kept, then Retry.
+  'thread-setup-failed.json',
+  'setup-retried.json',
 ] as const;
 type Name = (typeof NAMES)[number];
 
@@ -366,6 +369,23 @@ async function scenario() {
   }, 'the report to be held on the stopped parent');
   expect(held.pending).toMatchObject([{ kind: 'crew_report', delivery: 'recovered', thread_id: crew.id }]);
   keep('thread-report-held.json', held);
+
+  // A repo with no commit yet: its worktree cannot be cut, so the thread waits with the reason and its prompt.
+  const repo = join(tmp, 'widgets');
+  mkdirSync(repo);
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', ...args]);
+  git('init', '-q');
+  await call('POST', '/channels', { id: 'widgets', name: 'Widgets', kind: 'client', use_worktree: 1, repo_path: repo, notes: 'Fixture' });
+  const wt = (await call('POST', '/threads', { channel: 'widgets', prompt: 'TOOL:20 fix the widget', title: 'Fix the widget' })) as Thread;
+  const failed = await eventually(async () => {
+    const d = (await detail(wt.id)) as Detail & { thread: { setup: string | null } };
+    return d.thread.setup === 'failed' && d;
+  }, 'the worktree to fail');
+  expect(failed.pending).toMatchObject([{ kind: 'user', delivery: 'recovered', request_id: 'thread-start' }]);
+  keep('thread-setup-failed.json', failed);
+  git('commit', '-q', '--allow-empty', '-m', 'first');
+  keep('setup-retried.json', await call('POST', `/threads/${wt.id}/setup/retry`, {}));
+  await eventually(async () => (await detail(wt.id)).thread.status === 'done', 'the retried thread to run');
 }
 
 /** A request body the app sends: the recorded one, so the server is checked against what the Swift tests expect. */

@@ -480,6 +480,8 @@ struct QueuedMessagesView: View {
   let client: OmniClient
   let items: [PendingMsg]
   let starting: Bool
+  /// The thread's worktree is not ready: what waits sends once it is (SetupCard).
+  var setup: ThreadSetup? = nil
 
   var body: some View {
     let lead = PendingMsg.lead(in: items, starting: starting)
@@ -491,9 +493,9 @@ struct QueuedMessagesView: View {
             .foregroundStyle(Tok.fg3)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if m.isEditable {
-          PendingRow(store: store, client: client, m: m, label: m.label(lead: false), icon: "clock") { EmptyView() }
+          PendingRow(store: store, client: client, m: m, label: m.label(lead: false, setup: setup), icon: "clock") { EmptyView() }
         } else {
-          PendingBubble(m: m, label: m.label(lead: i == lead), icon: m.state == .sent ? "send" : "clock")
+          PendingBubble(m: m, label: m.label(lead: i == lead, setup: setup), icon: m.state == .sent ? "send" : "clock")
         }
       }
       if let error = store.edits.error {
@@ -752,6 +754,8 @@ struct ParkedMessagesView: View {
   let store: ThreadStore
   let client: OmniClient
   let items: [PendingMsg]
+  /// The thread's worktree is not ready: they send once it is, so Retry (SetupCard) stands in for Resume.
+  var setup: ThreadSetup? = nil
   @State private var busy: String?
   @State private var error: String?
 
@@ -761,11 +765,11 @@ struct ParkedMessagesView: View {
     VStack(alignment: .trailing, spacing: z(12)) {
       Rectangle().fill(Tok.line).frame(height: 1)
       HStack(spacing: z(8)) {
-        Text(ParkedMessages.heading(items))
+        Text(setup != nil ? PendingMsg.setupLabel : ParkedMessages.heading(items))
           .font(.omni(size: 12))
           .foregroundStyle(Tok.fg3)
           .frame(maxWidth: .infinity, alignment: .leading)
-        if !parked.recovered.isEmpty {
+        if !parked.recovered.isEmpty && setup == nil {
           Button { resume("resume", ids: nil) } label: {
             PendingLabel(text: parked.recovered.count > 1 ? "Resume \(parked.recovered.count)" : "Resume", icon: "play", busy: busy == "resume")
           }
@@ -778,7 +782,7 @@ struct ParkedMessagesView: View {
         let icon = m.delivery == .uncertain ? "alert" : "clock"
         if m.isOmnis {
           VStack(alignment: .trailing, spacing: z(6)) {
-            PendingBubble(m: m, label: m.label(lead: false), icon: icon)
+            PendingBubble(m: m, label: m.label(lead: false, setup: setup), icon: icon)
             HStack(spacing: z(4)) {
               sendAgain(m, off: off)
               Button { discard(m) } label: {
@@ -790,7 +794,7 @@ struct ParkedMessagesView: View {
             }
           }
         } else {
-          PendingRow(store: store, client: client, m: m, label: m.label(lead: false), icon: icon) {
+          PendingRow(store: store, client: client, m: m, label: m.label(lead: false, setup: setup), icon: icon) {
             sendAgain(m, off: off)
           }
         }

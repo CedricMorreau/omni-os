@@ -22,6 +22,8 @@
     "next_prompt": null,
     "archived": 0,
     "folder_id": null,
+    "setup": null,
+    "setup_error": null,
     "created_at": "2026-01-05T09:00:00.000Z",
     "updated_at": "2026-01-05T09:00:00.000Z"
   },
@@ -106,7 +108,7 @@
       "cwd": "/tmp/omni-fixtures/acme",
       "branch": null,
       "parent_id": "00000000-0000-4000-8000-000000000012",
-      "task_id": "T-0355",
+      "task_id": "T-CAB6",
       "source": "manual",
       "automation": null,
       "last_text": "ack: TOOL:300 check the stock",
@@ -115,6 +117,8 @@
       "next_prompt": null,
       "archived": 0,
       "folder_id": null,
+      "setup": null,
+      "setup_error": null,
       "created_at": "2026-01-05T09:00:00.000Z",
       "updated_at": "2026-01-05T09:00:00.000Z"
     }
@@ -129,7 +133,7 @@
       "source": "crew",
       "mode": "steer",
       "state": "held",
-      "task_id": "T-0355",
+      "task_id": "T-CAB6",
       "thread_id": "00000000-0000-4000-8000-000000000013",
       "request_id": "crew-report:00000000-0000-4000-8000-000000000013:79",
       "delivery": "recovered"

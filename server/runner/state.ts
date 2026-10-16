@@ -304,6 +304,15 @@ export function pendingFor(threadId: string): PendingMsg[] {
     ...(live?.inflight ?? []).map((m) => pendingView(m, 'sent')),
     ...(live?.held ?? []).map((m) => pendingView(m, 'held')),
     ...(waitingMsgs.get(threadId) ?? []).map((m) => pendingView(m, 'waiting')),
+    // A worktree thread's first prompt while the worktree is made: saved, waiting for it.
+    ...(threads.get(threadId)?.setup === 'preparing' ? messageRequests.unstarted(threadId) : []).map(
+      (r): PendingMsg =>
+        pendingRow({ uuid: r.id, kind: r.kind, text: r.prompt, mode: r.mode, state: 'waiting' }, { source: r.source }, {
+          request_id: r.request_id,
+          delivery: r.state,
+          ...(r.attachments?.length && { attachments: r.attachments }),
+        }),
+    ),
     ...messageRequests.parked(threadId).map(
       (r): PendingMsg =>
         pendingRow({ uuid: r.id, kind: r.kind, text: (r.payload?.text as string | undefined) ?? r.prompt, mode: r.mode, state: 'held' }, { source: r.source, ...r.payload }, {

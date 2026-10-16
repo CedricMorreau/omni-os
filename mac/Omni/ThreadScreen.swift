@@ -440,11 +440,15 @@ private struct TranscriptRows: View {
       if let line = store.workingLine {
         WorkingLine(text: line)
       }
+      if let t = store.thread, t.setup != nil {
+        SetupCard(model: model, store: store, thread: t)
+      }
       if store.pending.contains(where: { !$0.isParked }) {
-        QueuedMessagesView(store: store, client: model.client, items: store.pending.filter { !$0.isParked }, starting: store.betweenTurns)
+        QueuedMessagesView(
+          store: store, client: model.client, items: store.pending.filter { !$0.isParked }, starting: store.betweenTurns, setup: store.thread?.setup)
       }
       if store.pending.contains(where: \.isParked) {
-        ParkedMessagesView(store: store, client: model.client, items: store.pending.filter(\.isParked))
+        ParkedMessagesView(store: store, client: model.client, items: store.pending.filter(\.isParked), setup: store.thread?.setup)
       }
       if !store.edits.stale.isEmpty {
         StaleEditsView(store: store, client: model.client)

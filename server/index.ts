@@ -37,6 +37,9 @@ const onBindError = (err: NodeJS.ErrnoException) => {
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   server.off('error', onBindError);
   about.port = info.port;
+  // A worktree the last server was still preparing never got checked, so nothing runs in it until Ben retries.
+  const unprepared = threads.failPreparing("Omni stopped before this thread's worktree was ready.");
+  if (unprepared) console.log(`[omni] ${unprepared} thread(s) were mid-setup: kept for Retry`);
   const interrupted = threads.failInterrupted();
   if (interrupted) console.log(`[omni] marked ${interrupted} interrupted thread(s) as failed`);
   // Messages a killed server still held wait for Resume; one it had written to a harness is marked uncertain.

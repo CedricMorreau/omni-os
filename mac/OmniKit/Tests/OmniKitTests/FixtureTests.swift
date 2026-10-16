@@ -55,6 +55,8 @@ func sseData(_ text: String) -> [String] {
     "requests-record.json": { _ = try decodeFixture([SavedRequest].self, "requests-record.json") },
     "error-already-sent.json": { _ = try decodeFixture([String: String].self, "error-already-sent.json") },
     "thread-report-held.json": { _ = try decodeFixture(ThreadDetail.self, "thread-report-held.json") },
+    "thread-setup-failed.json": { _ = try decodeFixture(ThreadDetail.self, "thread-setup-failed.json") },
+    "setup-retried.json": { _ = try decodeFixture(RecoveryAnswer.self, "setup-retried.json") },
     // Hand-made: tests/sync-setup.test.ts checks the server still sends its keys and types.
     "sync-status.json": { _ = try decodeFixture(SyncStatus.self, "sync-status.json") },
     // Request bodies the app sends. SecretsTests compares them with what the client encodes.
@@ -157,6 +159,30 @@ func sseData(_ text: String) -> [String] {
     #expect(ParkedMessages.heading(d.pending) == "1 crew report is waiting for Resume")
     #expect(PendingMsg.reportNotes(d.pending) == [child: "report held for Resume"])
     #expect(PendingOrder.moved(d.pending, uuid: r.uuid, step: -1) == nil)
+  }
+
+  @Test func readsAWorktreeThatCouldNotBePrepared() throws {
+    let d = try decodeFixture(ThreadDetail.self, "thread-setup-failed.json")
+    #expect(d.thread.status == .failed)
+    #expect(d.thread.setup == .failed)
+    #expect(d.thread.setupError?.contains("git worktree add failed") == true)
+    #expect(d.thread.branch?.hasPrefix("omni/") == true)
+    // The first prompt waits, recovered, for Retry, and Ben can still edit it.
+    let first = try #require(d.pending.first)
+    #expect(d.pending.count == 1)
+    #expect(first.requestID == "thread-start")
+    #expect(first.delivery == .recovered)
+    #expect(first.isEditable)
+    #expect(first.label(lead: false, setup: d.thread.setup) == "Waits for the worktree")
+    #expect(first.label(lead: false) == "Held after a restart, waiting for Resume")
+    // Retry answers at once: preparing, the prompt still waiting.
+    let retried = try decodeFixture(RecoveryAnswer.self, "setup-retried.json")
+    #expect(retried.thread.id == d.thread.id)
+    #expect(retried.thread.setup == .preparing)
+    #expect(retried.thread.setupError == nil)
+    #expect(retried.pending.map(\.requestID) == ["thread-start"])
+    // A thread that needs no worktree has none.
+    #expect(try decodeFixture(ThreadDetail.self, "thread.json").thread.setup == nil)
   }
 
   @Test func readsTheKindOfASavedRequest() throws {

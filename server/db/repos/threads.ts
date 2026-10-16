@@ -3,6 +3,8 @@ import { outbox, record } from '../sync.ts';
 
 export type ThreadStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'imported';
 /** `team`: a member of a team, run under its lead thread and listed only there. */
+/** A worktree thread's preparation: `preparing` until its worktree is made and checked, `failed` (with why) until Ben retries. */
+export type ThreadSetup = 'preparing' | 'failed';
 export type ThreadSource = 'manual' | 'automation' | 'conductor' | 'import' | 'capture' | 'team';
 
 export interface Thread {
@@ -34,13 +36,17 @@ export interface Thread {
   archived: number;
   /** The sidebar folder it sits in (db/repos/folders.ts), null for ungrouped. Synced with the row. */
   folder_id: string | null;
+  /** Null once the thread's folder is ready, which is always for a thread that needs no worktree. Local only, not synced. */
+  setup: ThreadSetup | null;
+  /** Why the worktree could not be prepared, while setup is `failed`. */
+  setup_error: string | null;
   created_at: string;
   updated_at: string;
 }
 
 /** The columns clients read, without sync's run_machine. */
 export const THREAD_COLUMNS =
-  'id, channel_id, title, status, role, model, harness, effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, created_at, updated_at';
+  'id, channel_id, title, status, role, model, harness, effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, setup, setup_error, created_at, updated_at';
 
 /** Who runs a thread with this status: this machine while it is running or queued here and sync is set up, else nobody. */
 const runMachine = (status: ThreadStatus) => (status === 'running' || status === 'queued' ? outbox.machineId() : null);
@@ -91,25 +97,28 @@ export const threads = {
       .all(...args) as unknown as Thread[];
   },
   create(
-    t: Omit<Thread, 'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'archived' | 'folder_id'> & {
-      has_run?: number; created_at?: string; harness?: string; effort?: string; folder_id?: string | null;
+    t: Omit<
+      Thread,
+      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'archived' | 'folder_id' | 'setup' | 'setup_error'
+    > & {
+      has_run?: number; created_at?: string; harness?: string; effort?: string; folder_id?: string | null; setup?: ThreadSetup | null;
     },
   ) {
     const ts = t.created_at ?? now();
     return tx(() => {
       db.prepare(
-        `INSERT INTO threads (id, channel_id, title, status, role, model, harness, effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, run_machine, folder_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO threads (id, channel_id, title, status, role, model, harness, effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, run_machine, folder_id, setup, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         t.id, t.channel_id, t.title, t.status, t.role, t.model, t.harness ?? 'claude-code', t.effort ?? '', t.session_id, t.has_run ?? 0, t.cwd,
-        t.branch, t.parent_id, t.task_id, t.source, t.automation, runMachine(t.status), t.folder_id ?? null, ts, ts,
+        t.branch, t.parent_id, t.task_id, t.source, t.automation, runMachine(t.status), t.folder_id ?? null, t.setup ?? null, ts, ts,
       );
       record('thread', t.id);
       return threads.get(t.id)!;
     });
   },
   update(id: string, patch: Partial<Thread>) {
-    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'updated_at'] as const;
+    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'updated_at'] as const;
     const keys = allowed.filter((k) => k in patch);
     const sets = keys.map((k) => `${k} = ?`);
     const vals = keys.map((k) => (patch[k] ?? null) as string | number | null);
@@ -149,6 +158,10 @@ export const threads = {
    * Threads that were mid-run when the server died can never finish. Only the ones this machine ran, or no
    * machine claims: one another Mac runs is that Mac's to fail when it restarts.
    */
+  /** At boot: a preparation the last server was still running can never finish. It fails with why, for Retry. */
+  failPreparing(reason: string) {
+    return Number(db.prepare(`UPDATE threads SET setup = 'failed', setup_error = ? WHERE setup = 'preparing'`).run(reason).changes);
+  },
   failInterrupted() {
     return tx(() => {
       const ids = db

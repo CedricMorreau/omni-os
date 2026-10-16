@@ -97,6 +97,15 @@ extension PendingMsg {
   /// What the line over a message the agent has not read says, or the whole line for a crew report. A held crew
   /// report waits for Resume whether a restart or Ben's Stop kept it from the agent.
   public func label(lead: Bool) -> String {
+    label(lead: lead, setup: nil)
+  }
+
+  /// The line over a message on a thread whose worktree is not ready: it sends once it is, through Retry.
+  public static let setupLabel = "Sends once the worktree is ready"
+
+  /// As `label(lead:)`, for a thread whose worktree may not be ready yet.
+  public func label(lead: Bool, setup: ThreadSetup?) -> String {
+    if setup != nil { return isParked ? "Waits for the worktree" : Self.setupLabel }
     if kind == "crew_report" && delivery == .recovered { return "\(reportName), held for Resume" }
     if kind == "crew_report" && delivery == .uncertain { return "\(reportName), may have reached the agent before the restart" }
     if delivery == .recovered { return "Held after a restart, waiting for Resume" }

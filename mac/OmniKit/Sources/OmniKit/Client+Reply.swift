@@ -191,6 +191,12 @@ extension OmniClient {
     try await send("POST", "/api/threads/\(uriComponent(id))/requests/resume", body: RequestIDs(ids: ids))
   }
 
+  /// Retries a worktree that could not be prepared: the same thread, branch and session, and its first message once
+  /// the worktree is ready. Safe to send twice; a thread that is ready or being prepared is left as it is.
+  public func retrySetup(in id: String) async throws(OmniAPIError) -> RecoveryAnswer {
+    try await send("POST", "/api/threads/\(uriComponent(id))/setup/retry", body: RequestIDs(ids: nil))
+  }
+
   /// Drops parked messages. Each stays in the transcript, marked as never sent.
   public func discardRequests(in id: String, ids: [String]) async throws(OmniAPIError) -> RecoveryAnswer {
     try await send("POST", "/api/threads/\(uriComponent(id))/requests/discard", body: RequestIDs(ids: ids))

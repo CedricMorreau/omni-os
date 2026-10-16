@@ -27,6 +27,7 @@ import {
   refreshContext,
   reorderRequests,
   resumeRequests,
+  retrySetup,
   runsHere,
 } from './runner.ts';
 import { threadFilesReady, threadOpened } from './sync/files.ts';
@@ -173,6 +174,17 @@ threadActionsApi.post('/:id/requests/resume', async (c) => {
   const { ids } = z.object({ ids: z.array(z.string().min(1)).max(200).optional() }).parse(await c.req.json().catch(() => ({})));
   if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
   await resumeRequests(id, ids);
+  return c.json(afterRecovery(id));
+});
+
+/**
+ * Retry a worktree that could not be prepared: the same thread, branch and session, and its first prompt once the
+ * worktree is ready. Safe to send twice; a thread that is ready or already being prepared is left as it is.
+ */
+threadActionsApi.post('/:id/setup/retry', (c) => {
+  const id = c.req.param('id');
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  retrySetup(id);
   return c.json(afterRecovery(id));
 });
 

@@ -9,7 +9,9 @@ import { isOmnis, isParked } from './requests.ts';
  * Still unsent and saved on the server: queued in the runner, held for after this turn, or parked by a restart.
  * Ben's own messages only: a crew report or a team's go can be resumed or discarded, never edited or moved.
  */
-export const isEditable = (m: PendingMsg) => !isOmnis(m) && !!m.request_id && (m.state === 'waiting' || m.state === 'held');
+// A worktree thread's first prompt is only `accepted` while its worktree is made: the runner has not queued it yet.
+export const isEditable = (m: PendingMsg) =>
+  !isOmnis(m) && !!m.request_id && m.delivery !== 'accepted' && (m.state === 'waiting' || m.state === 'held');
 
 /** What a message is reordered within: held for after this turn, waiting for a slot, or parked by a restart. */
 const group = (m: PendingMsg) => (isParked(m) ? 'parked' : m.state);

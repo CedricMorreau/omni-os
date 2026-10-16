@@ -9,7 +9,8 @@ import Observation
 extension PendingMsg {
   /// Still unsent and saved on the server: queued in the runner, held for after this turn, or parked by a restart.
   /// Ben's own messages only: a crew report or a team's go can be resumed or discarded, never edited or moved.
-  public var isEditable: Bool { !isOmnis && requestID != nil && (state == .waiting || state == .held) }
+  /// A worktree thread's first prompt is only `accepted` while its worktree is made: the runner has not queued it yet.
+  public var isEditable: Bool { !isOmnis && requestID != nil && delivery != .accepted && (state == .waiting || state == .held) }
 
   /// What it is reordered within: held for after this turn, waiting for a slot, or parked by a restart.
   var orderGroup: String { isParked ? "parked" : state.rawValue }

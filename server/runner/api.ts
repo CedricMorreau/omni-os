@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { channels, folders, messageRequests, outbox, requestFingerprint, threads, type DeliveryState, type MessageRequest, type Thread, type ThreadSource } from '../db.ts';
 import { getCrew } from '../crew.ts';
-import { commandsFolder, prepareWorkdir } from '../sandbox.ts';
+import { commandsFolder, needsWorktree, prepareWorkdir } from '../sandbox.ts';
 import { prepareTurn, turnBlocked } from '../sync/guard.ts';
 import { parseSlash, resolveSlash, slashRecord, type SlashCommand, type SlashRecord } from '../../shared/slash.ts';
 import { listCommands, peekCommands } from '../commands.ts';
@@ -16,6 +16,7 @@ import type { CommandUse } from '../harness/adapter.ts';
 import { assembling, deliver, settleTeam } from './queue.ts';
 import { fallbackTitle, generateTitle } from './aux.ts';
 import { addEvent, emitThread, isShuttingDown, requestMsg, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
+import { bindResume, retrySetup, saveStart, setUpThread, START_REQUEST } from './setup.ts';
 
 // ---------- slash commands ----------
 
@@ -85,7 +86,10 @@ export interface CreateThreadInput {
   files?: File[];
 }
 
-/** Resolve the run, make the workdir and write the row. Nothing is delivered yet. */
+/**
+ * Resolve the run, make the workdir and write the row. Nothing is delivered yet. A thread that needs a worktree is
+ * written as preparing, with the worktree's planned folder and branch: setUpThread makes them before anything runs.
+ */
 async function openThread(input: CreateThreadInput, status: Thread['status'] = 'queued') {
   const role = getCrew(input.role);
   const channelId = input.channel || role?.channel || 'inbox';
@@ -113,7 +117,8 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
   const filedIn = input.folder?.trim() ? (folders.find(channel.id, input.folder) ?? folders.create({ channel_id: channel.id, name: input.folder })) : null;
 
   const id = randomUUID();
-  const wd = await prepareWorkdir(channel, id, { remote: harness === 'hermes' });
+  const remote = harness === 'hermes';
+  const wd = await prepareWorkdir(channel, id, { remote });
   const thread = threads.create({
     id,
     channel_id: channel.id,
@@ -131,6 +136,7 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
     source: input.source ?? 'manual',
     automation: input.automation ?? null,
     folder_id: filedIn?.id ?? null,
+    setup: needsWorktree(channel, { remote }) ? 'preparing' : null,
   });
   return { thread, channel, harness, folder: commandsFolder(channel) ?? wd.cwd };
 }
@@ -139,6 +145,13 @@ export async function createThread(input: CreateThreadInput): Promise<Thread> {
   const { thread, harness, folder } = await openThread(input);
   const saved = await saveUploads(thread.id, input.files ?? []);
   const attachments = saved.length ? saved : undefined;
+  if (thread.setup) {
+    // A worktree thread: its prompt and files are saved first, and sent once the worktree is made and checked.
+    saveStart(thread, input.prompt, attachments);
+    if (!input.title) void generateTitle(thread.id, input.prompt);
+    void setUpThread(thread.id);
+    return threads.get(thread.id)!;
+  }
   await warmCommands(harness, folder, input.prompt);
   const { text, slash, commands } = slashFor(input.prompt, () => peekCommands(harness as HarnessId, folder).commands);
   deliver(thread.id, {
@@ -187,6 +200,8 @@ export async function createTeam(input: CreateTeamInput): Promise<{ lead: Thread
   if (!input.tasks.length) throw new Error('a team needs at least one task');
   const { thread: lead } = await openThread({ ...input, source: input.source ?? 'conductor' }, 'running');
   addEvent(lead.id, 'user', { text: input.prompt, source: lead.source });
+  // Its brief is in the transcript already; it runs once its worktree and its team are both ready.
+  if (lead.setup) void setUpThread(lead.id);
   if (!input.title) void generateTitle(lead.id, input.prompt);
   const members: Thread[] = [];
   // A member can finish before the last one is created; the lead settles once all of them exist.
@@ -226,6 +241,8 @@ export function sendMessage(
     attachments?: Attachment[];
     /** A durable request (postMessage): its row id becomes the message uuid, and the runner tracks its state. */
     request?: Pick<MessageRequest, 'id' | 'request_id'>;
+    /** Who the transcript says sent it, when not `from`: a thread's first prompt keeps the thread's source. */
+    source?: string;
   } = {},
 ): Thread {
   const thread = threads.get(threadId);
@@ -241,7 +258,7 @@ export function sendMessage(
 export function messageFor(
   thread: Thread,
   prompt: string,
-  opts: { uuid: string; requestId?: string; from?: 'ben' | 'conductor'; mode?: SendMode; attachments?: Attachment[] },
+  opts: { uuid: string; requestId?: string; from?: 'ben' | 'conductor'; source?: string; mode?: SendMode; attachments?: Attachment[] },
 ): Msg {
   const attachments = opts.attachments?.length ? opts.attachments : undefined;
   const { text, slash, commands } = slashFor(prompt, () => (threadCommands(thread.id) ?? peekCommands(thread.harness as HarnessId, thread.cwd)).commands);
@@ -254,7 +271,7 @@ export function messageFor(
     commands,
     event: {
       kind: 'user',
-      payload: { text: prompt, source: opts.from ?? 'ben', ...(slash && { slash }), ...(attachments && { attachments }) },
+      payload: { text: prompt, source: opts.source ?? opts.from ?? 'ben', ...(slash && { slash }), ...(attachments && { attachments }) },
     },
   };
 }
@@ -323,8 +340,9 @@ async function deliverRequest(r: MessageRequest, undo: () => void) {
       return;
     }
     await warmCommands(ready.harness, ready.cwd, r.prompt, r.thread_id);
-    // Without a payload it came through the API, from Ben or the Conductor.
-    sendMessage(r.thread_id, r.prompt, { from: r.source as 'ben' | 'conductor', mode: r.mode, attachments: r.attachments ?? undefined, request: r });
+    // Without a payload it came through the API, from Ben or the Conductor, or it is a worktree thread's first prompt.
+    const source = r.request_id === START_REQUEST ? ready.source : undefined;
+    sendMessage(r.thread_id, r.prompt, { from: r.source as 'ben' | 'conductor', source, mode: r.mode, attachments: r.attachments ?? undefined, request: r });
   } catch (err) {
     if (isShuttingDown()) messageRequests.park(r.id);
     else undo();
@@ -381,6 +399,8 @@ export async function postMessage(
 export async function resumeRequests(threadId: string, ids?: string[]): Promise<Thread> {
   const thread = threads.get(threadId);
   if (!thread) throw refusal('thread not found', 404);
+  // What waits on a worktree goes once it is made: Resume there is Retry, and while it is made, nothing more.
+  if (thread.setup) return retrySetup(threadId);
   const parked = messageRequests.parked(threadId);
   const chosen = ids ? parked.filter((r) => ids.includes(r.id)) : parked.filter((r) => r.state === 'recovered');
   if (ids && chosen.length !== new Set(ids).size) throw refusal('Some of these messages are no longer waiting to be resumed.', 409);
@@ -413,3 +433,5 @@ export function discardRequests(threadId: string, ids: string[]): Thread {
   emitThread(threadId);
   return threads.get(threadId)!;
 }
+
+bindResume((threadId) => resumeRequests(threadId));

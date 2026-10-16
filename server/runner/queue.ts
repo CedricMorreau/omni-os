@@ -172,8 +172,9 @@ export function reportToParent(childId: string, status: string, text: string, co
   if (waitingLead) return teamReported(parent.id, key, prompt, report);
   const row = saveOwn(parent.id, key, { prompt, kind: 'crew_report', payload: report, source: 'crew' });
   if (!row) return;
-  // Ben stopped the parent: the report waits for him rather than starting it again.
-  if (parent.status === 'stopped' && !lives.get(parent.id)?.turn && !waiting.includes(parent.id)) {
+  // Ben stopped the parent: the report waits for him rather than starting it again. A parent whose worktree is not
+  // ready keeps it too, and Retry sends it once the worktree is made.
+  if (parent.setup || (parent.status === 'stopped' && !lives.get(parent.id)?.turn && !waiting.includes(parent.id))) {
     messageRequests.mark(row.id, 'recovered');
     return emitThread(parent.id);
   }
@@ -203,10 +204,13 @@ function teamReported(leadId: string, key: string, prompt: string, report: Recor
 /** Leads whose members are still being created. */
 export const assembling = new Set<string>();
 
-/** Start a waiting lead's turn once no member is queued or running. The go is saved first, once per lead. */
+/**
+ * Start a waiting lead's turn once no member is queued or running. The go is saved first, once per lead. A lead whose
+ * worktree is not ready waits: its setup settles the team once the worktree is made.
+ */
 export function settleTeam(leadId: string) {
   const lead = threads.get(leadId);
-  if (!lead || lead.has_run || assembling.has(leadId)) return;
+  if (!lead || lead.has_run || assembling.has(leadId) || lead.setup) return;
   const team = threads.team(leadId);
   if (team.some((m) => m.status === 'running' || m.status === 'queued')) return;
   if (lead.status !== 'running') return;

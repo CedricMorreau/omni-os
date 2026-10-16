@@ -1,8 +1,8 @@
 // Start a thread's process, including its browser profile and MCP config.
 import { config } from '../config.ts';
-import { channels, threads, type Thread } from '../db.ts';
+import { channels, messageRequests, threads, type Thread } from '../db.ts';
 import { getCrew } from '../crew.ts';
-import { writeDesignSystem, writeMcpConfig } from '../sandbox.ts';
+import { worktreeProblem, writeDesignSystem, writeMcpConfig } from '../sandbox.ts';
 import { attachThread, detachThread } from '../browser.ts';
 import { globalSecret, secretsEnv } from '../secrets.ts';
 import { closePipesAfterExit } from '../child.ts';
@@ -17,6 +17,7 @@ import { buildSystemPrompt } from './prompts.ts';
 import { onExit, onRecord } from './records.ts';
 import { abortStart } from './session.ts';
 import { adapterFor, addEvent, browserHolder, cliLabel, crash, emitThread, lives, omniUrl, track, userLine, writeLine, type Live, type Msg } from './state.ts';
+import { failSetup } from './setup.ts';
 
 export function launch(threadId: string, first: Msg): Live | undefined {
   const thread = threads.get(threadId);
@@ -67,12 +68,36 @@ export function launch(threadId: string, first: Msg): Live | undefined {
   return live;
 }
 
+/**
+ * Why a local thread on a branch cannot start in its folder, or null when it can: a worktree thread runs only in its
+ * own worktree, on its branch, never in the channel's checkout or the brain. A thread with no branch runs where it
+ * always has.
+ */
+async function workdirProblem(thread: Thread, repo: string | null): Promise<string | null> {
+  if (!thread.branch) return null;
+  if (!repo) return 'The channel has no repository set.';
+  return worktreeProblem(repo, thread.cwd, thread.branch);
+}
+
+/** The worktree is not usable: nothing starts, its messages wait for Retry, and the thread says why. */
+function refuseStart(live: Live, reason: string) {
+  const keep = (m: Msg) => !!m.requestId && messageRequests.park(m.uuid);
+  live.inflight = live.inflight.filter((m) => !keep(m));
+  live.held = live.held.filter((m) => !keep(m));
+  abortStart(live, 'failed');
+  failSetup(live.threadId, reason);
+}
+
 async function spawnLive(live: Live, thread: Thread) {
   const channel = channels.get(thread.channel_id)!;
   const role = getCrew(thread.role);
 
   // Hermes is not on this Mac: it must not take the channel's browser profile or see local MCP config.
   const remote = thread.harness === 'hermes';
+  // Every local harness starts here, so this is the one check that a worktree thread never runs anywhere else.
+  const problem = remote ? null : await workdirProblem(thread, channel.repo_path);
+  if (lives.get(thread.id) !== live) return;
+  if (problem) return refuseStart(live, problem);
   // Chrome locks a profile dir: the first live process in a channel keeps it until it exits.
   const holder = browserHolder.get(channel.id);
   const browserBusy = !!holder && holder !== thread.id;

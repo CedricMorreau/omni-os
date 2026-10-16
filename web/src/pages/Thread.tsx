@@ -7,6 +7,7 @@ import { BrowserTab } from '../components/thread/panel/BrowserTab.tsx';
 import { DetailsTab } from '../components/thread/panel/DetailsTab.tsx';
 import { PANEL_MIN, THREAD_MIN, defaultPanelWidth, PanelResizeHandle } from '../components/thread/panel/PanelResizeHandle.tsx';
 import { NextThreadCard } from '../components/thread/NextThreadCard.tsx';
+import { SetupCard } from '../components/thread/SetupCard.tsx';
 import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { Avatar, Button, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, StatusPill, Tabs } from '../components/ui.tsx';
@@ -288,7 +289,8 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
               </Button>
             )}
             <StatusPill status={thread.status} />
-            {slotBusy && (
+            {/* Nothing runs while the worktree is prepared, so there is nothing to interrupt. */}
+            {slotBusy && !thread.setup && (
               <Button
                 size="sm"
                 variant="secondary"
@@ -321,7 +323,15 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
               )}
               {/* Queued means waiting for a slot: nothing is working yet. */}
               <Transcript threadId={id} events={events} running={turnInProgress} cwd={init?.cwd || thread.cwd} known={known} team={members} artifacts={files} reports={reports} />
-              <QueuedMessages items={queued} starting={betweenTurns} threadId={id} onPending={setQueued} />
+              <SetupCard
+                thread={thread}
+                onRetried={(t, pending) => {
+                  // Retry keeps updated_at, so it must win a tie, like a rename.
+                  applyThread(t);
+                  setQueued(pending);
+                }}
+              />
+              <QueuedMessages items={queued} starting={betweenTurns} threadId={id} onPending={setQueued} setup={thread.setup} />
               {!queued.length && (
                 <NextThreadCard
                   thread={thread}
@@ -348,7 +358,8 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
         <div className="relative shrink-0 bg-bg px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-4">
           <div className="mx-auto max-w-4xl">
             {actionError && <ErrorNote className="mb-2">{actionError}</ErrorNote>}
-            {blocked && <ErrorNote className="mb-2">{blocked}</ErrorNote>}
+            {/* The setup card above says why while the worktree is not ready. */}
+            {blocked && !thread.setup && <ErrorNote className="mb-2">{blocked}</ErrorNote>}
             <ReplyComposer
               thread={thread}
               canSteer={canSteer(thread.harness, harnesses)}

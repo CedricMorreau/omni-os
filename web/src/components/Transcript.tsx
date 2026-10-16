@@ -415,6 +415,9 @@ const SOURCE_LABEL: Record<string, string> = {
   import: 'Imported',
 };
 
+/** A message that waits for the thread's worktree (SetupCard). */
+const SETUP_LABEL = 'Sends once the worktree is ready';
+
 function pendingLabel(m: PendingMsg, lead: boolean) {
   if (m.state === 'waiting') return 'Waiting for a free slot';
   if (m.state === 'held') return 'Queued, runs after this turn';
@@ -434,9 +437,12 @@ export function QueuedMessages({
   starting = false,
   threadId,
   onPending,
+  setup = null,
 }: {
   items: PendingMsg[];
   starting?: boolean;
+  /** The thread's worktree is not ready: what waits sends once it is, so Retry (SetupCard) stands in for Resume. */
+  setup?: Thread['setup'];
   /** Needed for the actions on Ben's own messages. */
   threadId?: string;
   /** The pending list an action answered with, before the stream brings it. */
@@ -518,12 +524,12 @@ export function QueuedMessages({
             </span>
           </div>
         ) : threadId && isEditable(m) ? (
-          ownRow(m, pendingLabel(m, false), 'clock')
+          ownRow(m, setup ? SETUP_LABEL : pendingLabel(m, false), 'clock')
         ) : (
-          <PendingBubble key={m.uuid ?? i} m={m} label={pendingLabel(m, m === lead)} icon={m.state === 'sent' ? 'send' : 'clock'} />
+          <PendingBubble key={m.uuid ?? i} m={m} label={setup ? SETUP_LABEL : pendingLabel(m, m === lead)} icon={m.state === 'sent' ? 'send' : 'clock'} />
         ),
       )}
-      {parked.length > 0 && threadId && <ParkedMessages threadId={threadId} items={parked} onPending={onPending} row={ownRow} busy={busy} />}
+      {parked.length > 0 && threadId && <ParkedMessages threadId={threadId} items={parked} onPending={onPending} row={ownRow} busy={busy} setup={setup} />}
       {error && <div className="text-right text-[12px] text-needs">{error}</div>}
       {threadId && stale.map((d) => <StaleEdit key={d.uuid} threadId={threadId} draft={d} onClose={() => actions.close(d.uuid)} />)}
     </div>
@@ -715,12 +721,14 @@ function ParkedMessages({
   onPending,
   row,
   busy: rowBusy,
+  setup,
 }: {
   threadId: string;
   items: PendingMsg[];
   onPending?: (items: PendingMsg[]) => void;
   row: (m: PendingMsg, label: string, icon: 'send' | 'clock' | 'alert', extra?: ReactNode) => ReactNode;
   busy: string | null;
+  setup?: Thread['setup'];
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -753,8 +761,8 @@ function ParkedMessages({
   return (
     <div className="flex flex-col gap-3 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[12px] text-fg-3">{parkedHeading(items)}</span>
-        {recovered.length > 0 && (
+        <span className="text-[12px] text-fg-3">{setup ? SETUP_LABEL : parkedHeading(items)}</span>
+        {recovered.length > 0 && !setup && (
           <Button size="sm" variant="primary" icon="play" busy={busy === 'resume'} disabled={off} onClick={() => void resume('resume')}>
             Resume{recovered.length > 1 ? ` ${recovered.length}` : ''}
           </Button>
@@ -767,9 +775,10 @@ function ParkedMessages({
           </Button>
         );
         const icon = m.delivery === 'uncertain' ? 'alert' : 'clock';
-        if (!isOmnis(m)) return row(m, parkedLabel(m) ?? '', icon, again);
+        const label = setup ? 'Waits for the worktree' : parkedLabel(m);
+        if (!isOmnis(m)) return row(m, label ?? '', icon, again);
         return (
-          <PendingBubble key={m.uuid} m={m} label={parkedLabel(m) ?? 'Held for Resume'} icon={icon}>
+          <PendingBubble key={m.uuid} m={m} label={label ?? 'Held for Resume'} icon={icon}>
             <div className="mt-1 flex flex-wrap items-center justify-end gap-0.5">
               {again}
               <Button size="sm" variant="ghost" icon="trash" busy={busy === `discard:${m.uuid}`} disabled={off} onClick={() => void discard(m.uuid)}>

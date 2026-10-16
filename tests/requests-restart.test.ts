@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { FAKE_CLAUDE, fakeAlive, sleep, waitFor } from './support.ts';
@@ -295,6 +295,86 @@ describe('crew reports across a restart', () => {
     const d = await api.detail(parent);
     expect(d.pending).toMatchObject([{ uuid: report.uuid, kind: 'crew_report', delivery: 'recovered' }]);
     expect(d.events.filter((e) => e.kind === 'crew_report')).toHaveLength(0);
+    await next.stop();
+  });
+});
+
+describe('a worktree thread across a restart', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-C', cwd, ...args], { encoding: 'utf8' }).trim();
+  type Setup = { thread: { id: string; status: string; setup: string | null; setup_error: string | null; cwd: string; branch: string } };
+  const until = async <D>(fn: () => Promise<D | false>, label: string) => {
+    for (const end = Date.now() + 15_000; ; ) {
+      const d = await fn();
+      if (d) return d;
+      if (Date.now() > end) throw new Error(label);
+      await sleep(50);
+    }
+  };
+
+  it('keeps the first prompt and its files while setup failed, and Retry runs it once', T, async () => {
+    const data = join(tmp, 'wt-failed');
+    const repo = join(tmp, 'wt-failed-repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    const server = boot(data);
+    const api = client(await server.port());
+    await api.ok('POST', '/channels', { id: 'widgets', name: 'Widgets', repo_path: repo, use_worktree: 1 });
+    // No commit yet, so there is nothing to cut a worktree from.
+    const t = await api.ok('POST', '/threads', withFile({ channel: 'widgets', prompt: 'read the spec', title: 'Spec' }, 'spec.txt', 'the spec'));
+    await until(async () => ((await api.detail(t.id)) as unknown as Setup).thread.setup === 'failed', 'the setup to fail');
+    await server.kill();
+
+    const next = boot(data);
+    const api2 = client(await next.port());
+    const after = (await api2.detail(t.id)) as Detail & Setup;
+    expect(after.thread).toMatchObject({ status: 'failed', setup: 'failed', setup_error: expect.stringMatching(/git worktree add failed/) });
+    expect(after.pending).toMatchObject([{ text: 'read the spec', delivery: 'recovered', request_id: 'thread-start', attachments: [{ name: 'spec.txt' }] }]);
+    await sleep(300);
+    expect(next.spawns(t.id)).toEqual([]);
+
+    git(repo, 'commit', '-q', '--allow-empty', '-m', 'first');
+    await api2.ok('POST', `/threads/${t.id}/setup/retry`, {});
+    await api2.ok('POST', `/threads/${t.id}/setup/retry`, {});
+    await until(async () => (await api2.detail(t.id)).thread.status === 'done', 'the retried thread to run');
+    const sent = await api2.users(t.id);
+    expect(sent).toMatchObject([{ text: 'read the spec', source: 'manual' }]);
+    expect(sent[0].attachments).toHaveLength(1);
+    expect(next.spawns(t.id)).toHaveLength(1);
+    expect(realpathSync(next.spawns(t.id)[0].cwd)).toBe(realpathSync(after.thread.cwd));
+    expect(git(after.thread.cwd, 'branch', '--show-current')).toBe(after.thread.branch);
+    await next.stop();
+  });
+
+  it('fails a setup a killed server left running, and Retry makes or keeps its worktree', T, async () => {
+    const data = join(tmp, 'wt-killed');
+    const repo = join(tmp, 'wt-killed-repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'commit', '-q', '--allow-empty', '-m', 'first');
+    // A slow checkout, so the server is killed while it prepares.
+    const hook = join(repo, '.git', 'hooks', 'post-checkout');
+    writeFileSync(hook, '#!/bin/sh\nsleep 2\n');
+    chmodSync(hook, 0o755);
+    const server = boot(data);
+    const api = client(await server.port());
+    await api.ok('POST', '/channels', { id: 'slow', name: 'Slow', repo_path: repo, use_worktree: 1 });
+    const t = await api.ok('POST', '/threads', { channel: 'slow', prompt: 'take your time', title: 'Slow' });
+    expect(((await api.detail(t.id)) as unknown as Setup).thread.setup).toBe('preparing');
+    expect((await api.detail(t.id)).pending).toMatchObject([{ text: 'take your time', state: 'waiting', delivery: 'accepted' }]);
+    await server.kill();
+
+    const next = boot(data);
+    const api2 = client(await next.port());
+    const after = (await api2.detail(t.id)) as Detail & Setup;
+    expect(after.thread).toMatchObject({ status: 'failed', setup: 'failed', setup_error: "Omni stopped before this thread's worktree was ready." });
+    expect(after.pending).toMatchObject([{ text: 'take your time', delivery: 'recovered', request_id: 'thread-start' }]);
+    // Whatever the git the killed server started left (a checked out worktree, or nothing), Retry ends with one.
+    rmSync(hook);
+    await api2.ok('POST', `/threads/${t.id}/setup/retry`, {});
+    await until(async () => (await api2.detail(t.id)).thread.status === 'done', 'the retried thread to run');
+    expect(next.spawns(t.id)).toHaveLength(1);
+    expect(git(repo, 'worktree', 'list').split('\n')).toHaveLength(2);
     await next.stop();
   });
 });

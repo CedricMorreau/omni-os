@@ -108,3 +108,40 @@ describe('crew reports held for the parent', () => {
     expect(parkedHeading(items.slice(4))).toBe('2 messages were waiting when Omni restarted');
   });
 });
+
+describe('a worktree that could not be prepared', () => {
+  const failed = fixture<ThreadDetail & { blocked?: string }>('thread-setup-failed.json');
+
+  it('reads the setup state, the reason and the first prompt the server keeps for Retry', () => {
+    expect(failed.thread.setup).toBe('failed');
+    expect(failed.thread.setup_error).toMatch(/git worktree add failed/);
+    expect(failed.blocked).toMatch(/could not be prepared/);
+    const pending = failed.pending ?? [];
+    expect(pending.map((p) => [p.text, p.delivery, p.request_id])).toEqual([['TOOL:20 fix the widget', 'recovered', 'thread-start']]);
+    // Ben's own message: he can still edit or remove it while it waits.
+    expect(isEditable(pending[0])).toBe(true);
+  });
+
+  it('reads the answer to Retry: preparing, with the prompt still waiting', () => {
+    const retried = fixture<{ thread: ThreadDetail['thread']; pending: PendingMsg[] }>('setup-retried.json');
+    expect(retried.thread.setup).toBe('preparing');
+    expect(retried.thread.setup_error).toBeNull();
+    expect(retried.pending.map((p) => p.request_id)).toEqual(['thread-start']);
+  });
+
+  it('shows Setup failed with the reason and Retry, and Preparing without it', async () => {
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { createElement } = await import('react');
+    const { SetupCard } = await import('../web/src/components/thread/SetupCard.tsx');
+    const html = (thread: ThreadDetail['thread']) => renderToStaticMarkup(createElement(SetupCard, { thread, onRetried: () => {} }));
+    const shown = html(failed.thread);
+    expect(shown).toContain('Setup failed');
+    expect(shown).toContain('git worktree add failed');
+    expect(shown).toContain('Retry');
+    expect(shown).toContain(failed.thread.branch!);
+    const preparing = html({ ...failed.thread, setup: 'preparing', setup_error: null });
+    expect(preparing).toContain('Preparing worktree');
+    expect(preparing).not.toContain('Retry');
+    expect(html({ ...failed.thread, setup: null, setup_error: null })).toBe('');
+  });
+});
