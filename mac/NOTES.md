@@ -313,8 +313,10 @@ OMNI_LIVE_PORT=4791 swift test --package-path mac/OmniKit --filter LiveServerTes
 | `SettingsView.swift` | The Settings tabs (`model.settingsTab`), the Connection pane, `PathField`, the folder and file pickers |
 | `SecretsSettingsView.swift` | The Secrets tab: `SecretsSettings` (a `SecretsModel` per client and visit), `SecretsForm`, `SecretRowView` |
 | `AppearanceSettingsView.swift` | The Appearance tab, `Appearance.nsAppearance` |
+| `NotificationSettingsView.swift` | The Notifications tab: this Mac's switch, the macOS permission, a switch per channel |
 | `AutomationsView.swift` | The Automations page: `AutomationsView` (an `AutomationsModel` per client and visit), `AutomationSection`, `RunStrip`, `RunRow`, `FlowRow` |
 | `SystemEvents.swift` | Wake (`NSWorkspace.didWakeNotification`) to `didWake()`, `NWPathMonitor` changes (not the first update) to `networkChanged()`. Both also `POST /api/sync/now`, ignoring a 409 (sync off) or 502 |
+| `SystemNotifications.swift` | UserNotifications for `AttentionCenter`: posts, withdraws, opens the thread on a click |
 | `QARunner.swift` | Debug only. The QA harness, below |
 
 `AppModel` (OmniKit) is the app's one connection to Omni: `ServerSettings`, the `ServerSupervisor`, an `OmniClient` and `WorkspaceStore` for the port in the settings, and `route`. `launch()` opens the feed, checks the server, and follows the settings with `Observations`: a port change swaps the client and store, any change checks the server again. The feed dropping or opening checks the server again too, so the window follows a server killed or started somewhere else. A failed start stays on screen (`startFailure`) until the server runs, Start is pressed again or the settings change.
@@ -512,6 +514,13 @@ Wired (both composers):
 - `GET /api/needs-you` lists each thread's newest unread result (done, failed, stopped) and its blockers (failed Setup, recovered and uncertain requests), across every thread not archived. `NeedsYou` in OmniKit decodes it and holds the Web UI's rules (`web/src/needs-you.ts`): the reason a row shows, a channel's part, the result an open thread shows, and the inbox once one is read.
 - `WorkspaceStore.needsYou` loads with everything, again with channels and status after thread events, and at once on the feed's `needs_you` event (a read on another client, or a result or read the other Mac's sync brought, #204). A sync sends those in bursts, so one load runs at a time and one more follows if events came meanwhile, as `coalesced` in `web/src/needs-you.ts` does. `readResult(_:)` drops the result at once, posts it, and loads again: a newer result that came in meanwhile stays unread.
 - `NeedsYouViews.swift`: the section under the composer on Home (all clear when empty) and in a channel's Threads tab (hidden when empty). `readsShownResult` on the thread view reads the result Needs you listed for the open thread, only while it is not running and the app is active.
+
+## Notifications (#205)
+
+- Mac notifications come from the same state as Needs you: `AttentionTracker` (OmniKit, `Attention.swift`) reads each `WorkspaceStore.needsYou` list and alerts a done or failed result the first time a list has it, under the result's uid. The first list after launch or a port change only records what is there, a result older than 10 minutes when it first shows never alerts (a sync after a day away, a long sleep), and a reconnect or sync that lists a result again is no news. The thread on screen in the front window is recorded, not alerted. An alert whose result leaves the list (read here, on the other Mac or in the Web UI) is withdrawn from Notification Center.
+- `AttentionCenter` holds `NotificationSettings` (UserDefaults, never synced: on or off, and muted channel ids; off until Ben turns it on) and the macOS permission. Turning on asks macOS; a denial keeps the switch on and Settings, Notifications says so with Open System Settings. `-notifications YES` turns them on for one run (QA) and saves nothing.
+- The app target's `SystemNotifications.swift` is the UserNotifications side: it posts (thread grouped by channel, a sound for failures), withdraws, shows alerts in front as list only (the window's banner already says it), and on a click shows the thread with `Route(notification:)`. The thread screen then reads the result through `readsShownResult`, the normal read flow.
+- QA step `{"settings": "notifications"}` opens the tab.
 
 ## Channel settings (#71)
 

@@ -105,6 +105,8 @@ public final class AppModel {
   public private(set) var startFailure: StartFailure?
   /// Banners for threads that finish, fail or stop. The window shows them.
   public let banners = BannerCenter()
+  /// Mac notifications for new results in Needs you, with this Mac's own settings.
+  public let attention: AttentionCenter
   /// Sidebar folders: their edits, the name being typed and the delete being confirmed. Follows the connection.
   public let folders = FolderModel()
 
@@ -118,10 +120,11 @@ public final class AppModel {
 
   /// - Parameter connect: makes the client and store for a port. `liveConnection` by default.
   public init(
-    settings: ServerSettings, supervisor: ServerSupervisor? = nil,
+    settings: ServerSettings, supervisor: ServerSupervisor? = nil, attention: AttentionCenter? = nil,
     connect: @escaping @MainActor (_ port: Int) -> Connection = AppModel.liveConnection
   ) {
     self.settings = settings
+    self.attention = attention ?? AttentionCenter()
     self.supervisor = supervisor ?? ServerSupervisor(settings: settings)
     self.connect = connect
     config = settings.config
@@ -171,6 +174,15 @@ public final class AppModel {
       }
       for await state in states {
         self?.connectionChanged(state)
+      }
+    })
+    watchers.append(Task { [weak self] in
+      let lists = Observations.untilFinished { [weak self] () -> Observations<NeedsYou?, Never>.Iteration in
+        guard let self else { return .finish }
+        return .next(self.store.needsYou)
+      }
+      for await list in lists {
+        if let list { self?.needsYouChanged(list) }
       }
     })
   }
@@ -296,6 +308,15 @@ public final class AppModel {
     threads.reconnectNow(ifQuietFor: quiet)
   }
 
+  /// Ben clicked a notification: the main window goes to its thread, which selects its channel too, and the
+  /// thread screen reads the result as it does any result it shows. False for one that is not Omni's.
+  @discardableResult
+  public func openNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
+    guard let route = Route(notification: userInfo) else { return false }
+    show(route)
+    return true
+  }
+
   /// Calls `handler` with each feed event until `unsubscribeFeed`.
   @discardableResult
   public func subscribeFeed(_ handler: @escaping @MainActor (SSEEvent<FeedEvent>) -> Void) -> UUID {
@@ -346,6 +367,7 @@ public final class AppModel {
       feed.stop()
       store.stop()
       threads.stopAll()
+      attention.reset()
       let c = connect(new.port)
       client = c.client
       store = c.store
@@ -364,6 +386,13 @@ public final class AppModel {
     var viewing: String?
     if case .thread(let id, _) = route { viewing = id }
     banners.handle(event, viewing: viewing)
+  }
+
+  private func needsYouChanged(_ list: NeedsYou) {
+    var viewing: String?
+    if case .thread(let id, _) = route { viewing = id }
+    let store = store
+    attention.observe(list, viewing: viewing) { store.channel($0)?.name }
   }
 
   /// Threads in flight when the feed opens, so their end gets a banner too.
