@@ -57,6 +57,8 @@ func sseData(_ text: String) -> [String] {
     "thread-report-held.json": { _ = try decodeFixture(ThreadDetail.self, "thread-report-held.json") },
     "thread-setup-failed.json": { _ = try decodeFixture(ThreadDetail.self, "thread-setup-failed.json") },
     "setup-retried.json": { _ = try decodeFixture(RecoveryAnswer.self, "setup-retried.json") },
+    "needs-you.json": { _ = try decodeFixture(NeedsYou.self, "needs-you.json") },
+    "needs-you-read.json": { _ = try decodeFixture(NeedsYouRead.self, "needs-you-read.json") },
     // Hand-made: tests/sync-setup.test.ts checks the server still sends its keys and types.
     "sync-status.json": { _ = try decodeFixture(SyncStatus.self, "sync-status.json") },
     // Request bodies the app sends. SecretsTests compares them with what the client encodes.
@@ -67,6 +69,8 @@ func sseData(_ text: String) -> [String] {
     "message-queued-request.json": { _ = try decodeFixture([String: String].self, "message-queued-request.json") },
     // PendingEditsTests compares it with what the client encodes.
     "request-edit-request.json": { _ = try decodeFixture(JSONValue.self, "request-edit-request.json") },
+    // NeedsYouTests compares it with what the client encodes.
+    "needs-you-read-request.json": { _ = try decodeFixture([String: String].self, "needs-you-read-request.json") },
   ]
 
   static func threadStream() throws -> [ThreadStreamMessage] {

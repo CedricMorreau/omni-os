@@ -152,6 +152,27 @@ CREATE TABLE IF NOT EXISTS message_requests (
 );
 CREATE INDEX IF NOT EXISTS message_requests_open ON message_requests(thread_id, seq) WHERE state NOT IN ('delivered','dropped','discarded','cancelled');
 
+-- Needs you (db/repos/needs-you.ts). A turn that ended done, failed or stopped, written by the trigger below whatever
+-- wrote the status. Its uid is the result's identity; seq orders it on this Mac. Local, not synced yet.
+CREATE TABLE IF NOT EXISTS completions (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL UNIQUE,
+  thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  -- The thread's newest event when the turn ended, by its synced uid: where the result sits in the transcript.
+  event_uid TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS completions_thread ON completions(thread_id, seq);
+-- The newest result Ben has seen per thread: read state, kept apart from the thread row so reading never moves
+-- updated_at, status or its folder. Only ever moves forward. Local, not synced yet.
+CREATE TABLE IF NOT EXISTS result_reads (
+  thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  uid TEXT NOT NULL,
+  read_at TEXT NOT NULL
+);
+
 -- A thread the other Mac filed in a folder that has not arrived here yet. The folder's arrival puts it there.
 CREATE TABLE IF NOT EXISTS sync_folder_wait (
   thread_id TEXT PRIMARY KEY,
@@ -212,4 +233,13 @@ export function migrate() {
     db.exec(`UPDATE ${table} SET uid = ${UUID_SQL} WHERE uid IS NULL`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${table}_uid ON ${table}(uid)`);
   }
+  // Every way a turn ends writes the thread's status (the runners, Setup, boot, sync): a turn leaving running or
+  // queued for done, failed or stopped is a result, whichever wrote it.
+  db.exec(`CREATE TRIGGER IF NOT EXISTS threads_completion AFTER UPDATE OF status ON threads
+    WHEN NEW.status IN ('done','failed','stopped') AND OLD.status IN ('running','queued')
+    BEGIN
+      INSERT INTO completions (uid, thread_id, status, event_uid, created_at)
+      VALUES (${UUID_SQL}, NEW.id, NEW.status, (SELECT uid FROM events WHERE thread_id = NEW.id ORDER BY id DESC LIMIT 1),
+        strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END`);
 }

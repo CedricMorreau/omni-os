@@ -12,6 +12,7 @@ import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { Avatar, Button, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, StatusPill, Tabs } from '../components/ui.tsx';
 import { href } from '../router.ts';
+import { shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
@@ -19,6 +20,17 @@ import { readPref, useApp, useIsMobile, writePref } from '../store.tsx';
 import { useThreadInterruptKey } from './useThreadInterruptKey.ts';
 import { useThreadSession } from './useThreadSession.ts';
 import { useTranscriptScroll } from './useTranscriptScroll.ts';
+
+/** True while the tab is on screen. */
+function usePageVisible() {
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
+  useEffect(() => {
+    const on = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', on);
+    return () => document.removeEventListener('visibilitychange', on);
+  }, []);
+  return visible;
+}
 
 // xterm.js is large; load it the first time the tab opens.
 const TerminalView = lazy(() => import('../components/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
@@ -39,7 +51,7 @@ function ModStatusLines({ lines }: { lines: ModStatus[] }) {
 }
 
 export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifact?: number }) {
-  const { setOpenThread, mods, reloadChannels } = useApp();
+  const { setOpenThread, mods, reloadChannels, needsYou, readResult } = useApp();
   const modLines = useMemo(() => mods.filter((m) => m.thread_id === id), [mods, id]);
   const isMobile = useIsMobile();
   // GET /api/harnesses, the same list the reply pills load. Until it arrives, canSteer uses the Cursor fallback.
@@ -107,6 +119,14 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
     if (thread) setOpenThread({ id: thread.id, channel_id: thread.channel_id, title: thread.title, status: thread.status, created_at: thread.created_at });
   }, [thread?.id, thread?.channel_id, thread?.title, thread?.status, thread?.created_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => setOpenThread(null), [setOpenThread]);
+
+  // On screen, the thread's newest result is read: exactly the one Needs you listed, so a turn that ends after it
+  // stays unread until the inbox lists it and this shows it too. A hidden tab reads nothing.
+  const visible = usePageVisible();
+  const shown = shownResult(needsYou, id, thread?.status);
+  useEffect(() => {
+    if (shown && visible) readResult(shown);
+  }, [shown, visible, readResult]);
 
   // The mobile sheet only exists on mobile; a desktop ?artifact= link sets mobilePanel too.
   const sheetOpen = isMobile && mobilePanel;

@@ -507,6 +507,12 @@ Wired (both composers):
 - Channel Settings and PRs tabs are placeholders. Go menu: Back ⌘[, Forward ⌘], Go to ⌘K.
 - QA step `{"palette": "query"}` opens the palette (`false` closes). Close it before opening with a new query.
 
+## Needs you (#203)
+
+- `GET /api/needs-you` lists each thread's newest unread result (done, failed, stopped) and its blockers (failed Setup, recovered and uncertain requests), across every thread not archived. `NeedsYou` in OmniKit decodes it and holds the Web UI's rules (`web/src/needs-you.ts`): the reason a row shows, a channel's part, the result an open thread shows, and the inbox once one is read.
+- `WorkspaceStore.needsYou` loads with everything, again with channels and status after thread events, and at once on the feed's `needs_you` event (a read on another client). `readResult(_:)` drops the result at once, posts it, and loads again: a newer result that came in meanwhile stays unread.
+- `NeedsYouViews.swift`: the section under the composer on Home (all clear when empty) and in a channel's Threads tab (hidden when empty). `readsShownResult` on the thread view reads the result Needs you listed for the open thread, only while it is not running and the app is active.
+
 ## Channel settings (#71)
 
 - `ChannelForm` (OmniKit) holds the form, `slugify`, the validation messages and the PATCH and POST bodies. Empty text goes as `null`, so clearing a field clears it; the store domain is cut to the host; a system channel sends no `kind`. `OmniClient.createChannel`, `updateChannel`, `setChannelArchived`.

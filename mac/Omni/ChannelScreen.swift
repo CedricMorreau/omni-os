@@ -213,6 +213,7 @@ private struct ChannelThreads: View {
     VStack(alignment: .leading, spacing: z(32)) {
       NewThreadComposerView(model: model, channelID: channel.id)
         .id(channel.id)
+      NeedsYouSection(model: model, inbox: model.store.needsYou?.inChannel(channel.id), quiet: true)
       if let error, loaded == nil {
         ErrorNote(text: error) { Task { await load() } }
       } else if loaded == nil {

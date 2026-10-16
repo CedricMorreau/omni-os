@@ -69,6 +69,10 @@ const NAMES = [
   // A worktree that could not be made: the reason and the first prompt kept, then Retry.
   'thread-setup-failed.json',
   'setup-retried.json',
+  // Needs you, with every kind of result and blocker above in it, then a read.
+  'needs-you.json',
+  'needs-you-read-request.json',
+  'needs-you-read.json',
 ] as const;
 type Name = (typeof NAMES)[number];
 
@@ -383,6 +387,17 @@ async function scenario() {
   }, 'the worktree to fail');
   expect(failed.pending).toMatchObject([{ kind: 'user', delivery: 'recovered', request_id: 'thread-start' }]);
   keep('thread-setup-failed.json', failed);
+
+  // Needs you now holds every kind: done, failed and stopped results, failed Setup and parked requests.
+  type Item = { thread: Thread; result: { uid: string; status: string } | null; blockers: { kind: string }[] };
+  const inbox = keep('needs-you.json', await get('/needs-you')) as { items: Item[] };
+  expect(new Set(inbox.items.flatMap((i) => (i.result ? [i.result.status] : [])))).toEqual(new Set(['done', 'failed', 'stopped']));
+  expect(new Set(inbox.items.flatMap((i) => i.blockers.map((b) => b.kind)))).toEqual(new Set(['setup', 'recovered']));
+  // Ben reads the stopped parent's result: its held crew report still needs him. The uid is this run's.
+  const stopped = inbox.items.find((i) => i.thread.id === boss.id)!;
+  const readBody = request('needs-you-read-request.json', { uid: stopped.result!.uid }) as { uid: string };
+  const after = keep('needs-you-read.json', await call('POST', '/needs-you/read', { ...readBody, uid: stopped.result!.uid })) as { item: Item };
+  expect(after.item).toMatchObject({ result: null, blockers: [{ kind: 'recovered' }] });
   git('commit', '-q', '--allow-empty', '-m', 'first');
   keep('setup-retried.json', await call('POST', `/threads/${wt.id}/setup/retry`, {}));
   await eventually(async () => (await detail(wt.id)).thread.status === 'done', 'the retried thread to run');

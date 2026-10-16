@@ -378,3 +378,29 @@ describe('a worktree thread across a restart', () => {
     await next.stop();
   });
 });
+
+describe('Needs you across a restart', () => {
+  it('keeps what Ben read, lists the turn the crash ended, and the messages it parked', T, async () => {
+    const { data, server, api, id: busyId } = await busy('needs-you');
+    const t = await api.ok('POST', '/threads', { channel: 'inbox', prompt: 'quick one', title: 'Quick' });
+    for (const end = Date.now() + 15_000; (await api.detail(t.id)).thread.status !== 'done'; ) {
+      if (Date.now() > end) throw new Error('the quick thread never finished');
+      await sleep(50);
+    }
+    const item = (await api.ok('GET', '/needs-you')).items.find((i: { thread: { id: string } }) => i.thread.id === t.id);
+    await api.ok('POST', '/needs-you/read', { uid: item.result.uid });
+    const read = (await api.detail(t.id)).thread as unknown as { updated_at: string; status: string };
+    await api.ok('POST', `/threads/${busyId}/messages`, { prompt: 'after the crash', mode: 'queue', request_id: 'ny-1' });
+
+    await server.kill();
+    const next = boot(data);
+    const api2 = client(await next.port());
+    const inbox = (await api2.ok('GET', '/needs-you')) as { items: { thread: { id: string }; result: { status: string } | null; blockers: { kind: string }[] }[] };
+    // Read before the restart, still read, and the thread row untouched.
+    expect(inbox.items.some((i) => i.thread.id === t.id)).toBe(false);
+    expect((await api2.detail(t.id)).thread).toMatchObject({ updated_at: read.updated_at, status: read.status });
+    // The turn the crash ended is a failure, with the message it parked as a blocker.
+    expect(inbox.items.find((i) => i.thread.id === busyId)).toMatchObject({ result: { status: 'failed' }, blockers: [{ kind: 'recovered', count: 1 }] });
+    await next.stop();
+  });
+});
