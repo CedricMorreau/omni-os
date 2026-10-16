@@ -743,9 +743,11 @@ struct StaleEditsView: View {
   }
 }
 
-/// Messages Omni accepted before it restarted, as ParkedMessages in Transcript.tsx. A recovered one never reached
-/// the agent: Resume sends them all in the saved order. An uncertain one may have, so it is only sent again when
-/// Ben says so. Each can be edited, moved or removed first; none of that resumes anything.
+/// Messages Omni accepted before it restarted, and crew reports kept for a thread Ben stopped, as ParkedMessages in
+/// Transcript.tsx. A recovered one never reached the agent: Resume sends them all in the saved order. An uncertain
+/// one may have, so it is only sent again when Ben says so. Ben's own can be edited, moved or removed first; none of
+/// that resumes anything. A crew report or a team's go is Omni's: Discard (kept in the transcript, marked not sent)
+/// instead.
 struct ParkedMessagesView: View {
   let store: ThreadStore
   let client: OmniClient
@@ -759,7 +761,7 @@ struct ParkedMessagesView: View {
     VStack(alignment: .trailing, spacing: z(12)) {
       Rectangle().fill(Tok.line).frame(height: 1)
       HStack(spacing: z(8)) {
-        Text("\(Format.plural(items.count, "message")) \(items.count == 1 ? "was" : "were") waiting when Omni restarted")
+        Text(ParkedMessages.heading(items))
           .font(.omni(size: 12))
           .foregroundStyle(Tok.fg3)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -773,14 +775,23 @@ struct ParkedMessagesView: View {
         }
       }
       ForEach(items) { m in
-        PendingRow(store: store, client: client, m: m, label: m.label(lead: false), icon: m.delivery == .uncertain ? "alert" : "clock") {
-          if m.delivery == .uncertain {
-            Button { resume("again:\(m.uuid)", ids: [m.uuid]) } label: {
-              PendingLabel(text: "Send again", icon: "send", busy: busy == "again:\(m.uuid)")
+        let icon = m.delivery == .uncertain ? "alert" : "clock"
+        if m.isOmnis {
+          VStack(alignment: .trailing, spacing: z(6)) {
+            PendingBubble(m: m, label: m.label(lead: false), icon: icon)
+            HStack(spacing: z(4)) {
+              sendAgain(m, off: off)
+              Button { discard(m) } label: {
+                PendingLabel(text: "Discard", icon: "trash", busy: busy == "discard:\(m.uuid)")
+              }
+              .buttonStyle(.pill(.ghost, height: 28))
+              .help("Don't send it. It stays in the transcript, marked not sent.")
+              .disabled(off)
             }
-            .buttonStyle(.pill(.secondary, height: 28))
-            .help("It may already have reached the agent. Send it once more.")
-            .disabled(off)
+          }
+        } else {
+          PendingRow(store: store, client: client, m: m, label: m.label(lead: false), icon: icon) {
+            sendAgain(m, off: off)
           }
         }
       }
@@ -793,7 +804,26 @@ struct ParkedMessagesView: View {
     .accessibilityLabel("Messages waiting since a restart")
   }
 
+  @ViewBuilder private func sendAgain(_ m: PendingMsg, off: Bool) -> some View {
+    if m.delivery == .uncertain {
+      Button { resume("again:\(m.uuid)", ids: [m.uuid]) } label: {
+        PendingLabel(text: "Send again", icon: "send", busy: busy == "again:\(m.uuid)")
+      }
+      .buttonStyle(.pill(.secondary, height: 28))
+      .help("It may already have reached the agent. Send it once more.")
+      .disabled(off)
+    }
+  }
+
   private func resume(_ key: String, ids: [String]?) {
+    run(key) { [client] id in try await client.resumeRequests(in: id, ids: ids) }
+  }
+
+  private func discard(_ m: PendingMsg) {
+    run("discard:\(m.uuid)") { [client] id in try await client.discardRequests(in: id, ids: [m.uuid]) }
+  }
+
+  private func run(_ key: String, _ call: @escaping (String) async throws -> RecoveryAnswer) {
     guard busy == nil else { return }
     busy = key
     error = nil
@@ -801,7 +831,7 @@ struct ParkedMessagesView: View {
     Task {
       defer { busy = nil }
       do {
-        store.apply(recovery: try await client.resumeRequests(in: id, ids: ids))
+        store.apply(recovery: try await call(id))
       } catch let e as OmniAPIError {
         error = e.message
       } catch {

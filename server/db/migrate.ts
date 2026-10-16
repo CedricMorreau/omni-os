@@ -139,6 +139,9 @@ CREATE TABLE IF NOT EXISTS message_requests (
   mode TEXT NOT NULL,
   source TEXT NOT NULL,
   attachments TEXT,
+  -- user, or crew_report. A message Omni wrote itself (a crew report, a team's go) keeps its transcript payload.
+  kind TEXT NOT NULL DEFAULT 'user',
+  payload TEXT,
   fingerprint TEXT NOT NULL,
   state TEXT NOT NULL,
   machine_id TEXT,
@@ -198,6 +201,9 @@ export function migrate() {
   // Queue order for durable requests (db/repos/requests.ts); a row saved before reordering existed keeps its arrival order.
   ensureColumn('message_requests', 'pos', 'INTEGER');
   db.exec('UPDATE message_requests SET pos = seq WHERE pos IS NULL');
+  // Crew reports and a team's go to its lead are durable requests too, with the transcript payload Omni wrote.
+  ensureColumn('message_requests', 'kind', `TEXT NOT NULL DEFAULT 'user'`);
+  ensureColumn('message_requests', 'payload', 'TEXT');
   for (const table of ['events', 'artifacts', 'automation_runs']) {
     ensureColumn(table, 'uid', 'TEXT');
     db.exec(`UPDATE ${table} SET uid = ${UUID_SQL} WHERE uid IS NULL`);

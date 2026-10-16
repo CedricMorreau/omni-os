@@ -30,7 +30,7 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-function boot(data: string) {
+function boot(data: string, extra: Record<string, string> = {}) {
   const fakeLog = `${data}.fake-claude.jsonl`;
   fakeLogs.add(fakeLog);
   const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', 'server/index.ts'], {
@@ -53,6 +53,7 @@ function boot(data: string) {
       OMNI_WEB_DIST: join(tmp, 'no-web'),
       FAKE_CLAUDE_LOG: fakeLog,
       FAKE_CLAUDE_LATENCY_MS: '10',
+      ...extra,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -84,7 +85,9 @@ function boot(data: string) {
   };
 }
 
-type Pending = { uuid: string; text: string; state: string; delivery?: string; request_id?: string; mode: string; attachments?: { name: string }[] };
+type Pending = {
+  uuid: string; kind: string; text: string; state: string; delivery?: string; request_id?: string; mode: string; thread_id?: string; attachments?: { name: string }[];
+};
 type Detail = { thread: { id: string; status: string }; events: { id: number; kind: string; payload: string }[]; pending: Pending[] };
 
 function client(port: number) {
@@ -211,6 +214,87 @@ describe('requests across a clean restart', () => {
     const d = await api2.detail(id);
     expect(d.pending).toMatchObject([{ uuid: q.request.id, delivery: 'recovered', state: 'held' }]);
     expect((await api2.users(id)).some((u) => u.dropped)).toBe(false);
+    await next.stop();
+  });
+});
+
+// Crew reports (server/runner/queue.ts) are saved for the parent before it is woken. Two slots, both taken: the
+// child finishes, and its report waits for one, the parent not woken yet, when the server goes down.
+const TWO_SLOTS = { OMNI_MAX_CONCURRENT: '2' };
+
+async function until<T>(label: string, fn: () => Promise<T | null | undefined | false>, timeout = 15_000): Promise<T> {
+  for (const end = Date.now() + timeout; ; ) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error(`timed out waiting for ${label}`);
+    await sleep(50);
+  }
+}
+
+async function reportWaiting(name: string) {
+  const data = join(tmp, name);
+  const server = boot(data, TWO_SLOTS);
+  const api = client(await server.port());
+  const count = async (id: string, kind: string) => (await api.detail(id)).events.filter((e) => e.kind === kind).length;
+  const parent = await api.ok('POST', '/threads', { channel: 'inbox', prompt: 'be the conductor', title: 'Conductor' });
+  await until('the parent to finish', async () => (await api.detail(parent.id)).thread.status === 'done');
+  const blocker = await api.ok('POST', '/threads', { channel: 'inbox', prompt: 'TOOL:30000 hold a slot', title: 'Blocker' });
+  await until('the blocker to run', async () => (await count(blocker.id, 'tool_use')) === 1);
+  const child = await api.ok('POST', '/threads', { channel: 'inbox', prompt: 'TOOL:1500 child task', title: 'Child', parent_id: parent.id });
+  await until('the child to run', async () => (await count(child.id, 'tool_use')) === 1);
+  // Takes the child's slot first when it frees up, so the parent waits.
+  await api.ok('POST', '/threads', { channel: 'inbox', prompt: 'TOOL:30000 take the next slot', title: 'Next' });
+  const report = await until('the report to wait for a slot', async () =>
+    (await api.detail(parent.id)).pending.find((p) => p.kind === 'crew_report' && p.delivery === 'waiting'),
+  );
+  expect(report).toMatchObject({ thread_id: child.id, state: 'waiting' });
+  return { data, server, api, parent: parent.id as string, child: child.id as string, report };
+}
+
+describe('crew reports across a restart', () => {
+  it('keeps a report the parent never got for Resume, and Resume delivers it once', T, async () => {
+    const { data, server, parent, child, report } = await reportWaiting('report-forced');
+    const spawned = server.spawns(parent).length;
+    await server.kill();
+    const next = boot(data, TWO_SLOTS);
+    const api = client(await next.port());
+    expect(next.output()).toMatch(/kept 1 undelivered message\(s\) for Resume/);
+
+    // Held for Resume through the same parked list as Ben's messages, and not in the transcript yet.
+    const after = await api.detail(parent);
+    expect(after.pending).toMatchObject([{ uuid: report.uuid, kind: 'crew_report', state: 'held', delivery: 'recovered', thread_id: child, mode: 'steer' }]);
+    expect(after.events.filter((e) => e.kind === 'crew_report')).toHaveLength(0);
+    await sleep(500);
+    expect(next.spawns(parent)).toHaveLength(spawned);
+    const results = after.events.filter((e) => e.kind === 'result').length;
+
+    // Two Resumes at once, as a retry would: one report in the transcript, one turn.
+    await Promise.all([api.call('POST', `/threads/${parent}/requests/resume`, {}), api.call('POST', `/threads/${parent}/requests/resume`, {})]);
+    const done = await until('the parent to run the report', async () => {
+      const d = await api.detail(parent);
+      return d.thread.status === 'done' && d.events.filter((e) => e.kind === 'result').length > results && d;
+    });
+    const reports = done.events.filter((e) => e.kind === 'crew_report').map((e) => JSON.parse(e.payload));
+    expect(reports).toMatchObject([{ thread_id: child, status: 'done', text: 'ack: TOOL:1500 child task' }]);
+    await sleep(300);
+    const settled = await api.detail(parent);
+    expect(settled.events.filter((e) => e.kind === 'result')).toHaveLength(results + 1);
+    expect(settled.pending).toEqual([]);
+    expect(next.spawns(parent)).toHaveLength(spawned + 1);
+    expect((await api.call('POST', `/threads/${parent}/requests/resume`, { ids: [report.uuid] })).status).toBe(409);
+    const record = (await api.ok('GET', `/threads/${parent}/requests`)) as { kind: string; state: string }[];
+    expect(record.filter((r) => r.kind === 'crew_report').map((r) => r.state)).toEqual(['delivered']);
+    await next.stop();
+  });
+
+  it('parks a report waiting for its parent at a clean shutdown instead of dropping it', T, async () => {
+    const { data, server, parent, report } = await reportWaiting('report-clean');
+    await server.stop();
+    const next = boot(data, TWO_SLOTS);
+    const api = client(await next.port());
+    const d = await api.detail(parent);
+    expect(d.pending).toMatchObject([{ uuid: report.uuid, kind: 'crew_report', delivery: 'recovered' }]);
+    expect(d.events.filter((e) => e.kind === 'crew_report')).toHaveLength(0);
     await next.stop();
   });
 });

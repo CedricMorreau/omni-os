@@ -12,6 +12,9 @@ const refusal = (message: string, status: number) => Object.assign(new Error(mes
 /** Said when a message left the queue before Ben's change reached the server. */
 export const ALREADY_SENT = 'This message has already been sent, so it can no longer be changed.';
 
+/** Said when Ben tries to edit a crew report or a team's go. */
+export const OWN = 'Omni wrote this message, so it can be resumed or discarded but not edited.';
+
 /** The runner's lists that still hold unsent messages: held for after this turn, then waiting for a slot. */
 function queues(threadId: string): Msg[][] {
   const live = lives.get(threadId);
@@ -53,12 +56,13 @@ function thread(threadId: string): Thread {
 export function editRequest(threadId: string, id: string, edit: { prompt: string; keep?: string[]; added?: Attachment[] }): MessageRequest {
   const t = thread(threadId);
   const { row, at } = editable(threadId, id);
+  if (row.payload) throw refusal(OWN, 409);
   const kept = (row.attachments ?? []).filter((a) => !edit.keep || edit.keep.includes(a.name));
   const attachments = [...kept, ...(edit.added ?? [])];
   if (!messageRequests.edit(id, { prompt: edit.prompt, attachments })) throw refusal(ALREADY_SENT, 409);
   if (at) {
     const was = at.list[at.i];
-    const next = messageFor(t, edit.prompt, { uuid: was.uuid, requestId: was.requestId, from: row.source, mode: was.mode, attachments });
+    const next = messageFor(t, edit.prompt, { uuid: was.uuid, requestId: was.requestId, from: row.source as 'ben' | 'conductor', mode: was.mode, attachments });
     at.list[at.i] = { ...next, ...(was.midTurn && { midTurn: true }) };
   }
   emitThread(threadId);
@@ -91,12 +95,15 @@ export function cancelRequests(threadId: string, ids: string[]): Thread {
  * Put a thread's unsent requests in a new order. `ids` names every one of them, as the client last saw the queue;
  * a queue that changed since (one sent, one added) is refused with a 409, so a stale order never applies. Held,
  * waiting and parked messages each keep their own group; within each the new order applies, and the saved queue
- * positions follow it, so a restart, and Resume after it, keep the order. Reordering never resumes anything.
+ * positions follow it, so a restart, and Resume after it, keep the order. Reordering never resumes anything. Crew
+ * reports and a team's go are not Ben's to move: they are left out of `ids` and keep their places.
  */
 export function reorderRequests(threadId: string, ids: string[]): Thread {
   thread(threadId);
-  const queued = queues(threadId).flatMap((l) => l.filter((m) => m.requestId).map((m) => m.uuid));
-  const current = [...queued, ...messageRequests.parked(threadId).map((r) => r.id)];
+  // Ben's own messages only: a crew report or a team's go keeps its place.
+  const mine = (m: Msg) => !!m.requestId && !m.byOmni;
+  const queued = queues(threadId).flatMap((l) => l.filter(mine).map((m) => m.uuid));
+  const current = [...queued, ...messageRequests.parked(threadId).filter((r) => !r.payload).map((r) => r.id)];
   const same = ids.length === current.length && new Set(ids).size === ids.length && current.every((id) => ids.includes(id));
   if (!same) throw refusal('The queue changed while you were reordering it. Try again.', 409);
   const rank = new Map(ids.map((id, i) => [id, i]));
@@ -104,7 +111,7 @@ export function reorderRequests(threadId: string, ids: string[]): Thread {
   const positions = current.map((id) => messageRequests.get(id)!.pos).sort((a, b) => a - b);
   messageRequests.reposition(ids.map((id, i) => ({ id, pos: positions[i] })));
   for (const list of queues(threadId)) {
-    const slots = list.flatMap((m, i) => (m.requestId ? [i] : []));
+    const slots = list.flatMap((m, i) => (mine(m) ? [i] : []));
     const sorted = slots.map((i) => list[i]).sort((a, b) => rank.get(a.uuid)! - rank.get(b.uuid)!);
     slots.forEach((i, k) => (list[i] = sorted[k]));
   }

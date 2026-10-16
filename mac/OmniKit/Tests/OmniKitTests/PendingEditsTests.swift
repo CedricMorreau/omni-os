@@ -25,6 +25,19 @@ private func msg(_ uuid: String, _ state: String, delivery: String? = nil, kind:
     #expect(resumed.pending.map(\.isEditable) == [false, true])
   }
 
+  @Test func omnisOwnMessagesAreNotEditableOrMovable() throws {
+    // A crew report and a team's go, both saved and parked: Resume or Discard, never Edit or a move.
+    let team = #"{"uuid":"t","kind":"user","text":"All 2 reports are in.","source":"team","mode":"steer","state":"held","delivery":"recovered","request_id":"team-settle:x"}"#
+    let report = #"{"uuid":"r","kind":"crew_report","text":"done","mode":"steer","state":"held","delivery":"recovered","request_id":"crew-report:c:9","thread_id":"c"}"#
+    let items = try pending("[\(team),\(report),\(msg("p1", "held", delivery: "recovered")),\(msg("p2", "held", delivery: "recovered"))]")
+    #expect(items.map(\.isOmnis) == [true, true, false, false])
+    #expect(items.map(\.isEditable) == [false, false, true, true])
+    #expect(PendingOrder.moved(items, uuid: "p2", step: -1) == ["p2", "p1"])
+    #expect(PendingOrder.moved(items, uuid: "t", step: 1) == nil)
+    #expect(ParkedMessages.heading(items) == "4 messages and crew reports are waiting for Resume")
+    #expect(PendingMsg.reportNotes(items) == ["c": "report held for Resume"])
+  }
+
   @Test func movesWithinItsGroupOnly() throws {
     let items = try pending(
       "[\(msg("sent", "sent")),\(msg("a", "held")),\(msg("b", "held")),\(msg("w", "waiting")),"

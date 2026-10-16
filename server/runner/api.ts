@@ -15,7 +15,7 @@ import { resolveRun } from '../harness/resolve.ts';
 import type { CommandUse } from '../harness/adapter.ts';
 import { assembling, deliver, settleTeam } from './queue.ts';
 import { fallbackTitle, generateTitle } from './aux.ts';
-import { addEvent, emitThread, isShuttingDown, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
+import { addEvent, emitThread, isShuttingDown, requestMsg, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
 
 // ---------- slash commands ----------
 
@@ -315,8 +315,16 @@ async function deliverRequest(r: MessageRequest, undo: () => void) {
     const thread = threads.get(r.thread_id);
     if (!thread) throw refusal('thread not found', 404);
     const ready = await prepareTurn(thread, runsHere(r.thread_id));
+    if (r.payload) {
+      // Omni wrote it (a crew report, a team's go): it goes as saved, with no commands to resolve.
+      const blocked = turnBlocked(thread, runsHere(r.thread_id));
+      if (blocked) throw refusal(blocked, 409);
+      deliver(r.thread_id, requestMsg(r));
+      return;
+    }
     await warmCommands(ready.harness, ready.cwd, r.prompt, r.thread_id);
-    sendMessage(r.thread_id, r.prompt, { from: r.source, mode: r.mode, attachments: r.attachments ?? undefined, request: r });
+    // Without a payload it came through the API, from Ben or the Conductor.
+    sendMessage(r.thread_id, r.prompt, { from: r.source as 'ben' | 'conductor', mode: r.mode, attachments: r.attachments ?? undefined, request: r });
   } catch (err) {
     if (isShuttingDown()) messageRequests.park(r.id);
     else undo();
@@ -390,7 +398,7 @@ export async function resumeRequests(threadId: string, ids?: string[]): Promise<
 
 /**
  * Ben decided not to send these parked requests. Each goes in the transcript marked dropped, like any message the
- * agent never saw, so the text is not lost.
+ * agent never saw, so the text is not lost: a crew report as a dropped report.
  */
 export function discardRequests(threadId: string, ids: string[]): Thread {
   const thread = threads.get(threadId);
@@ -399,7 +407,8 @@ export function discardRequests(threadId: string, ids: string[]): Thread {
   if (chosen.length !== new Set(ids).size) throw refusal('Some of these messages are no longer waiting to be resumed.', 409);
   for (const r of chosen) {
     if (!messageRequests.mark(r.id, 'discarded')) continue;
-    addEvent(threadId, 'user', { text: r.prompt, source: r.source, ...(r.attachments?.length && { attachments: r.attachments }), dropped: true });
+    const payload = r.payload ?? { text: r.prompt, source: r.source, ...(r.attachments?.length && { attachments: r.attachments }) };
+    addEvent(threadId, r.kind, { ...payload, dropped: true });
   }
   emitThread(threadId);
   return threads.get(threadId)!;

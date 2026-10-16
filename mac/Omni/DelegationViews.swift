@@ -10,6 +10,8 @@ struct DelegationCard: View {
   let model: AppModel
   /// Sub-agents the thread's own run launched, which have no thread to link to.
   var agents: AgentRows?
+  /// Crew reports the thread has not read yet, by the thread that reported (`PendingMsg.reportNotes`).
+  var reports: [String: String] = [:]
 
   var body: some View {
     let n = delegation.branches.count + (agents?.calls.count ?? 0)
@@ -17,7 +19,7 @@ struct DelegationCard: View {
       header(n)
       VStack(alignment: .leading, spacing: z(8)) {
         ForEach(delegation.branches) { b in
-          BranchRow(branch: b, model: model).openInNewWindow(b.id, model: model)
+          BranchRow(branch: b, model: model, report: reports[b.id]).openInNewWindow(b.id, model: model)
         }
         if let agents {
           ForEach(agents.calls) { c in
@@ -139,6 +141,8 @@ private struct RailRow: ViewModifier {
 private struct BranchRow: View {
   let branch: DelegationBranch
   let model: AppModel
+  /// Where its report is while the parent has not read it: on its way, queued, or held for Resume.
+  var report: String?
 
   var body: some View {
     Button { model.route = .thread(id: branch.id) } label: {
@@ -149,7 +153,7 @@ private struct BranchRow: View {
         if let task = branch.taskID {
           Text(task).font(.omni(size: ThreadStyle.mono, design: .monospaced)).foregroundStyle(Tok.fg2)
         }
-        if let detail { Text(detail).foregroundStyle(Tok.fg4) }
+        if let detail { Text(detail).fontWeight(report != nil && !branch.status.isActive ? .medium : .regular).foregroundStyle(report != nil && !branch.status.isActive ? Tok.fg2 : Tok.fg4) }
       }
     }
     .buttonStyle(.plain)
@@ -158,6 +162,7 @@ private struct BranchRow: View {
 
   private var detail: String? {
     if branch.status == .queued { return "waiting for a slot" }
+    if let report, branch.status != .running { return report }
     guard let at = branch.updatedAt else { return nil }
     return branch.status == .running ? "started \(RelTime.label(at))" : "report in · \(RelTime.label(at))"
   }

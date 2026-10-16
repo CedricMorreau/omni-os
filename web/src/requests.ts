@@ -33,9 +33,56 @@ export function parkedOf(items: readonly PendingMsg[]) {
   };
 }
 
-/** The line over a parked message. Null for one the runner has. */
+/** Omni wrote it, not Ben: a crew report, or the go a team's lead gets once its members have reported. */
+export const isOmnis = (m: PendingMsg) => m.kind === 'crew_report' || m.source === 'team' || m.source === 'crew';
+
+/** "Crew report T-1 from coder": who a crew report is from. */
+export function reportName(m: PendingMsg): string {
+  let s = 'Crew report';
+  if (m.task_id) s += ` ${m.task_id}`;
+  if (m.role) s += ` from ${m.role}`;
+  return s;
+}
+
+/**
+ * The line over a parked message. Null for one the runner has. A held crew report waits for Resume whether a
+ * restart or Ben's Stop kept it from the agent.
+ */
 export function parkedLabel(m: PendingMsg): string | null {
+  if (m.kind === 'crew_report') {
+    if (m.delivery === 'recovered') return `${reportName(m)}, held for Resume`;
+    if (m.delivery === 'uncertain') return `${reportName(m)}, may have reached the agent before the restart`;
+    return null;
+  }
   if (m.delivery === 'recovered') return 'Held after a restart, waiting for Resume';
   if (m.delivery === 'uncertain') return 'May have reached the agent before the restart';
   return null;
+}
+
+/** The line over the parked list. Crew reports also wait there when Ben stopped the thread, not only after a restart. */
+export function parkedHeading(items: readonly PendingMsg[]): string {
+  const n = items.length;
+  const reports = items.filter((m) => m.kind === 'crew_report').length;
+  if (!reports) return `${n === 1 ? '1 message was' : `${n} messages were`} waiting when Omni restarted`;
+  if (reports === n) return `${n === 1 ? '1 crew report is' : `${n} crew reports are`} waiting for Resume`;
+  return `${n} messages and crew reports are waiting for Resume`;
+}
+
+/**
+ * Where each crew report to this thread is, by the thread that reported, for the delegation card's rows. Only the
+ * ones the agent has not read yet: a delivered one is in the transcript.
+ */
+export function reportNotes(items: readonly PendingMsg[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of items) {
+    if (m.kind !== 'crew_report' || !m.thread_id) continue;
+    const note =
+      m.delivery === 'recovered' ? 'report held for Resume'
+      : m.delivery === 'uncertain' ? 'report may not have arrived'
+      : m.state === 'waiting' ? 'report waiting for a slot'
+      : m.state === 'held' ? 'report queued'
+      : 'report on its way';
+    out.set(m.thread_id, note);
+  }
+  return out;
 }

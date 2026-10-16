@@ -7,7 +7,7 @@ import { BranchFace, DelegationCard, RailItem, ROW_CARD } from './Delegation.tsx
 import { PublishedCard } from './Published.tsx';
 import { Markdown } from './Markdown.tsx';
 import { Button, CheckItem, copyText, Icon, IconButton, Loader, Modal, StatusDot, StatusPill, Ticks } from './ui.tsx';
-import { isParked, parkedLabel, parkedOf, requestIdFor } from '../requests.ts';
+import { isOmnis, isParked, parkedHeading, parkedLabel, parkedOf, requestIdFor } from '../requests.ts';
 import { canMove, editBody, editFailed, isEditable, movedOrder, openEdit, reconcileEdits, STALE_NOTE, type EditDraft } from '../pending-edits.ts';
 import { SOURCE_TAG } from '../../../shared/slash-menu.ts';
 import { slashPieces } from '../../../shared/slash-pills.ts';
@@ -36,6 +36,7 @@ export { toolLabel, toolSummary, type ToolCall };
 
 const NO_THREADS: Thread[] = [];
 const NO_ARTIFACTS: Artifact[] = [];
+const NO_REPORTS = new Map<string, string>();
 
 /** Task state by the Agent call's tool_use id. */
 const TaskCtx = createContext<Map<string, TaskView>>(new Map());
@@ -703,9 +704,10 @@ function PendingBubble({ m, label, icon, children }: { m: PendingMsg; label: str
 }
 
 /**
- * Messages Omni accepted before it restarted. A recovered one never reached the agent: Resume sends every one in
- * the saved order. An uncertain one may have, so it is only sent again when Ben says so. Editing, moving or
- * removing one never resumes anything.
+ * Messages Omni accepted before it restarted, and crew reports kept for a thread Ben stopped. A recovered one never
+ * reached the agent: Resume sends every one in the saved order. An uncertain one may have, so it is only sent again
+ * when Ben says so. Editing, moving or removing one never resumes anything. A crew report or a team's go is Omni's,
+ * not Ben's: it has Discard (it stays in the transcript, marked not sent) instead of Edit, moves and Remove.
  */
 function ParkedMessages({
   threadId,
@@ -736,30 +738,47 @@ function ParkedMessages({
       setBusy(null);
     }
   };
+  const discard = async (uuid: string) => {
+    setBusy(`discard:${uuid}`);
+    setError(null);
+    try {
+      const res = await api.post<{ pending?: PendingMsg[] }>(`/threads/${encodeURIComponent(threadId)}/requests/discard`, { ids: [uuid] });
+      if (res.pending) onPending?.(res.pending);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <div className="flex flex-col gap-3 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[12px] text-fg-3">
-          {plural(items.length, 'message')} {items.length === 1 ? 'was' : 'were'} waiting when Omni restarted
-        </span>
+        <span className="text-[12px] text-fg-3">{parkedHeading(items)}</span>
         {recovered.length > 0 && (
           <Button size="sm" variant="primary" icon="play" busy={busy === 'resume'} disabled={off} onClick={() => void resume('resume')}>
             Resume{recovered.length > 1 ? ` ${recovered.length}` : ''}
           </Button>
         )}
       </div>
-      {items.map((m) =>
-        row(
-          m,
-          parkedLabel(m) ?? '',
-          m.delivery === 'uncertain' ? 'alert' : 'clock',
-          m.delivery === 'uncertain' && (
-            <Button size="sm" variant="secondary" icon="send" busy={busy === `again:${m.uuid}`} disabled={off} onClick={() => void resume(`again:${m.uuid}`, [m.uuid])}>
-              Send again
-            </Button>
-          ),
-        ),
-      )}
+      {items.map((m) => {
+        const again = m.delivery === 'uncertain' && (
+          <Button size="sm" variant="secondary" icon="send" busy={busy === `again:${m.uuid}`} disabled={off} onClick={() => void resume(`again:${m.uuid}`, [m.uuid])}>
+            Send again
+          </Button>
+        );
+        const icon = m.delivery === 'uncertain' ? 'alert' : 'clock';
+        if (!isOmnis(m)) return row(m, parkedLabel(m) ?? '', icon, again);
+        return (
+          <PendingBubble key={m.uuid} m={m} label={parkedLabel(m) ?? 'Held for Resume'} icon={icon}>
+            <div className="mt-1 flex flex-wrap items-center justify-end gap-0.5">
+              {again}
+              <Button size="sm" variant="ghost" icon="trash" busy={busy === `discard:${m.uuid}`} disabled={off} onClick={() => void discard(m.uuid)}>
+                Discard
+              </Button>
+            </div>
+          </PendingBubble>
+        );
+      })}
       {error && <div className="text-right text-[12px] text-needs">{error}</div>}
     </div>
   );
@@ -975,6 +994,7 @@ export const Transcript = memo(function Transcript({
   known = NO_THREADS,
   team,
   artifacts = NO_ARTIFACTS,
+  reports = NO_REPORTS,
 }: {
   threadId: string;
   events: EventRow[];
@@ -986,6 +1006,8 @@ export const Transcript = memo(function Transcript({
   team?: Branch[];
   /** The thread's files: a published page's card previews the one linked to its url. */
   artifacts?: Artifact[];
+  /** Where each crew report the agent has not read is, by the thread that reported (`reportNotes`). */
+  reports?: Map<string, string>;
 }) {
   const byId = useMemo(() => new Map(known.map((t) => [t.id, t])), [known]);
   const { items, plan } = useMemo(() => buildItems(events), [events]);
@@ -1019,7 +1041,7 @@ export const Transcript = memo(function Transcript({
           switch (it.type) {
             case 'user': {
               const bubble = <UserBubble key={it.key} p={it.p} at={it.at} threadId={threadId} />;
-              return idx === 0 && team?.length ? [bubble, <DelegationCard key="team" branches={team} team />] : bubble;
+              return idx === 0 && team?.length ? [bubble, <DelegationCard key="team" branches={team} team reports={reports} />] : bubble;
             }
             case 'text':
               return (
@@ -1032,7 +1054,7 @@ export const Transcript = memo(function Transcript({
               const { agents, rest, agentsFirst } = splitGroup(it.calls);
               const cards = [
                 ...delegations(it.calls).map((d) => (
-                  <DelegationCard key={`d${d.key}`} lead={d.lead && withLive(d.lead, byId)} branches={d.branches.map((b) => withLive(b, byId))} />
+                  <DelegationCard key={`d${d.key}`} lead={d.lead && withLive(d.lead, byId)} branches={d.branches.map((b) => withLive(b, byId))} reports={reports} />
                 )),
                 ...(pages.get(it.key) ?? []).map((p) => (
                   <PublishedCard key={`p${p.url}`} p={p} threadId={threadId} artifact={artifacts.findLast((a) => a.url === p.url)} />

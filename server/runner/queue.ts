@@ -1,7 +1,7 @@
 // Who runs next: deliver a message, take a free slot, start the turn.
-import { randomUUID } from 'node:crypto';
 import { resolveDelivery } from '../delivery.ts';
-import { events, threads } from '../db.ts';
+import { events, messageRequests, outbox, requestFingerprint, threads, tx, type MessageRequest } from '../db.ts';
+import { publishThread } from '../bus.ts';
 import { clearSuggestion } from './aux.ts';
 import { hardKill, requestInterrupt, stopStartup } from './session.ts';
 import { launch } from './spawn.ts';
@@ -15,6 +15,7 @@ import {
   harnessSteers,
   isShuttingDown,
   lives,
+  requestMsg,
   runningByHarness,
   send,
   track,
@@ -115,7 +116,39 @@ function begin(threadId: string, [first, ...rest]: Msg[]) {
   emitThread(threadId);
 }
 
-export function reportToParent(childId: string, status: string, text: string) {
+/**
+ * Save a message Omni writes to a thread itself (a crew report, a team's go) before anything is woken, keyed so the
+ * same report or go is saved once whatever calls this again. Null when that key was saved before: it was handled.
+ */
+function saveOwn(threadId: string, key: string, m: Pick<MessageRequest, 'prompt' | 'kind' | 'payload' | 'source'>): MessageRequest | null {
+  const { row, fresh } = messageRequests.accept({
+    thread_id: threadId,
+    request_id: key,
+    ...m,
+    mode: 'steer',
+    attachments: null,
+    fingerprint: requestFingerprint({ prompt: m.prompt, mode: 'steer', source: m.source, files: [] }),
+    machine_id: outbox.machineId(),
+  });
+  return fresh ? row : null;
+}
+
+/** Hand a saved message to the runner. While Omni shuts down it is parked for Resume after the restart instead. */
+function wake(r: MessageRequest) {
+  if (isShuttingDown()) {
+    messageRequests.park(r.id);
+    return emitThread(r.thread_id);
+  }
+  deliver(r.thread_id, requestMsg(r));
+}
+
+/**
+ * A child's turn ended: report to its parent. The report is saved for the parent first, keyed by the child and
+ * where its transcript stood (`completion`), so a restart before the parent reads it keeps it for Resume, and a
+ * second call for the same completion reports nothing more. A parent Ben stopped keeps the report for Resume
+ * instead of being woken by it.
+ */
+export function reportToParent(childId: string, status: string, text: string, completion = events.lastId(childId)) {
   const child = threads.get(childId)!;
   const parent = threads.get(child.parent_id!);
   if (!parent) return;
@@ -129,26 +162,40 @@ export function reportToParent(childId: string, status: string, text: string) {
     status,
   };
   // A lead that has not run yet waits for its whole team, then runs once with every report.
-  if (child.source === 'team' && !parent.has_run && !lives.has(parent.id) && !waiting.includes(parent.id)) return teamReported(parent.id, report);
-  if (status === 'stopped') return;
+  const waitingLead = child.source === 'team' && !parent.has_run && !lives.has(parent.id) && !waiting.includes(parent.id);
+  if (!waitingLead && status === 'stopped') return;
+  const prompt =
+    `[crew report] task ${child.task_id ?? '(none)'} from ${child.role ?? 'crew'} in #${child.channel_id} ` +
+    `(thread ${child.id}), status: ${status}\n\n${report.text}\n\n` +
+    'Relay what matters to Ben in one short update. Delegate follow-ups if needed. Do not redo the work.';
+  const key = `crew-report:${child.id}:${completion}`;
+  if (waitingLead) return teamReported(parent.id, key, prompt, report);
+  const row = saveOwn(parent.id, key, { prompt, kind: 'crew_report', payload: report, source: 'crew' });
+  if (!row) return;
+  // Ben stopped the parent: the report waits for him rather than starting it again.
+  if (parent.status === 'stopped' && !lives.get(parent.id)?.turn && !waiting.includes(parent.id)) {
+    messageRequests.mark(row.id, 'recovered');
+    return emitThread(parent.id);
+  }
   // Wake the parent, or steer it if busy, exactly like a crewmate messaging firstmate.
-  deliver(parent.id, {
-    uuid: randomUUID(),
-    mode: 'steer',
-    event: { kind: 'crew_report', payload: report },
-    text:
-      `[crew report] task ${child.task_id ?? '(none)'} from ${child.role ?? 'crew'} in #${child.channel_id} ` +
-      `(thread ${child.id}), status: ${status}\n\n${report.text}\n\n` +
-      'Relay what matters to Ben in one short update. Delegate follow-ups if needed. Do not redo the work.',
-  });
+  wake(row);
 }
 
 /**
- * A member's report reaches a lead that is still waiting. It shows in the lead's transcript at once; the last
- * one starts the lead's first turn with the brief and every member's reply. A stopped lead stays stopped.
+ * A member's report reaches a lead that is still waiting. It shows in the lead's transcript at once, saved together
+ * with its request row as delivered; the last one starts the lead's first turn with the brief and every member's
+ * reply. A stopped lead stays stopped.
  */
-function teamReported(leadId: string, report: Record<string, unknown>) {
-  addEvent(leadId, 'crew_report', report);
+function teamReported(leadId: string, key: string, prompt: string, report: Record<string, unknown>) {
+  const row = tx(() => {
+    const saved = saveOwn(leadId, key, { prompt, kind: 'crew_report', payload: report, source: 'crew' });
+    if (!saved) return null;
+    const ev = events.add(leadId, 'crew_report', report);
+    messageRequests.mark(saved.id, 'delivered', ev.id);
+    return ev;
+  });
+  if (!row) return;
+  publishThread(leadId, row);
   emitThread(leadId);
   settleTeam(leadId);
 }
@@ -156,7 +203,7 @@ function teamReported(leadId: string, report: Record<string, unknown>) {
 /** Leads whose members are still being created. */
 export const assembling = new Set<string>();
 
-/** Start a waiting lead's turn once no member is queued or running. */
+/** Start a waiting lead's turn once no member is queued or running. The go is saved first, once per lead. */
 export function settleTeam(leadId: string) {
   const lead = threads.get(leadId);
   if (!lead || lead.has_run || assembling.has(leadId)) return;
@@ -170,12 +217,13 @@ export function settleTeam(leadId: string) {
       (events.lastRunText(m.id) || m.last_text || '(no reply)'),
   );
   const said = `All ${team.length} reports are in.`;
-  deliver(leadId, {
-    uuid: randomUUID(),
-    mode: 'steer',
-    event: { kind: 'user', payload: { text: said, source: 'team' } },
-    text: `${brief}\n\n## Your team's reports\n\n${replies.join('\n\n')}\n\n${said} Combine them into one answer. Do not redo their work.`,
+  const row = saveOwn(leadId, `team-settle:${leadId}`, {
+    prompt: `${brief}\n\n## Your team's reports\n\n${replies.join('\n\n')}\n\n${said} Combine them into one answer. Do not redo their work.`,
+    kind: 'user',
+    payload: { text: said, source: 'team' },
+    source: 'team',
   });
+  if (row) wake(row);
 }
 
 bindPump(pump);
