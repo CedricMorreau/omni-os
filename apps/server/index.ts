@@ -26,6 +26,7 @@ const { startScheduler } = await import('./automations.ts');
 const { startEventWatch } = await import('./automation-watch.ts');
 const { startCatalogRefresh } = await import('./harness/catalog-service.ts');
 const { startSync } = await import('./sync/worker.ts');
+const { startWorktreeSweep } = await import('./worktree-sweep.ts');
 const { migrateLegacyConfig } = await import('./config-migrate.ts');
 
 // An install from before data/omni.config.json keeps its old settings and skips onboarding.
@@ -60,6 +61,8 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   startScheduler();
   startEventWatch();
   startCatalogRefresh();
+  // Removes worktrees of archived, deleted and merged-and-idle threads that hold nothing unsaved, now and daily.
+  startWorktreeSweep();
   // Off unless the sync credentials are in the Keychain; then it runs alongside, and a failure only logs.
   startSync().catch((err) => console.error('[sync] could not start:', (err as Error).message));
   if (!isLoopback(config.host)) {
