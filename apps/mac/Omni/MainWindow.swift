@@ -59,6 +59,7 @@ struct MainWindow: View {
       model.settingsTab = tab
       openSettings()
     }
+    .onAppear { QuickPromptController.openMain = { openWindow(id: "main") } }
     #if DEBUG
     .onAppear { QARunner.openSettings = openSettings }
     #endif
