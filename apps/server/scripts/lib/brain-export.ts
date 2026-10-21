@@ -125,6 +125,23 @@ function isIpv6(m: string) {
   return groups.length === 8;
 }
 
+// Passwords written out in prose ("the storefront password is x", "**Password:** `x`"): only the value goes.
+const PASSWORD_PHRASE =
+  /\b(pass(?:word|code|wd)|wachtwoord)\b(\**(?:[^\n.:=`]{0,40}?\s(?:is|was|=)\s+|\s*\**\s*[:=]\s*\**\s*|\s+(?=`)))(`[^`\n]{3,}`|"[^"\n]{3,}"|[^\s`"',;)]{3,})/gi;
+/** Words that follow "password is" in prose without being the password. */
+const NOT_A_PASSWORD = new Set(
+  'now the a an in set stored saved not still also required correct wrong protected page field off on removed gone there here needed enabled disabled for from to and or so what which only being already changed rotated reset shared same different missing empty blank optional visible hidden known unknown'.split(' '),
+);
+
+/** Values of passwords spelled out in text. */
+export function redactPasswords(input: string): string {
+  return input.replace(PASSWORD_PHRASE, (m, word: string, between: string, value: string) => {
+    const bare = value.replace(/^[`"]|[`"]$/g, '').replace(/[.!?]+$/, '');
+    if (bare === '[REDACTED]' || NOT_A_PASSWORD.has(bare.toLowerCase())) return m;
+    return `${word}${between}${value.startsWith('`') ? '`[REDACTED]`' : '[REDACTED]'}`;
+  });
+}
+
 /** IP addresses and SSH details, replaced whole. URL hosts count; ids in URL paths are left to the other rules. */
 export function redactNetwork(input: string): string {
   let s = input;
@@ -167,7 +184,7 @@ const looksRandom = (s: string) => /[A-Z]/.test(s) && /[a-z]/.test(s) && /\d/.te
 
 /**
  * Builds the redactor: exact secret values first (longest first, so one value inside another goes whole),
- * then token shapes, `NAME_KEY=value` assignments, Bearer headers, passwords in URLs, IP addresses and SSH details.
+ * then token shapes, `NAME_KEY=value` assignments, Bearer headers, passwords in URLs and prose, IP addresses and SSH details.
  */
 export function makeRedactor(secretValues: Iterable<string>): (s: string) => string {
   const values = [...new Set([...secretValues].map((v) => v.trim()).filter((v) => v.length >= 6))].sort((a, b) => b.length - a.length);
@@ -186,7 +203,7 @@ export function makeRedactor(secretValues: Iterable<string>): (s: string) => str
     s = s.replace(/(?<![A-Za-z0-9+_-])[A-Za-z0-9+_-]{32,}={0,2}(?![A-Za-z0-9+=_-])/g, (m, at: number, str: string) =>
       looksRandom(m) && !inPathOrName(str, at, m.length) ? '[REDACTED]' : m,
     );
-    return redactNetwork(s);
+    return redactPasswords(redactNetwork(s));
   };
 }
 
@@ -422,6 +439,14 @@ export interface Route {
 }
 
 /** Throwaway working dirs: temp dirs, scratchpads and agent worktrees. */
+/**
+ * Old project folders whose channel's repo now lives under another name, by folder name. Imported sessions
+ * that ran in one go to that channel.
+ */
+export const IMPORTED_ALIASES: Record<string, string> = {
+  coldblackcoffee: 'cold-black-coffee',
+};
+
 export const SCRATCH_CWD = /^\/(?:private\/)?(?:tmp|var\/folders)\/|\/scratchpad(?:\/|$)|\/scratch-workspaces\/|\/\.claude\/worktrees\/|\/data\/worktrees\//;
 
 const lastSegment = (p: string) => p.replace(/\/+$/, '').split('/').pop()?.toLowerCase() ?? '';
@@ -429,7 +454,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 
 /**
  * The channel a thread's digest goes to. Imported history has no real channel: route it by its cwd, then by a
- * repo with the same folder name (a checkout elsewhere), else to imported/<folder name>.
+ * repo with the same folder name (a checkout elsewhere) or an alias, else to imported/<folder name>.
  */
 export function routeChannel(thread: ThreadRow, channels: ChannelRow[], home = ''): Route {
   const own = channels.find((c) => c.id === thread.channel_id);
@@ -439,7 +464,9 @@ export function routeChannel(thread: ThreadRow, channels: ChannelRow[], home = '
   if (match) return match;
   if (SCRATCH_CWD.test(thread.cwd)) return { ...IMPORTED, scratch: true };
   const base = lastSegment(thread.cwd);
-  const sameName = candidates.find((c) => [c.repo_path, c.base_dir].some((p) => p && lastSegment(p) === base));
+  const sameName =
+    candidates.find((c) => [c.repo_path, c.base_dir].some((p) => p && lastSegment(p) === base)) ??
+    candidates.find((c) => c.id === IMPORTED_ALIASES[base]);
   if (sameName) return sameName;
   const atHome = home && thread.cwd.replace(/\/+$/, '') === home.replace(/\/+$/, '');
   return { ...IMPORTED, ...(own ?? {}), project: atHome ? 'home' : slug(base) };

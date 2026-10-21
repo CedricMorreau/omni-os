@@ -262,6 +262,17 @@ describe('plan', () => {
     expect(by.get(ids[3])!.path).toBe('omni/imported/home/2026-10-14-eeeeeeee.md');
   });
 
+  it('files the old coldblackcoffee folder under the Cold Black Coffee channel', () => {
+    channel('cold-black-coffee', 'personal', '/Users/ben/coldblackcoffee-theme');
+    const id = 'ffffffff-0000-4000-8000-000000000001';
+    thread(id, { channel_id: 'imported', cwd: '/Users/ben/coldblackcoffee' });
+    ev(id, 'user', { text: 'hi', source: 'import' });
+    const [d] = digests(run());
+    expect(d.path).toBe('omni/cold-black-coffee/2026-10-14-ffffffff.md');
+    expect(d.content).toContain('channel_kind: "personal"');
+    expect(d.content).not.toContain('imported_project');
+  });
+
   it('exports only what is new after the cursor, as the next part', () => {
     thread(T1);
     ev(T1, 'user', { text: 'first ask', source: 'ben' });
@@ -399,6 +410,32 @@ describe('IP addresses and SSH details', () => {
 
   it('keeps emails off SSH lines and ids in URL paths', () => {
     const keep = ['mail ben@askphill.com today', 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcd/edit'];
+    for (const s of keep) expect(redact(s)).toBe(s);
+  });
+});
+
+describe('passwords in prose', () => {
+  const redact = makeRedactor([]);
+
+  it.each([
+    ['The storefront password is hunter22 for now.', 'The storefront password is [REDACTED] for now.'],
+    ['Storefront password: `tiwhoo`', 'Storefront password: `[REDACTED]`'],
+    ['**Password:** `s3cret-map`', '**Password:** `[REDACTED]`'],
+    ['the password for the store is opensesame', 'the password for the store is [REDACTED]'],
+    ['dev store (password `blueberry`)', 'dev store (password `[REDACTED]`)'],
+    ['wachtwoord: geheim123', 'wachtwoord: [REDACTED]'],
+  ])('redacts the value in %s', (input, out) => {
+    expect(redact(input)).toBe(out);
+  });
+
+  it('leaves prose about passwords alone', () => {
+    const keep = [
+      'The store is password protected, so I can\'t render it.',
+      'The password is now in Omni secrets.',
+      'password is in `~/notes/store.md`',
+      'Enter the storefront password in the Online Store tab.',
+      'security find-generic-password -s omni-os -a global/X -w',
+    ];
     for (const s of keep) expect(redact(s)).toBe(s);
   });
 });
