@@ -8,9 +8,6 @@ import { launch } from './spawn.ts';
 import { userName } from '../profile.ts';
 import { startTurnSnapshot } from './snapshots.ts';
 import {
-  addEvent,
-  bindPump,
-  bindReportToParent,
   capFor,
   deliveryPhase,
   emitThread,
@@ -234,6 +231,3 @@ export function settleTeam(leadId: string) {
   });
   if (row) wake(row);
 }
-
-bindPump(pump);
-bindReportToParent(reportToParent);
