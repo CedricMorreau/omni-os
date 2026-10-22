@@ -119,17 +119,49 @@ private struct ErrorBody: Decodable {
 /// The Omni server's HTTP API, one method per endpoint. Every method throws `OmniAPIError`.
 public struct OmniClient: Sendable {
   public let baseURL: URL
+  /// Sent as `Authorization: Bearer` on every request (apps/server/request-guard.ts).
+  public let token: ServerToken
   private let transport: any HTTPTransport
 
-  public init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport()) {
+  public init(baseURL: URL, token: ServerToken = .none, transport: any HTTPTransport = URLSessionTransport()) {
     self.baseURL = baseURL
+    self.token = token
     self.transport = transport
   }
 
-  public init(host: String = "127.0.0.1", port: Int = 4747, transport: any HTTPTransport = URLSessionTransport()) {
+  public init(host: String = "127.0.0.1", port: Int = 4747, token: ServerToken = .none, transport: any HTTPTransport = URLSessionTransport()) {
     let h = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
     guard let url = URL(string: "http://\(h):\(port)") else { preconditionFailure("Not a host: \(host)") }
-    self.init(baseURL: url, transport: transport)
+    self.init(baseURL: url, token: token, transport: transport)
+  }
+
+  /// `url` is on this server: the same scheme, host and port as `baseURL`. Only those requests get the token.
+  public func isOwn(_ url: URL) -> Bool {
+    url.scheme?.lowercased() == baseURL.scheme?.lowercased() && url.host()?.lowercased() == baseURL.host()?.lowercased()
+      && (url.port ?? 80) == (baseURL.port ?? 80)
+  }
+
+  /// A request for `url`, with the token when `url` is on this server and without it anywhere else. For the event
+  /// streams, which build their own, and for images, whose URLs can come from a model's markdown.
+  public func authorized(_ url: URL) -> URLRequest {
+    var req = URLRequest(url: url)
+    if isOwn(url), let t = token.value { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+    return req
+  }
+
+  /// An image's bytes. One on this server goes through this client, with the token; any other URL (another port
+  /// included) goes through `external`, with no token and no cookie. Nothing puts the token in a shared cookie store.
+  public func imageData(_ url: URL, external: any HTTPTransport = URLSessionTransport()) async throws(OmniAPIError) -> Data {
+    if isOwn(url) { return try await file(url) }
+    do {
+      let (data, response) = try await external.send(URLRequest(url: url))
+      guard (200..<300).contains(response.statusCode) else { throw OmniAPIError.http(status: response.statusCode, message: "Request failed (\(response.statusCode))") }
+      return data
+    } catch let e as OmniAPIError {
+      throw e
+    } catch {
+      throw .unreachable(error.localizedDescription)
+    }
   }
 
   // MARK: Endpoints
@@ -240,7 +272,7 @@ public struct OmniClient: Sendable {
     _ method: String, _ path: String, query: [(String, String)] = [], body: (any Encodable & Sendable)? = nil,
     raw: (data: Data, contentType: String)? = nil
   ) async throws(OmniAPIError) -> T {
-    var req = URLRequest(url: url(path, query: query))
+    var req = authorized(url(path, query: query))
     req.httpMethod = method
     req.cachePolicy = .reloadIgnoringLocalCacheData
     req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -268,7 +300,7 @@ public struct OmniClient: Sendable {
 
   /// A file the server serves, such as an upload, as it is.
   public func file(_ url: URL) async throws(OmniAPIError) -> Data {
-    var req = URLRequest(url: url)
+    var req = authorized(url)
     req.cachePolicy = .reloadIgnoringLocalCacheData
     return try await exchange(req).0
   }
