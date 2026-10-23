@@ -4,7 +4,8 @@ import { folderOf } from '../folder-groups.ts';
 import { DEFAULT_FOLDER_NAME, FOLDER_NAME_MAX, drag, draftKey, freeName, useFolders } from '../folders.tsx';
 import { foldAllAction, openFolderIds } from '../sidebar-fold.ts';
 import { openMenu } from './ContextMenu.tsx';
-import { pinnedRows, type PinnedThread } from '../pins.ts';
+import { pinnedRows } from '../pins.ts';
+import { recentThreads, runningThreads } from '../sidebar-lists.ts';
 import { duration, monthlyTitle, plural, toDate, untilLabel, windowPct } from '../format.ts';
 import { href, navigate, requestComposerFocus, useHash, useRoute } from '../router.ts';
 import { readPref, useApp, useNow, writePref } from '../store.tsx';
@@ -229,11 +230,12 @@ function AgentLink({ t, last, onNavigate }: { t: BackgroundTask; last: boolean; 
 }
 
 /**
- * A thread in the Pinned section, flush with the channels: its status, its title and its channel's name, which gives
- * way on hover to the button that unpins it. It opens the thread as its row under its channel does, and a right-click
- * gives the same menu. Open, it reads bold; the thumb stays on its row under its channel.
+ * A thread in the Running, Pinned or Recent threads section, flush with the channels: its status, its title and its
+ * channel's name. In Pinned the name gives way on hover to the button that unpins it. It opens the thread as its row
+ * under its channel does, and a right-click gives the same menu. Open, it reads bold; the thumb stays on its row under
+ * its channel.
  */
-function PinnedLink({ t, channel, active, agents, onNavigate }: { t: PinnedThread; channel: string; active: boolean; agents: number; onNavigate?: () => void }) {
+function SectionLink({ t, channel, active, agents, unpin, onNavigate }: { t: ThreadStub; channel: string; active: boolean; agents: number; unpin?: boolean; onNavigate?: () => void }) {
   const { setPinned } = useApp();
   const title = t.title || 'Untitled';
   const busy = t.status === 'running' || agents > 0;
@@ -251,19 +253,60 @@ function PinnedLink({ t, channel, active, agents, onNavigate }: { t: PinnedThrea
           {busy ? <Loader size={11} className="text-live-text" /> : <StatusDot status={t.status} size={7} />}
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span className="mr-6 max-w-[45%] shrink-0 truncate text-[11px] font-normal text-fg-4 transition-opacity md:mr-0 md:group-focus-within/pin:opacity-0 md:group-hover/pin:opacity-0">
+        <span
+          className={`max-w-[45%] shrink-0 truncate text-[11px] font-normal text-fg-4 ${
+            unpin ? 'mr-6 transition-opacity md:mr-0 md:group-focus-within/pin:opacity-0 md:group-hover/pin:opacity-0' : ''
+          }`}
+        >
           {channel}
         </span>
       </a>
+      {unpin && (
+        <button
+          type="button"
+          aria-label={`Unpin ${title}`}
+          title="Unpin"
+          onClick={() => void setPinned(t, false).catch(() => {})}
+          className="hov relative z-[2] -ml-7 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-fg-3 opacity-100 transition-opacity hover:text-fg focus-visible:opacity-100 md:opacity-0 md:group-hover/pin:opacity-100 md:group-focus-within/pin:opacity-100"
+        >
+          <Icon name="pin" size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A section that folds on its own, apart from the channels, remembered on this device under `pref`. */
+function useSectionFold(pref: string): [closed: boolean, toggle: () => void] {
+  const [closed, setClosed] = useState(() => readPref<boolean>(pref, false));
+  const toggle = () =>
+    setClosed((prev) => {
+      writePref(pref, !prev);
+      return !prev;
+    });
+  return [closed, toggle];
+}
+
+/**
+ * Running, Pinned or Recent threads: a caption that folds its rows away, with the count beside it while folded. The
+ * caller leaves it out when it has nothing to list.
+ */
+function ThreadSection({ label, closed, onToggle, count, children }: { label: string; closed: boolean; onToggle: () => void; count: number; children: ReactNode }) {
+  const what = label.toLowerCase().replace(/ threads$/, '');
+  return (
+    <div>
       <button
         type="button"
-        aria-label={`Unpin ${title}`}
-        title="Unpin"
-        onClick={() => void setPinned(t, false).catch(() => {})}
-        className="hov relative z-[2] -ml-7 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-fg-3 opacity-100 transition-opacity hover:text-fg focus-visible:opacity-100 md:opacity-0 md:group-hover/pin:opacity-100 md:group-focus-within/pin:opacity-100"
+        onClick={onToggle}
+        aria-expanded={!closed}
+        title={closed ? `Show ${what} threads` : `Hide ${what} threads`}
+        className="caption flex w-full items-center gap-1 px-3 pt-1 pb-2 text-left transition-colors hover:text-fg-2"
       >
-        <Icon name="pin" size={13} />
+        {label}
+        <Icon name={closed ? 'chevronRight' : 'chevronDown'} size={11} className="text-fg-4" />
+        {closed && <span className="ml-auto font-num tabular-nums">{count}</span>}
       </button>
+      {!closed && <div className="space-y-px">{children}</div>}
     </div>
   );
 }
@@ -492,13 +535,10 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
     void folders.collapseAll(openFolderIds(channels));
   };
 
-  // The Pinned section folds on its own, apart from the channels, remembered on this device.
-  const [pinsClosed, setPinsClosed] = useState(() => readPref<boolean>('sidebar.pinnedCollapsed', false));
-  const togglePins = () =>
-    setPinsClosed((prev) => {
-      writePref('sidebar.pinnedCollapsed', !prev);
-      return !prev;
-    });
+  // Running, Pinned and Recent threads each fold on their own.
+  const [runningClosed, toggleRunning] = useSectionFold('sidebar.runningCollapsed');
+  const [pinsClosed, togglePins] = useSectionFold('sidebar.pinnedCollapsed');
+  const [recentClosed, toggleRecent] = useSectionFold('sidebar.recentCollapsed');
 
   const activeChannel = route.name === 'channel' ? route.id : null;
   const openId = route.name === 'thread' ? route.id : null;
@@ -531,8 +571,12 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
     );
   };
   // Rows appearing or leaving above the highlighted one move it, so they re-measure the thumb too.
-  const pins = pinnedRows(pinned, openThread && openThread.id === openId ? openThread : null);
-  const pinsKey = pinsClosed ? 'pins:closed' : pins.map((t) => t.id).join();
+  const openCopy = openThread && openThread.id === openId ? openThread : null;
+  const running = runningThreads(channels, openCopy);
+  const pins = pinnedRows(pinned, openCopy);
+  const recent = recentThreads(channels, openCopy);
+  const sectionKey = (closed: boolean, list: ThreadStub[]) => (closed ? 'closed' : list.map((t) => t.id).join());
+  const sectionsKey = [sectionKey(runningClosed, running), sectionKey(pinsClosed, pins), sectionKey(recentClosed, recent)].join('|');
   const rowsKey = channels
     .flatMap((c) =>
       collapsed.has(c.id)
@@ -542,7 +586,7 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
     .join();
   // Agent rows nest under threads, so they move the rows below them too.
   const agentsKey = tasks.map((k) => k.task_id).join();
-  const box = useSlidingThumb(listRef, `${hash}:${channels.length}:${pinsKey}:${rowsKey}:${agentsKey}:${folders.editing}`, true, '[data-active="true"]');
+  const box = useSlidingThumb(listRef, `${hash}:${channels.length}:${sectionsKey}:${rowsKey}:${agentsKey}:${folders.editing}`, true, '[data-active="true"]');
 
   const threadLinks = (c: ChannelWithRunning) => {
     const closed = collapsed.has(c.id);
@@ -663,6 +707,18 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
     </div>
   );
 
+  const sectionLink = (t: ThreadStub, unpin = false) => (
+    <SectionLink
+      key={t.id}
+      t={t}
+      channel={t.channel_id === 'conductor' ? 'Conductor' : (channels.find((c) => c.id === t.channel_id)?.name ?? t.channel_id)}
+      active={t.id === openId}
+      agents={tasks.filter((k) => taskHost(k) === t.id).length}
+      unpin={unpin}
+      onNavigate={onNavigate}
+    />
+  );
+
   const channelLink = (c: ChannelWithRunning) => (
     <Fragment key={c.id}>
       {channelRow(
@@ -746,34 +802,22 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
             )}
           </div>
 
+          {running.length > 0 && (
+            <ThreadSection label="Running" closed={runningClosed} onToggle={toggleRunning} count={running.length}>
+              {running.map((t) => sectionLink(t))}
+            </ThreadSection>
+          )}
+
           {pins.length > 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={togglePins}
-                aria-expanded={!pinsClosed}
-                title={pinsClosed ? 'Show pinned threads' : 'Hide pinned threads'}
-                className="caption flex w-full items-center gap-1 px-3 pt-1 pb-2 text-left transition-colors hover:text-fg-2"
-              >
-                Pinned
-                <Icon name={pinsClosed ? 'chevronRight' : 'chevronDown'} size={11} className="text-fg-4" />
-                {pinsClosed && <span className="ml-auto font-num tabular-nums">{pins.length}</span>}
-              </button>
-              {!pinsClosed && (
-                <div className="space-y-px">
-                  {pins.map((t) => (
-                    <PinnedLink
-                      key={t.id}
-                      t={t}
-                      channel={t.channel_id === 'conductor' ? 'Conductor' : (channels.find((c) => c.id === t.channel_id)?.name ?? t.channel_id)}
-                      active={t.id === openId}
-                      agents={tasks.filter((k) => taskHost(k) === t.id).length}
-                      onNavigate={onNavigate}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+            <ThreadSection label="Pinned" closed={pinsClosed} onToggle={togglePins} count={pins.length}>
+              {pins.map((t) => sectionLink(t, true))}
+            </ThreadSection>
+          )}
+
+          {recent.length > 0 && (
+            <ThreadSection label="Recent threads" closed={recentClosed} onToggle={toggleRecent} count={recent.length}>
+              {recent.map((t) => sectionLink(t))}
+            </ThreadSection>
           )}
 
           {channelsError && <ErrorNote>{channelsError}</ErrorNote>}

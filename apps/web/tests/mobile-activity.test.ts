@@ -95,4 +95,13 @@ describe('Activity', () => {
   it('shows nothing that needs Ben before Needs you loads', () => {
     expect(view([thread('run', { status: 'running' })], null).needs).toEqual([]);
   });
+
+  it("lists the sidebar's Recent threads as rows, in the order given, with their last activity", () => {
+    const latest = [thread('b', { status: 'running', updated_at: '2026-01-05T11:58:00.000Z' }), thread('a', { updated_at: '2026-01-05T10:00:00.000Z' })];
+    const a = activityOf({ recent: [], needsYou: null, pinned: [], latest, channel, harness, now: NOW });
+    expect(a.latest.map((r) => [r.id, r.time, r.settled])).toEqual([
+      ['b', '2m', false],
+      ['a', '2h', true],
+    ]);
+  });
 });

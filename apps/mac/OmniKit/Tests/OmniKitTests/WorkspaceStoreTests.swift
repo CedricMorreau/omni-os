@@ -668,3 +668,69 @@ private func loaded(_ store: WorkspaceStore, _ api: FakeWorkspaceAPI) async thro
     #expect(SidebarSections.pinned(list, open: nil) == list)
   }
 }
+
+/// SidebarSections.running and .recent, as apps/web/tests/sidebar-lists.test.ts checks runningThreads and recentThreads.
+@Suite struct RunningAndRecentSidebarTests {
+  private func stub(_ id: String, status: String = "done", created: String = "2026-10-01T00:00:00Z", updated: String? = "2026-10-01T00:00:00Z") -> String {
+    let u = updated.map { #","updated_at":"\#($0)""# } ?? ""
+    return #"{"id":"\#(id)","channel_id":"acme","title":"\#(id)","status":"\#(status)","created_at":"\#(created)"\#(u)}"#
+  }
+  private func channel(_ id: String, active: [String] = [], recent: [String] = []) throws -> ChannelWithRunning {
+    try decode(
+      ChannelWithRunning.self,
+      #"{"id":"\#(id)","name":"\#(id)","kind":"client","use_worktree":0,"browser_headless":0,"archived":0,"created_at":"2026-10-01T00:00:00Z","active":[\#(active.joined(separator: ","))],"recent":[\#(recent.joined(separator: ","))]}"#)
+  }
+
+  @Test func runningListsTheBusyThreadsOfEveryChannelNewestFirst() throws {
+    let channels = [
+      try channel("a", active: [stub("a", status: "running", created: "2026-10-02T00:00:00Z")]),
+      try channel("b", active: [stub("b", status: "queued", created: "2026-10-03T00:00:00Z"), stub("c", status: "running")], recent: [stub("old")]),
+    ]
+    #expect(SidebarSections.running(channels).map(\.id) == ["b", "a", "c"])
+    #expect(SidebarSections.running([try channel("a", recent: [stub("done")])]).isEmpty, "nothing running hides the section")
+  }
+
+  @Test func runningBreaksATieByIDAndTakesTheOpenThreadsFresherCopy() throws {
+    let c = try channel("a", active: [stub("y", status: "running"), stub("x", status: "running")])
+    #expect(SidebarSections.running([c]).map(\.id) == ["x", "y"])
+    let open = try decode(ThreadStub.self, stub("y", status: "done"))
+    #expect(SidebarSections.running([c], open: open).map(\.status) == [.running, .done])
+    let other = try decode(ThreadStub.self, stub("z", status: "running"))
+    #expect(SidebarSections.running([c], open: other).map(\.id) == ["x", "y"], "never adds the open thread")
+  }
+
+  @Test func recentTakesTheFiveLatestByActivityAcrossChannels() throws {
+    let channels = [
+      try channel("1", recent: [stub("a", updated: "2026-10-09T00:00:00Z"), stub("b", updated: "2026-10-03T00:00:00Z"), stub("c", updated: "2026-10-01T00:00:00Z")]),
+      try channel("2", active: [stub("d", status: "running", updated: "2026-10-08T00:00:00Z")],
+                  recent: [stub("d", status: "running", updated: "2026-10-08T00:00:00Z"), stub("e", status: "failed", updated: "2026-10-06T00:00:00Z")]),
+      try channel("3", recent: [stub("f", updated: "2026-10-07T00:00:00Z"), stub("g", updated: "2026-10-02T00:00:00Z")]),
+    ]
+    #expect(SidebarSections.recentThreads == 5)
+    #expect(SidebarSections.recent(channels).map(\.id) == ["a", "d", "f", "e", "b"])
+  }
+
+  @Test func recentOrdersByActivityThenTheNewerThreadThenID() throws {
+    let c = try channel(
+      "a",
+      recent: [
+        stub("old-but-busy", created: "2026-09-01T00:00:00Z", updated: "2026-10-10T00:00:00Z"),
+        stub("b", updated: "2026-10-05T00:00:00Z"), stub("a", updated: "2026-10-05T00:00:00Z"),
+        stub("n", created: "2026-10-04T00:00:00Z", updated: "2026-10-05T00:00:00Z"),
+      ])
+    #expect(SidebarSections.recent([c]).map(\.id) == ["old-but-busy", "n", "a", "b"])
+  }
+
+  @Test func theRecordedChannelsCarryEachThreadsLastActivity() throws {
+    let list = try decodeFixture([ChannelWithRunning].self, "channels.json")
+    let stubs = list.flatMap { $0.active + $0.recent }
+    #expect(!stubs.isEmpty && stubs.allSatisfy { $0.updatedAt != nil })
+  }
+
+  @Test func recentIsEmptyOnlyWithNoThreadsAndFallsBackToTheStartTime() throws {
+    #expect(SidebarSections.recent([]).isEmpty)
+    #expect(SidebarSections.recent([try channel("a")]).isEmpty)
+    let old = try channel("a", recent: [stub("a", created: "2026-10-01T00:00:00Z", updated: nil), stub("b", created: "2026-10-02T00:00:00Z", updated: nil)])
+    #expect(SidebarSections.recent([old]).map(\.id) == ["b", "a"], "an older server sends no updated_at")
+  }
+}

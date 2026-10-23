@@ -19,8 +19,10 @@ struct SidebarView: View {
   /// saved as `sidebar.collapsedChannels`, one id per line.
   @State private var collapsed = Set(
     (UserDefaults.standard.string(forKey: collapsedChannelsKey) ?? "").split(separator: "\n").map(String.init))
-  /// The Pinned section folds on its own, apart from the channels.
+  /// Running, Pinned and Recent threads each fold on their own, apart from the channels.
+  @AppStorage(runningCollapsedKey) private var runningClosed = false
   @AppStorage(pinnedCollapsedKey) private var pinsClosed = false
+  @AppStorage(recentCollapsedKey) private var recentClosed = false
 
   private func setChannel(_ id: String, open: Bool) {
     guard collapsed.contains(id) == open else { return }
@@ -104,8 +106,19 @@ struct SidebarView: View {
             }
           }
 
-          if !model.store.pinned.isEmpty {
-            pinnedSection
+          let running = SidebarSections.running(model.store.channels, open: model.openThread)
+          if !running.isEmpty {
+            threadSection("Running", closed: $runningClosed, threads: running)
+          }
+
+          let pins = SidebarSections.pinned(model.store.pinned, open: model.openThread)
+          if !pins.isEmpty {
+            threadSection("Pinned", closed: $pinsClosed, threads: pins, unpin: true)
+          }
+
+          let recent = SidebarSections.recent(model.store.channels, open: model.openThread)
+          if !recent.isEmpty {
+            threadSection("Recent threads", closed: $recentClosed, threads: recent)
           }
 
           if let error = channelsError {
@@ -185,22 +198,23 @@ struct SidebarView: View {
       .accessibilityAddTraits(on ? .isSelected : [])
   }
 
-  /// Threads Ben pinned from any channel, the latest pin first, under a caption that folds them away. Hidden when
-  /// nothing is pinned. A pinned thread still shows under its own channel too.
-  private var pinnedSection: some View {
-    let pins = SidebarSections.pinned(model.store.pinned, open: model.openThread)
+  /// Running, Pinned or Recent threads, as ThreadSection in Sidebar.tsx: threads from any channel under a caption
+  /// that folds them away, with the count beside it while folded. The caller leaves it out when it lists nothing. A
+  /// thread here still shows under its own channel too.
+  private func threadSection(_ label: String, closed: Binding<Bool>, threads: [ThreadStub], unpin: Bool = false) -> some View {
+    let what = label.lowercased().replacingOccurrences(of: " threads", with: "")
     return VStack(alignment: .leading, spacing: 0) {
       Button {
-        withAnimation(Motion.spring) { pinsClosed.toggle() }
+        withAnimation(Motion.spring) { closed.wrappedValue.toggle() }
       } label: {
         HStack(spacing: z(4)) {
-          Text("Pinned")
+          Text(label)
             .omniCaption()
-          OmniIcon(name: pinsClosed ? "chevronRight" : "chevronDown", size: 11)
+          OmniIcon(name: closed.wrappedValue ? "chevronRight" : "chevronDown", size: 11)
             .foregroundStyle(Tok.fg4)
           Spacer(minLength: 0)
-          if pinsClosed {
-            Text("\(pins.count)")
+          if closed.wrappedValue {
+            Text("\(threads.count)")
               .omniCaption()
               .monospacedDigit()
           }
@@ -211,40 +225,42 @@ struct SidebarView: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .help(pinsClosed ? "Show pinned threads" : "Hide pinned threads")
-      .accessibilityLabel("Pinned, \(Format.plural(pins.count, "thread"))")
-      .accessibilityValue(pinsClosed ? "Collapsed" : "Expanded")
-      if !pinsClosed {
+      .help(closed.wrappedValue ? "Show \(what) threads" : "Hide \(what) threads")
+      .accessibilityLabel("\(label), \(Format.plural(threads.count, "thread"))")
+      .accessibilityValue(closed.wrappedValue ? "Collapsed" : "Expanded")
+      if !closed.wrappedValue {
         VStack(spacing: 1) {
-          ForEach(pins) { pinnedRow($0) }
+          ForEach(threads) { sectionRow($0, unpin: unpin) }
         }
       }
     }
   }
 
-  /// A pinned thread, flush with the channels: its status, title and channel, and the pin that unpins it on hover.
-  /// Open, it reads bold; the thumb stays on its row under its channel.
-  private func pinnedRow(_ thread: ThreadStub) -> some View {
+  /// A thread in a section, flush with the channels: its status, title and channel. In Pinned, the pin that unpins it
+  /// shows on hover. Open, it reads bold; the thumb stays on its row under its channel.
+  private func sectionRow(_ thread: ThreadStub, unpin: Bool) -> some View {
     let item = SidebarItem.thread(thread.id)
     let channel = thread.channelID == SidebarSections.conductorID ? "Conductor" : (model.store.channel(thread.channelID)?.name ?? thread.channelID)
     return HoverChrome { hover in
       row(item, thumb: false) {
-        PinnedRow(thread: thread, channel: channel, active: selected == item, agents: agents[thread.id]?.count ?? 0, hover: hover)
+        SectionRow(thread: thread, channel: channel, active: selected == item, agents: agents[thread.id]?.count ?? 0, hover: unpin && hover)
       }
       .overlay(alignment: .trailing) {
-        Button {
-          Task { await model.setThreadPinned(thread, false) }
-        } label: {
-          OmniIcon(name: "pin", size: 13)
-            .foregroundStyle(Tok.fg3)
-            .frame(width: z(24), height: z(24))
-            .contentShape(Circle())
+        if unpin {
+          Button {
+            Task { await model.setThreadPinned(thread, false) }
+          } label: {
+            OmniIcon(name: "pin", size: 13)
+              .foregroundStyle(Tok.fg3)
+              .frame(width: z(24), height: z(24))
+              .contentShape(Circle())
+          }
+          .buttonStyle(.plain)
+          .padding(.trailing, z(4))
+          .opacity(hover ? 1 : 0)
+          .help("Unpin")
+          .accessibilityLabel("Unpin \(thread.title.isEmpty ? "Untitled" : thread.title)")
         }
-        .buttonStyle(.plain)
-        .padding(.trailing, z(4))
-        .opacity(hover ? 1 : 0)
-        .help("Unpin")
-        .accessibilityLabel("Unpin \(thread.title.isEmpty ? "Untitled" : thread.title)")
       }
     }
     .openInNewWindow(thread.id, model: model, title: thread.title, stub: thread)
@@ -419,6 +435,8 @@ struct SidebarView: View {
 let sidebarWidthKey = "sidebar.width"
 let collapsedChannelsKey = "sidebar.collapsedChannels"
 let pinnedCollapsedKey = "sidebar.pinnedCollapsed"
+let runningCollapsedKey = "sidebar.runningCollapsed"
+let recentCollapsedKey = "sidebar.recentCollapsed"
 
 /// Tracks the pointer over a row, for a button laid over it that shows on hover.
 private struct HoverChrome<Content: View>: View {
@@ -565,9 +583,9 @@ struct ThreadRow: View {
   }
 }
 
-/// PinnedLink in Sidebar.tsx: a pinned thread, flush with the channels. Its channel's name gives way on hover to the
-/// button that unpins it.
-private struct PinnedRow: View {
+/// SectionLink in Sidebar.tsx: a thread in Running, Pinned or Recent threads, flush with the channels. In Pinned its
+/// channel's name gives way on hover to the button that unpins it.
+private struct SectionRow: View {
   let thread: ThreadStub
   let channel: String
   let active: Bool
