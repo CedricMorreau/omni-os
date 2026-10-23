@@ -97,11 +97,14 @@ export const threads = {
     db
       .prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE parent_id = ? AND source = 'team' ORDER BY created_at`)
       .all(leadId) as unknown as Thread[],
-  /** Each channel's `perChannel` most recently updated threads, whatever their status. Team members are listed under their lead. */
+  /**
+   * Each channel's `perChannel` most recently updated threads, whatever their status. Team members are listed under their
+   * lead. Ties go to the newer thread, then the lower id, as the sidebar's Recent threads breaks them (apps/web/src/sidebar-lists.ts).
+   */
   recentPerChannel: (perChannel = 5) =>
     db
       .prepare(
-        `SELECT ${THREAD_COLUMNS} FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY updated_at DESC) AS n FROM threads WHERE source != 'team' AND archived = 0) WHERE n <= ?`,
+        `SELECT ${THREAD_COLUMNS} FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY updated_at DESC, created_at DESC, id) AS n FROM threads WHERE source != 'team' AND archived = 0) WHERE n <= ?`,
       )
       .all(perChannel) as unknown as Thread[],
   /** Threads in a folder of their own channel, newest first, without archived ones and team members. */

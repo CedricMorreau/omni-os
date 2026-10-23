@@ -117,6 +117,8 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
   public let title: String
   public let status: ThreadStatus
   public let createdAt: Date
+  /// Its last activity (a message, a run, a status change), for the sidebar's Recent threads. nil from an older server.
+  public let updatedAt: Date?
   /// The sidebar folder it sits in, nil for the channel's ungrouped list.
   public internal(set) var folderID: String?
   /// The agent CLI it runs in, for the logo after its title. nil from a server that does not send it.
@@ -128,19 +130,21 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
     case id, title, status, harness
     case channelID = "channel_id"
     case createdAt = "created_at"
+    case updatedAt = "updated_at"
     case folderID = "folder_id"
     case doneAt = "done_at"
   }
 
   public init(
-    id: String, channelID: String, title: String, status: ThreadStatus, createdAt: Date, folderID: String? = nil,
-    harness: HarnessID? = nil, doneAt: Date? = nil
+    id: String, channelID: String, title: String, status: ThreadStatus, createdAt: Date, updatedAt: Date? = nil,
+    folderID: String? = nil, harness: HarnessID? = nil, doneAt: Date? = nil
   ) {
     self.id = id
     self.channelID = channelID
     self.title = title
     self.status = status
     self.createdAt = createdAt
+    self.updatedAt = updatedAt
     self.folderID = folderID
     self.harness = harness
     self.doneAt = doneAt
@@ -149,8 +153,8 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
   /// The sidebar's row for a thread it has the whole of.
   public init(_ t: OmniThread) {
     self.init(
-      id: t.id, channelID: t.channelID, title: t.title, status: t.status, createdAt: t.createdAt, folderID: t.folderID,
-      harness: t.harness, doneAt: t.doneAt)
+      id: t.id, channelID: t.channelID, title: t.title, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt,
+      folderID: t.folderID, harness: t.harness, doneAt: t.doneAt)
   }
 
   /// A running or queued thread brings its own result, so it cannot be marked done yet; the server refuses it too.

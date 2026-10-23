@@ -479,6 +479,40 @@ public struct SidebarSections: Hashable, Sendable {
     return list.map { $0.id == open.id ? open : $0 }
   }
 
+  /// How many threads Recent threads lists, as RECENT_THREADS in apps/web/src/sidebar-lists.ts. The server sends each
+  /// channel's 5 latest, so the 5 latest overall are among them.
+  public static let recentThreads = 5
+
+  /// Newest first; a tie goes to the lower id, so the order never flickers between reloads.
+  private static func newer(_ a: ThreadStub, _ b: ThreadStub) -> Bool {
+    a.createdAt != b.createdAt ? a.createdAt > b.createdAt : a.id < b.id
+  }
+
+  /// Every list once, keeping a thread's first copy.
+  private static func unique(_ lists: [[ThreadStub]]) -> [ThreadStub] {
+    var seen = Set<String>()
+    return lists.joined().filter { seen.insert($0.id).inserted }
+  }
+
+  /// The Running section, as runningThreads in apps/web/src/sidebar-lists.ts: every thread at work in any channel,
+  /// newest first. That is what each channel's running badge counts (running and queued) plus a thread whose
+  /// sub-agents still run after its turn ended. Empty when nothing runs, which hides it. The open thread's fresher
+  /// copy shows in its own place.
+  public static func running(_ channels: [ChannelWithRunning], open: ThreadStub? = nil) -> [ThreadStub] {
+    pinned(unique(channels.map(\.active)), open: open).sorted(by: newer)
+  }
+
+  /// The Recent threads section, as recentThreads in apps/web/src/sidebar-lists.ts: the `limit` threads with the
+  /// latest activity in any channel, whatever their status, pinned or running. Ties go to the newer thread, then the
+  /// lower id. The open thread's fresher copy shows in its own place.
+  public static func recent(_ channels: [ChannelWithRunning], open: ThreadStub? = nil, limit: Int = recentThreads) -> [ThreadStub] {
+    let list = unique(channels.map(\.recent)).sorted { a, b in
+      let (x, y) = (a.updatedAt ?? a.createdAt, b.updatedAt ?? b.createdAt)
+      return x != y ? x > y : newer(a, b)
+    }
+    return pinned(Array(list.prefix(limit)), open: open)
+  }
+
   /// The channel's folders in order, with the open thread under its own folder even past the listed ones.
   public static func folders(of channel: ChannelWithRunning, open: ThreadStub? = nil) -> [FolderWithThreads] {
     guard let open, open.channelID == channel.id, let home = folder(of: open, in: channel) else { return channel.folders }

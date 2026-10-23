@@ -4,6 +4,7 @@ import { useLiveThreads } from '../components/ThreadList.tsx';
 import { Segmented } from '../components/ui.tsx';
 import { plural } from '../format.ts';
 import { href } from '../router.ts';
+import { recentThreads } from '../sidebar-lists.ts';
 import { useApp, useNow } from '../store.tsx';
 import { activityOf } from './activity.ts';
 import { NeedsCardView } from './NeedsCard.tsx';
@@ -17,13 +18,13 @@ const count = (n: number) => <span className="text-[11px] text-fg-4 tabular-nums
 /** Home on a phone: what needs Ben first, answerable in place, then what runs and what finished today. */
 export function ActivityScreen() {
   const shell = useShell();
-  const { needsYou, pinned, channel } = useApp();
+  const { needsYou, pinned, channels, channel } = useApp();
   const recent = useLiveThreads('/recent?limit=60', acceptAll, 60);
   const now = useNow(60_000);
   const [filter, setFilter] = useState<Filter>('all');
   const a = useMemo(
-    () => activityOf({ recent: recent.data, needsYou, pinned, channel: (id) => channel(id), harness: harnessLabel, now }),
-    [recent.data, needsYou, pinned, channel, now],
+    () => activityOf({ recent: recent.data, needsYou, pinned, latest: recentThreads(channels), channel: (id) => channel(id), harness: harnessLabel, now }),
+    [recent.data, needsYou, pinned, channels, channel, now],
   );
   const open = (id: string) => shell.open(href.thread(id));
   const waiting = a.needs.some((n) => n.glyph === 'needs');
@@ -71,14 +72,20 @@ export function ActivityScreen() {
             )}
           </MoSection>
         )}
+        {/* As the sidebar: Running (hidden under All while nothing runs), Pinned, then Recent threads. */}
+        {(filter === 'running' || (filter === 'all' && a.running.length > 0)) && (
+          <MoSection title="Running" count={a.running.length}>
+            {a.running.length ? <MoRows items={a.running} onOpen={(r) => open(r.id)} /> : <MoEmpty>Nothing is running. Tap + to start something.</MoEmpty>}
+          </MoSection>
+        )}
         {filter === 'all' && a.pinned.length > 0 && (
           <MoSection title="Pinned" count={a.pinned.length}>
             <MoRows items={a.pinned} onOpen={(r) => open(r.id)} />
           </MoSection>
         )}
-        {show('running') && (
-          <MoSection title="Running" count={a.running.length}>
-            {a.running.length ? <MoRows items={a.running} onOpen={(r) => open(r.id)} /> : <MoEmpty>Nothing is running. Tap + to start something.</MoEmpty>}
+        {filter === 'all' && a.latest.length > 0 && (
+          <MoSection title="Recent threads" count={a.latest.length}>
+            <MoRows items={a.latest} onOpen={(r) => open(r.id)} />
           </MoSection>
         )}
         {show('done') && (

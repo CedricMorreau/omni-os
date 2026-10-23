@@ -6,6 +6,7 @@ import { Avatar, Icon, Segmented, StatusDot } from '../components/ui.tsx';
 import { inChannel, reasonOf } from '../needs-you.ts';
 import { href } from '../router.ts';
 import { useApp, useNow } from '../store.tsx';
+import { useFolders } from '../folders.tsx';
 import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoRows, MoScroll, MoSection, MoTitle } from './parts.tsx';
 import { rowOf, type RowItem } from './rows.ts';
 import { useShell } from './shell.tsx';
@@ -102,10 +103,35 @@ export function ChannelsScreen() {
 
 const busy = (t: Thread) => t.status === 'running' || t.status === 'queued';
 
+function MoFolderHeader({ folder, onToggle }: { folder: FolderRows; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex items-center gap-2.5 px-4 py-3 text-left text-[14px] leading-[1.4] font-medium text-fg-2 hover:text-fg active:bg-[var(--wash)]"
+    >
+      <Icon name={folder.collapsed ? 'chevronRight' : 'chevronDown'} size={14} className="shrink-0 text-fg-4" />
+      <span className="flex-1 truncate">{folder.name}</span>
+      <span className="shrink-0 text-[12px] text-fg-4 tabular-nums">{folder.count}</span>
+      {folder.running > 0 && <span className="shrink-0 text-[12px] text-fg-4 tabular-nums">{folder.running} running</span>}
+    </button>
+  );
+}
+
+interface FolderRows {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  count: number;
+  running: number;
+  rows: RowItem[];
+}
+
 /** One channel: what needs Ben and runs in it, or what finished, and a new thread in the thumb zone. */
 export function ChannelScreen({ id }: { id: string }) {
   const shell = useShell();
   const { channel, channelsLoaded, needsYou } = useApp();
+  const folders = useFolders();
   const ch: ChannelWithRunning | undefined = channel(id);
   const accept = useCallback((t: Thread) => t.channel_id === id, [id]);
   const list = useLiveThreads(`/channels/${encodeURIComponent(id)}/threads`, accept);
@@ -114,20 +140,43 @@ export function ChannelScreen({ id }: { id: string }) {
   const conductor = id === 'conductor';
   const name = conductor ? 'Conductor' : `#${ch?.name ?? id}`;
 
-  const { active, recent } = useMemo(() => {
+  const { active, recent, activeFolders, recentFolders } = useMemo(() => {
     const info = ch ? { name: ch.name, icon: ch.icon } : undefined;
     const needs = new Map((inChannel(needsYou, id)?.items ?? []).map((i) => [i.thread.id, i]));
-    const active: RowItem[] = [];
-    const recent: RowItem[] = [];
+    const folderMap = new Map<string, { active: RowItem[]; recent: RowItem[] }>();
+    const activeRows: RowItem[] = [];
+    const recentRows: RowItem[] = [];
+
     for (const t of (list.data ?? []).filter((x) => x.source !== 'team')) {
       const item = needs.get(t.id);
       const row = rowOf(t, info, now);
-      if (item) active.push({ ...row, meta: reasonOf(item).label, status: reasonOf(item).glyph === 'needs' ? 'needs' : row.status });
-      else if (busy(t)) active.push(row);
-      else recent.push(row);
+      const finalRow = item ? { ...row, meta: reasonOf(item).label, status: reasonOf(item).glyph === 'needs' ? 'needs' : row.status } : row;
+      const isActive = !!item || busy(t);
+
+      if (t.folder_id) {
+        if (!folderMap.has(t.folder_id)) folderMap.set(t.folder_id, { active: [], recent: [] });
+        folderMap.get(t.folder_id)![isActive ? 'active' : 'recent'].push(finalRow);
+      } else {
+        if (isActive) activeRows.push(finalRow);
+        else recentRows.push(finalRow);
+      }
     }
-    return { active, recent };
+
+    const foldersFor = (tab: 'active' | 'recent'): FolderRows[] => (ch?.folders ?? []).flatMap((f) => {
+      const rows = folderMap.get(f.id)?.[tab] ?? [];
+      return rows.length ? [{
+        id: f.id, name: f.name, collapsed: !!f.collapsed, count: rows.length,
+        running: rows.filter((r) => r.status === 'running' || r.status === 'queued').length, rows,
+      }] : [];
+    });
+
+    return { active: activeRows, recent: recentRows, activeFolders: foldersFor('active'), recentFolders: foldersFor('recent') };
   }, [list.data, needsYou, id, ch, now]);
+
+  const tabFolders = tab === 'active' ? activeFolders : recentFolders;
+  const activeCount = active.length + activeFolders.reduce((n, f) => n + f.rows.length, 0);
+  const recentCount = recent.length + recentFolders.reduce((n, f) => n + f.rows.length, 0);
+
   const rows = tab === 'active' ? active : recent;
 
   if (!ch && channelsLoaded) {
@@ -154,14 +203,31 @@ export function ChannelScreen({ id }: { id: string }) {
             value={tab}
             onChange={setTab}
             options={[
-              { id: 'active', label: 'Active', badge: <span className="text-[11px] text-fg-4 tabular-nums">{active.length}</span> },
-              { id: 'recent', label: 'Recent', badge: <span className="text-[11px] text-fg-4 tabular-nums">{recent.length}</span> },
+              { id: 'active', label: 'Active', badge: <span className="text-[11px] text-fg-4 tabular-nums">{activeCount}</span> },
+              { id: 'recent', label: 'Recent', badge: <span className="text-[11px] text-fg-4 tabular-nums">{recentCount}</span> },
             ]}
           />
         </div>
         <MoSection title={tab === 'active' ? 'Needs you and running' : 'Done'}>
-          {rows.length ? (
-            <MoRows items={rows} onOpen={(r) => shell.open(href.thread(r.id))} />
+          {rows.length || tabFolders.length ? (
+            <div className="flex flex-col">
+              {tabFolders.map((folder) => (
+                <div key={folder.id}>
+                  <MoFolderHeader folder={folder} onToggle={() => void folders.toggle(folder.id)} />
+                  {!folder.collapsed && folder.rows.length > 0 && (
+                    <div className="bg-surface rounded-lg">
+                      <MoRows items={folder.rows} onOpen={(r) => shell.open(href.thread(r.id))} />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {rows.length > 0 && (
+                <>
+                  {tabFolders.length > 0 && <div className="px-4 py-2 text-[12px] text-fg-4">Ungrouped</div>}
+                  <MoRows items={rows} onOpen={(r) => shell.open(href.thread(r.id))} />
+                </>
+              )}
+            </div>
           ) : (
             <MoEmpty>
               {list.loading && !list.data

@@ -1,4 +1,5 @@
-// The phone's Activity tab: what needs Ben as cards he answers in place, then what runs, then what finished today.
+// The phone's Activity tab: what needs Ben as cards he answers in place, then what runs, what he pinned, the latest
+// threads and what finished today.
 // Pure: the recent list and Needs you in, the screen's sections out.
 import type { NeedsYou, NeedsYouItem, Thread } from '../api.ts';
 import type { Glyph } from '../components/ui.tsx';
@@ -43,6 +44,8 @@ export interface Activity {
   running: RowItem[];
   doneToday: RowItem[];
   pinned: RowItem[];
+  /** The sidebar's Recent threads: the latest by activity in any channel (apps/web/src/sidebar-lists.ts). */
+  latest: RowItem[];
 }
 
 const OPEN: NeedsAction = { kind: 'open', label: 'Open' };
@@ -107,6 +110,7 @@ export function activityOf({
   recent,
   needsYou,
   pinned,
+  latest = [],
   channel,
   harness,
   now,
@@ -114,6 +118,7 @@ export function activityOf({
   recent: Thread[] | undefined;
   needsYou: NeedsYou | null;
   pinned: ListedThread[];
+  latest?: ListedThread[];
   channel: (id: string) => ChannelInfo | undefined;
   harness: (id: string) => string;
   now: number;
@@ -129,5 +134,6 @@ export function activityOf({
     running: listed.filter((t) => t.status === 'running' || t.status === 'queued').map(row),
     doneToday: listed.filter((t) => (t.status === 'done' || t.status === 'failed' || t.status === 'stopped') && new Date(t.updated_at).getTime() >= today).map(row),
     pinned: pinned.map(row),
+    latest: latest.map(row),
   };
 }
