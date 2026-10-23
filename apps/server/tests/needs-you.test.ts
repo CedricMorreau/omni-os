@@ -204,3 +204,77 @@ describe('Needs you blockers', () => {
     expect(await itemOf(t.id)).toBeUndefined();
   });
 });
+
+describe('Needs you, marked done', () => {
+  const done = (id: string, on = true) => call('PATCH', `/threads/${id}`, { done: on });
+
+  it('leaves a thread out while it is marked done, and reopening brings back the same result', T, async () => {
+    const t = await finish('done with this');
+    const { uid } = (await itemOf(t.id)).result;
+    const before = h.thread(t.id);
+    const unread = (await inbox()).unread;
+    const res = await done(t.id);
+    expect(res.status).toBe(200);
+    expect(res.body.done_at).toEqual(expect.any(String));
+    expect(await itemOf(t.id)).toBeUndefined();
+    expect((await inbox()).unread).toBe(unread - 1);
+    // Still in its channel, in its place, its result unread and its status as it was.
+    expect(h.db.threads.byChannel(t.channel_id).some((x) => x.id === t.id)).toBe(true);
+    expect(h.thread(t.id)).toMatchObject({ status: before.status, updated_at: before.updated_at });
+    expect(h.db.resultReads.get(t.id)).toBeUndefined();
+
+    expect((await done(t.id, false)).body.done_at).toBeNull();
+    expect((await itemOf(t.id)).result.uid).toBe(uid);
+  });
+
+  it('leaves out a failed one and its blockers too, not only unread results', T, async () => {
+    const bad = await h.start('CRASH_NOW');
+    await h.untilStatus(bad.id, 'failed');
+    expect((await itemOf(bad.id)).result.status).toBe('failed');
+    await done(bad.id);
+    expect(await itemOf(bad.id)).toBeUndefined();
+
+    h.db.channels.create({ id: 'broken-done', name: 'Broken', kind: 'client', use_worktree: 1, repo_path: join(h.tmp, 'no-repo-here') });
+    const stuck = await h.runner.createThread({ channel: 'broken-done', prompt: 'never runs' });
+    await h.until('setup to fail', () => h.thread(stuck.id).setup === 'failed');
+    const blocked = (await inbox()).blocked;
+    await done(stuck.id);
+    expect(await itemOf(stuck.id)).toBeUndefined();
+    expect((await inbox()).blocked).toBe(blocked - 1);
+    // Retrying the setup is news: it fails again, and shows again.
+    await call('POST', `/threads/${stuck.id}/setup/retry`, {});
+    expect(h.thread(stuck.id).done_at).toBeNull();
+    await h.until('setup to fail again', () => h.thread(stuck.id).setup === 'failed');
+    expect((await itemOf(stuck.id)).blockers[0].kind).toBe('setup');
+  });
+
+  it('clears done when Ben writes in it again, so the next result shows', T, async () => {
+    const t = await finish('first pass');
+    await done(t.id);
+    await call('POST', `/threads/${t.id}/messages`, { prompt: 'one more thing', mode: 'queue' });
+    expect(h.thread(t.id).done_at).toBeNull();
+    await h.untilResults(t.id, 2);
+    expect((await itemOf(t.id)).result.status).toBe('done');
+  });
+
+  it('clears done when a run starts without a message from Ben', T, async () => {
+    const t = await finish('automation target');
+    await done(t.id);
+    h.db.threads.update(t.id, { status: 'queued' });
+    expect(h.thread(t.id).done_at).toBeNull();
+    h.db.threads.update(t.id, { status: 'done' });
+  });
+
+  it('refuses to mark a running thread done, and tells the feed when it changes', T, async () => {
+    const t = await h.start('TOOL:3000 busy');
+    await h.untilTool(t.id);
+    expect(await done(t.id)).toEqual({ status: 409, body: { error: 'a running thread cannot be marked done' } });
+    await h.untilResults(t.id, 1);
+    const seen: string[] = [];
+    const onFeed = (e: any) => e.type === 'needs_you' && seen.push(e.thread_id);
+    h.bus.on('feed', onFeed);
+    await done(t.id);
+    h.bus.off('feed', onFeed);
+    expect(seen).toContain(t.id);
+  });
+});

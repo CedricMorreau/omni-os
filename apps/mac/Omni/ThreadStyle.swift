@@ -75,10 +75,19 @@ struct StatusPill: View {
 struct StatusDot: View {
   let status: ThreadStatus
   var size: CGFloat = 8
+  /// Ben marked it done: a grey check in place of the dot (DoneMark in apps/web/src/components/ui/status.tsx).
+  var done = false
 
   var body: some View {
-    GlyphView(glyph: Glyph(status), size: size)
-      .help(status.label)
+    if done {
+      OmniIcon(name: "check", size: size + 5)
+        .foregroundStyle(Tok.fg4)
+        .frame(width: size, height: size)
+        .help("Marked done")
+    } else {
+      GlyphView(glyph: Glyph(status), size: size)
+        .help(status.label)
+    }
   }
 }
 

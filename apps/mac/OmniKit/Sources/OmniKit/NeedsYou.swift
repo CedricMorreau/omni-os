@@ -150,6 +150,11 @@ public struct NeedsYou: Decodable, Hashable, Sendable {
     return items.first { $0.thread.id == threadID }?.result?.uid
   }
 
+  /// The inbox once a thread is marked done, before the server answers: it goes, its result and blockers with it.
+  public func withoutThread(_ threadID: String) -> NeedsYou {
+    NeedsYou(items: items.filter { $0.thread.id != threadID })
+  }
+
   /// The inbox once a result is read, before the server answers: the result goes, its blockers stay.
   public func withoutResult(_ uid: String) -> NeedsYou {
     NeedsYou(items: items.compactMap { i in

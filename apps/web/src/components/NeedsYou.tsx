@@ -1,18 +1,22 @@
 import type { NeedsYou as Inbox, NeedsYouItem } from '../api.ts';
 import { relTime } from '../format.ts';
-import { reasonOf } from '../needs-you.ts';
+import { canMarkDone, reasonOf } from '../needs-you.ts';
 import { href } from '../router.ts';
 import { useApp, useNow } from '../store.tsx';
-import { Avatar, StatusDot } from './ui.tsx';
+import { Avatar, Icon, StatusDot } from './ui.tsx';
 
-/** One thread that needs Ben: why, and the result's last words or Setup's reason. Opening it reads the result. */
+/**
+ * One thread that needs Ben: why, and the result's last words or Setup's reason. Opening it reads the result. On
+ * hover, a check marks it done: out of here until something new happens in it (right-click has it too).
+ */
 function NeedsYouRow({ item, showChannel }: { item: NeedsYouItem; showChannel?: boolean }) {
   useNow(60_000);
-  const { channels } = useApp();
+  const { channels, setDone } = useApp();
   const t = item.thread;
   const reason = reasonOf(item);
   const unread = !!item.result;
   return (
+    <div className="group/ny relative">
     <a href={href.thread(t.id)} className="hov group flex items-start gap-3 rounded-[18px] px-3 py-3 [--hov:var(--surface)] md:px-3.5">
       {showChannel ? (
         <span className="relative mt-0.5 shrink-0">
@@ -30,7 +34,11 @@ function NeedsYouRow({ item, showChannel }: { item: NeedsYouItem; showChannel?: 
         <div className="flex min-w-0 items-center gap-2">
           <span className={`min-w-0 truncate text-[14px] group-hover:text-fg ${unread ? 'text-fg' : 'text-fg-2'}`}>{t.title || 'Untitled'}</span>
           {unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-fg" aria-label="Unread" role="img" />}
-          <span className="ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-4 tabular-nums">{relTime(item.at)}</span>
+          <span
+            className={`ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-4 tabular-nums ${canMarkDone(t.status) ? 'md:group-focus-within/ny:opacity-0 md:group-hover/ny:opacity-0' : ''}`}
+          >
+            {relTime(item.at)}
+          </span>
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-fg-3">
           {showChannel && <span className="shrink-0 text-fg-2">#{t.channel_id}</span>}
@@ -39,6 +47,18 @@ function NeedsYouRow({ item, showChannel }: { item: NeedsYouItem; showChannel?: 
         </div>
       </div>
     </a>
+    {canMarkDone(t.status) && (
+      <button
+        type="button"
+        aria-label={`Mark ${t.title || 'Untitled'} as done`}
+        title="Mark as done"
+        onClick={() => void setDone(t.id, true).catch(() => {})}
+        className="hov absolute top-2.5 right-2.5 z-[2] grid h-7 w-7 place-items-center rounded-full text-fg-3 opacity-100 transition-opacity [--hov:var(--bg)] hover:text-fg focus-visible:opacity-100 md:opacity-0 md:group-hover/ny:opacity-100 md:group-focus-within/ny:opacity-100"
+      >
+        <Icon name="check" size={15} />
+      </button>
+    )}
+    </div>
   );
 }
 

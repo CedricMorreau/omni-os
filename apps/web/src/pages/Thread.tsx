@@ -15,7 +15,7 @@ import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { Avatar, Button, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, StatusPill, Tabs } from '../components/ui.tsx';
 import { href } from '../router.ts';
-import { shownResult } from '../needs-you.ts';
+import { canMarkDone, shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
@@ -43,7 +43,7 @@ function ModStatusLines({ lines }: { lines: ModStatus[] }) {
 }
 
 export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifact?: number }) {
-  const { setOpenThread, mods, reloadChannels, needsYou, readResult, setPinned } = useApp();
+  const { setOpenThread, mods, reloadChannels, needsYou, readResult, setPinned, setDone } = useApp();
   const modLines = useMemo(() => mods.filter((m) => m.thread_id === id), [mods, id]);
   // GET /api/harnesses, the same list the reply pills load. Until it arrives, canSteer uses the Cursor fallback.
   const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
@@ -105,8 +105,8 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
 
   // The sidebar keeps this thread listed under its channel, with live title and status, even once it stops.
   useEffect(() => {
-    if (thread) setOpenThread({ id: thread.id, channel_id: thread.channel_id, title: thread.title, status: thread.status, created_at: thread.created_at });
-  }, [thread?.id, thread?.channel_id, thread?.title, thread?.status, thread?.created_at]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (thread) setOpenThread({ id: thread.id, channel_id: thread.channel_id, title: thread.title, status: thread.status, created_at: thread.created_at, done_at: thread.done_at });
+  }, [thread?.id, thread?.channel_id, thread?.title, thread?.status, thread?.created_at, thread?.done_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => setOpenThread(null), [setOpenThread]);
 
   // On screen, the thread's newest result is read: exactly the one Needs you listed, so a turn that ends after it
@@ -198,6 +198,16 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
     const on = !thread?.pinned_at;
     try {
       applyThread(await setPinned(thread!, on), true);
+    } catch (e) {
+      setActionError(errorText(e));
+    }
+  };
+
+  // Done or not, from the header: out of Needs you at once, and the thread's copy follows the server's answer.
+  const toggleDone = async () => {
+    setActionError(null);
+    try {
+      applyThread(await setDone(thread!.id, !thread?.done_at), true);
     } catch (e) {
       setActionError(errorText(e));
     }
@@ -296,6 +306,16 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
                 active={!!thread.pinned_at}
                 aria-pressed={!!thread.pinned_at}
                 onClick={() => void togglePin()}
+              />
+            )}
+            {!thread.archived && (thread.done_at || canMarkDone(thread.status)) && (
+              <IconButton
+                icon="check"
+                label={thread.done_at ? 'Mark as not done' : 'Mark as done'}
+                title={thread.done_at ? 'Marked done. Click to bring it back to Needs you.' : 'Mark as done: out of Needs you until something new happens here'}
+                active={!!thread.done_at}
+                aria-pressed={!!thread.done_at}
+                onClick={() => void toggleDone()}
               />
             )}
             {!!thread.archived && (

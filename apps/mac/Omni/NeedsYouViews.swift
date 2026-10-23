@@ -60,7 +60,8 @@ struct NeedsYouSection: View {
   }
 }
 
-/// One thread that needs Ben: why, and the result's last words or Setup's reason. Opening it reads the result.
+/// One thread that needs Ben: why, and the result's last words or Setup's reason. Opening it reads the result. On
+/// hover, a check in place of the time marks it done (as NeedsYouRow in NeedsYou.tsx); right-click has it too.
 private struct NeedsYouRow: View {
   let model: AppModel
   let item: NeedsYouItem
@@ -95,6 +96,7 @@ private struct NeedsYouRow: View {
                 .monospacedDigit()
                 .foregroundStyle(Tok.fg4)
             }
+            .opacity(hovering && canDone ? 0 : 1)
           }
           HStack(spacing: z(6)) {
             if showChannel {
@@ -120,9 +122,30 @@ private struct NeedsYouRow: View {
       .background(hovering ? Tok.surface : .clear, in: RoundedRectangle(cornerRadius: z(18), style: .continuous))
     }
     .buttonStyle(.plain)
+    .overlay(alignment: .topTrailing) {
+      if canDone {
+        Button {
+          Task { await model.setThreadDone(item.id, true) }
+        } label: {
+          OmniIcon(name: "check", size: 15)
+            .foregroundStyle(Tok.fg3)
+            .frame(width: z(28), height: z(28))
+            .background(Tok.bg, in: Circle())
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, z(6))
+        .padding(.trailing, z(6))
+        .opacity(hovering ? 1 : 0)
+        .help("Mark as done")
+        .accessibilityLabel("Mark \(item.thread.title.isEmpty ? "Untitled" : item.thread.title) as done")
+      }
+    }
     .onHover { hovering = $0 }
     .accessibilityElement(children: .combine)
   }
+
+  private var canDone: Bool { !item.thread.status.isActive }
 
   @ViewBuilder private func leading(_ glyph: Glyph) -> some View {
     if showChannel {

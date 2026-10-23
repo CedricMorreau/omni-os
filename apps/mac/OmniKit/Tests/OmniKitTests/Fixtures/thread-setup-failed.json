@@ -24,6 +24,7 @@
     "archived": 0,
     "folder_id": null,
     "pinned_at": null,
+    "done_at": null,
     "setup": "failed",
     "setup_error": "git worktree add failed: fatal: invalid reference: HEAD",
     "limit_state": null,

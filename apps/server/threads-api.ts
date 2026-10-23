@@ -22,12 +22,14 @@ const patchSchema = z
     folder_id: z.string().nullable().optional(),
     /** Pin it to the sidebar's Pinned section, or unpin it. */
     pinned: z.boolean().optional(),
+    /** Mark it done, out of Needs you until something new happens in it, or not done again. */
+    done: z.boolean().optional(),
     /** Null dismisses the proposed follow-up thread, the card under the transcript. */
     next_thread: z.null().optional(),
   })
-  .refine((b) => b.title !== undefined || b.archived !== undefined || b.folder_id !== undefined || b.pinned !== undefined || b.next_thread !== undefined, 'a title is required');
+  .refine((b) => b.title !== undefined || b.archived !== undefined || b.folder_id !== undefined || b.pinned !== undefined || b.done !== undefined || b.next_thread !== undefined, 'a title is required');
 
-/** Rename, archive, pin or file a thread, or dismiss its proposed follow-up. It keeps its place in the lists, since nothing happened in it. */
+/** Rename, archive, pin, mark done or file a thread, or dismiss its proposed follow-up. It keeps its place in the lists, since nothing happened in it. */
 threadsApi.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const t = threads.get(id);
@@ -36,6 +38,8 @@ threadsApi.patch('/:id', async (c) => {
   if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? 'a title is required' }, 400);
   // An archived thread is out of the lists, so it has no place in Pinned either.
   if (body.data.pinned && (body.data.archived ?? !!t.archived)) return c.json({ error: 'an archived thread cannot be pinned' }, 409);
+  // A turn still going brings its own result, so there is nothing to be done with yet.
+  if (body.data.done && (t.status === 'running' || t.status === 'queued')) return c.json({ error: 'a running thread cannot be marked done' }, 409);
   const edit: Partial<Thread> = {};
   if (body.data.title !== undefined) edit.title = body.data.title;
   if (body.data.archived !== undefined) edit.archived = body.data.archived ? 1 : 0;
@@ -50,10 +54,12 @@ threadsApi.patch('/:id', async (c) => {
   if (body.data.next_thread === null) threads.setNextThread(id, null);
   // Archiving unpins: restoring it later brings it back to its channel, not to Pinned.
   if (body.data.pinned !== undefined || edit.archived) threads.setPinned(id, !!body.data.pinned && !edit.archived);
+  if (body.data.done !== undefined) threads.setDone(id, body.data.done);
   // Archived: a usage limit's continuation no longer runs by itself (apps/server/runner/limits.ts).
   if (edit.archived) threads.setLimit(id, null);
   const renamed = Object.keys(edit).length ? threads.update(id, { ...edit, updated_at: t.updated_at })! : threads.get(id)!;
   publishFeed({ type: 'thread', thread: renamed });
+  if (body.data.done !== undefined) publishFeed({ type: 'needs_you', thread_id: id });
   // Archived: its worktree goes once nothing in it can be lost. Reopening it checks the branch out again.
   if (edit.archived && !t.archived) sweepArchived(id);
   return c.json(renamed);

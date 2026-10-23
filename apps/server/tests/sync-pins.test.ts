@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryTransport } from '../sync/transport.ts';
 
-// Pinned threads between two Macs in one process, each with its own data dir, through one in-memory relay.
+// Pinned and done threads between two Macs in one process, each with its own data dir, through one in-memory relay.
 
 async function machine(name: string) {
   vi.resetModules();
@@ -59,5 +59,17 @@ describe('pins', () => {
     await exchange();
     expect(b.db.threads.get('t-1')).toMatchObject({ title: 'from an old Mac', pinned_at: expect.any(String) });
     expect(pinnedOn(b)).toEqual(['t-1']);
+  });
+
+  it('a thread marked done on A is done on B, and a run starting on B clears it on A', async () => {
+    a.db.threads.setDone('t-2', true);
+    await exchange();
+    expect(b.db.threads.get('t-2')!.done_at).toBe(a.db.threads.get('t-2')!.done_at);
+    expect(b.db.threads.get('t-2')!.done_at).toEqual(expect.any(String));
+
+    b.db.threads.update('t-2', { status: 'queued' });
+    b.db.threads.update('t-2', { status: 'done' });
+    await exchange();
+    expect(a.db.threads.get('t-2')!.done_at).toBeNull();
   });
 });

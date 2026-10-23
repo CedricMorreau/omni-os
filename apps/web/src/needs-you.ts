@@ -57,6 +57,15 @@ export function withoutResult(all: NeedsYou, uid: string): NeedsYou {
   return { items, unread: items.filter((i) => i.result).length, blocked: items.filter((i) => i.blockers.length).length };
 }
 
+/** The inbox once a thread is marked done, before the server answers: it goes, its result and blockers with it. */
+export function withoutThread(all: NeedsYou, threadId: string): NeedsYou {
+  const items = all.items.filter((i) => i.thread.id !== threadId);
+  return { items, unread: items.filter((i) => i.result).length, blocked: items.filter((i) => i.blockers.length).length };
+}
+
+/** A running or queued thread brings its own result, so it cannot be marked done yet (the server refuses it too). */
+export const canMarkDone = (status: string | undefined) => status !== 'running' && status !== 'queued';
+
 /**
  * A load that runs one at a time: a call while one is out runs it once more after, however many calls came. A sync
  * that applies many results and reads at once sends a `needs_you` event for each; the inbox loads twice, not once
