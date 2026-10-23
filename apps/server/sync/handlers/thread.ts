@@ -1,4 +1,4 @@
-import { db, outbox, syncMeta, threads, type Thread } from '../../db.ts';
+import { db, outbox, syncMeta, threads, type StoredSessionState, type Thread } from '../../db.ts';
 import { publishFeed } from '../../bus.ts';
 import { claim, registerHandler } from '../apply.ts';
 import { fromPortable, safeSegment, toRemote } from '../paths.ts';
@@ -8,7 +8,7 @@ import { fromPortable, safeSegment, toRemote } from '../paths.ts';
 // folder_id travels with the row. A folder that has not arrived yet waits in sync_folder_wait, and the folder's own
 // change files the thread (handlers/folder.ts). A change from an older build carries no folder_id: this Mac's stays,
 // unless the thread moved channel. pinned_at travels the same way: a change without it keeps this Mac's pin, and so does
-// auto_reason, which an older build does not send.
+// auto_reason, which an older build does not send, and sessions and handover (the run switch, runner/switch-plan.ts).
 
 const COLUMNS = [
   'id', 'channel_id', 'title', 'status', 'role', 'model', 'harness', 'effort', 'session_id', 'has_run', 'cwd',
@@ -32,6 +32,7 @@ const wait = db.prepare(
 const unwait = db.prepare('DELETE FROM sync_folder_wait WHERE thread_id = ?');
 const setPinned = db.prepare('UPDATE threads SET pinned_at = ? WHERE id = ?');
 const setAutoReason = db.prepare('UPDATE threads SET auto_reason = ? WHERE id = ?');
+const setSessionState = db.prepare('UPDATE threads SET sessions = ?, handover = ? WHERE id = ?');
 
 /** Threads whose folder an applied change moved, so notify tells sidebars to regroup. */
 const regrouped = new Set<string>();
@@ -54,7 +55,7 @@ registerHandler('thread', {
     if (!t) return null;
     // A folder still on its way here is where the thread is, as far as the other Mac knows.
     const waiting = (waitingFor.get(id) as { folder_id: string } | undefined)?.folder_id;
-    return { ...t, folder_id: t.folder_id ?? waiting ?? null, cwd: toRemote(t.cwd), run_machine: threads.runMachine(id) };
+    return { ...t, ...threads.storedSessionState(id), folder_id: t.folder_id ?? waiting ?? null, cwd: toRemote(t.cwd), run_machine: threads.runMachine(id) };
   },
   apply(change, ctx) {
     // The id names the thread's folder here: one that would leave data/threads is dropped, not retried.
@@ -78,6 +79,10 @@ registerHandler('thread', {
     if (Object.prototype.hasOwnProperty.call(change.data ?? {}, 'folder_id')) file(change.entity_id, t.channel_id, t.folder_id ?? null);
     if (Object.prototype.hasOwnProperty.call(change.data ?? {}, 'pinned_at')) setPinned.run(t.pinned_at ?? null, change.entity_id);
     if (Object.prototype.hasOwnProperty.call(change.data ?? {}, 'auto_reason')) setAutoReason.run(t.auto_reason ?? null, change.entity_id);
+    if (Object.prototype.hasOwnProperty.call(change.data ?? {}, 'sessions')) {
+      const s = change.data as Partial<StoredSessionState>;
+      setSessionState.run(s.sessions ? JSON.stringify(s.sessions) : null, s.handover ? JSON.stringify(s.handover) : null, change.entity_id);
+    }
     const after = (folderOf.get(change.entity_id) as { folder_id: string | null }).folder_id;
     if (after !== before) regrouped.add(change.entity_id);
     if (differs) outbox.requeue('thread', change.entity_id);

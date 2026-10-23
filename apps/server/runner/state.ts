@@ -1,6 +1,7 @@
 // Live processes, the queue's waiting maps, and the helpers the lifecycle modules share.
 import { readFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
+import type { HandoverP } from '@omni/shared/run-switch.ts';
 import type { DeliveryPhase } from '../delivery.ts';
 import { config } from '../config.ts';
 import { events, messageRequests, threads, type DeliveryState, type MessageRequest } from '../db.ts';
@@ -136,6 +137,8 @@ export interface Live {
   /** Set while the checkout is saved before a turn: messages wait in `gated` until it is, so the harness edits nothing first. */
   gate?: Promise<void> | null;
   gated?: Msg[];
+  /** The handover this process's first message carries, recorded once the harness starts it (runner/switch.ts). */
+  handover?: HandoverP;
 }
 
 /** A sub-agent, background shell or workflow still running in some thread's process. */

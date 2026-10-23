@@ -84,4 +84,6 @@ export interface HarnessAdapter {
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession;
   /** Whether a resume is warranted from on-disk session state, given the thread has not "run" in this process yet. */
   resumeOnDisk?(thread: Thread): boolean;
+  /** The session id a thread starts with when it moves to this harness and gets a new session (runner/switch.ts). */
+  freshSessionId(thread: Thread): string;
 }

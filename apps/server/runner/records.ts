@@ -8,6 +8,7 @@ import { type ModUi, type Record as StreamRecord, type TaskUpdate } from '../str
 import { armIdle, clearInterrupt, endTurn, teardown } from './session.ts';
 import { finishTurnSnapshot, startTurnSnapshot } from './snapshots.ts';
 import { pump, reportToParent } from './queue.ts';
+import { handedOver } from './switch.ts';
 import {
   activeTasks,
   addEvent,
@@ -200,7 +201,7 @@ export function onRecord(live: Live, rec: StreamRecord) {
       if (live.initSeen) return;
       live.initSeen = true;
       addEvent(id, 'init', rec.payload);
-      return;
+      return handedOver(live);
     case 'result':
       return onResult(live, rec.payload);
     case 'task':
