@@ -4,7 +4,7 @@
 import type { NeedsYou, NeedsYouItem, Thread } from '../api.ts';
 import type { Glyph } from '../components/ui.tsx';
 import { LIMIT_ACTION, limitView, type LimitAction } from '../limits.ts';
-import { reasonOf } from '../needs-you.ts';
+import { canMarkDone, reasonOf } from '../needs-you.ts';
 import { rowOf, shortTime, type ChannelInfo, type ListedThread, type RowItem } from './rows.ts';
 
 /** What a card's button does. Each is a route the server already has; nothing here is invented for the phone. */
@@ -17,7 +17,9 @@ export type NeedsAction =
   /** POST /threads/:id/limit/<action>. */
   | { kind: 'limit'; label: string; action: LimitAction }
   /** POST /threads/:id/requests/resume: the messages a restart kept. */
-  | { kind: 'resume'; label: string };
+  | { kind: 'resume'; label: string }
+  /** PATCH /threads/:id {done: true}: out of Needs you, whatever it waits on, until something new happens there. */
+  | { kind: 'done'; label: string };
 
 export type NeedsKind = NonNullable<NeedsYouItem['blockers'][number]>['kind'] | 'result';
 
@@ -47,6 +49,7 @@ export interface Activity {
 }
 
 const OPEN: NeedsAction = { kind: 'open', label: 'Open' };
+const DONE: NeedsAction = { kind: 'done', label: 'Mark done' };
 
 function actionsOf(item: NeedsYouItem, harness: (id: string) => string, now: number): NeedsAction[] {
   const b = item.blockers[0];
@@ -69,6 +72,8 @@ function actionsOf(item: NeedsYouItem, harness: (id: string) => string, now: num
     default:
       out = item.result ? [OPEN, { kind: 'read', label: 'Mark read', uid: item.result.uid }] : [OPEN];
   }
+  // A blocker's second button dismisses it: the card itself already opens the thread.
+  if (out.length < 2 && b && canMarkDone(t.status)) out.push(DONE);
   if (out.length < 2 && !out.some((a) => a.kind === 'open')) out.push(OPEN);
   return out.slice(0, 2);
 }

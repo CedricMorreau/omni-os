@@ -24,6 +24,7 @@
     "archived": 0,
     "folder_id": null,
     "pinned_at": null,
+    "done_at": null,
     "setup": "preparing",
     "setup_error": null,
     "limit_state": null,

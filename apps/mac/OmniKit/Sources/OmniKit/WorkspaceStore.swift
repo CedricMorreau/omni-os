@@ -272,6 +272,18 @@ public final class WorkspaceStore {
 
   /// Ben saw this result: it leaves Needs you at once, and the server keeps it read. The inbox loads again after,
   /// since a newer result may have come in meanwhile.
+  /// A thread marked done leaves Needs you at once; a Needs you load already out is dropped, so it cannot put it back.
+  /// The next load is the server's answer, which also brings a reopened thread back.
+  public func editDone(_ threadID: String, on: Bool) {
+    guard on else { return }
+    tokens[.needsYou, default: 0] += 1
+    if let n = needsYou { needsYou = n.withoutThread(threadID) }
+  }
+
+  public func reloadNeedsYou() async {
+    await load([.needsYou])
+  }
+
   public func readResult(_ uid: String) async {
     tokens[.needsYou, default: 0] += 1
     if let n = needsYou { needsYou = n.withoutResult(uid) }

@@ -140,11 +140,10 @@ export function ChannelScreen({ id }: { id: string }) {
   const conductor = id === 'conductor';
   const name = conductor ? 'Conductor' : `#${ch?.name ?? id}`;
 
-  const { active, recent, folderRows } = useMemo(() => {
+  const { active, recent, activeFolders, recentFolders } = useMemo(() => {
     const info = ch ? { name: ch.name, icon: ch.icon } : undefined;
     const needs = new Map((inChannel(needsYou, id)?.items ?? []).map((i) => [i.thread.id, i]));
-    const folderMap = new Map<string, RowItem[]>();
-    const ungrouped: RowItem[] = [];
+    const folderMap = new Map<string, { active: RowItem[]; recent: RowItem[] }>();
     const activeRows: RowItem[] = [];
     const recentRows: RowItem[] = [];
 
@@ -152,28 +151,31 @@ export function ChannelScreen({ id }: { id: string }) {
       const item = needs.get(t.id);
       const row = rowOf(t, info, now);
       const finalRow = item ? { ...row, meta: reasonOf(item).label, status: reasonOf(item).glyph === 'needs' ? 'needs' : row.status } : row;
+      const isActive = !!item || busy(t);
 
       if (t.folder_id) {
-        if (!folderMap.has(t.folder_id)) folderMap.set(t.folder_id, []);
-        folderMap.get(t.folder_id)!.push(finalRow);
+        if (!folderMap.has(t.folder_id)) folderMap.set(t.folder_id, { active: [], recent: [] });
+        folderMap.get(t.folder_id)![isActive ? 'active' : 'recent'].push(finalRow);
       } else {
-        const isActive = !!item || busy(t);
         if (isActive) activeRows.push(finalRow);
         else recentRows.push(finalRow);
       }
     }
 
-    const folders = (ch?.folders ?? []).map((f): FolderRows => ({ id: f.id, name: f.name, collapsed: !!f.collapsed, count: f.count, running: f.running, rows: folderMap.get(f.id) ?? [] }));
+    const foldersFor = (tab: 'active' | 'recent'): FolderRows[] => (ch?.folders ?? []).flatMap((f) => {
+      const rows = folderMap.get(f.id)?.[tab] ?? [];
+      return rows.length ? [{
+        id: f.id, name: f.name, collapsed: !!f.collapsed, count: rows.length,
+        running: rows.filter((r) => r.status === 'running' || r.status === 'queued').length, rows,
+      }] : [];
+    });
 
-    return { active: activeRows, recent: recentRows, folderRows: folders };
+    return { active: activeRows, recent: recentRows, activeFolders: foldersFor('active'), recentFolders: foldersFor('recent') };
   }, [list.data, needsYou, id, ch, now]);
 
-  const tabFolders = useMemo(() => {
-    if (tab === 'active') {
-      return folderRows.filter((f) => f.rows.some((r) => r.status !== 'settled'));
-    }
-    return folderRows.filter((f) => f.rows.every((r) => r.status === 'settled'));
-  }, [folderRows, tab]);
+  const tabFolders = tab === 'active' ? activeFolders : recentFolders;
+  const activeCount = active.length + activeFolders.reduce((n, f) => n + f.rows.length, 0);
+  const recentCount = recent.length + recentFolders.reduce((n, f) => n + f.rows.length, 0);
 
   const rows = tab === 'active' ? active : recent;
 
@@ -201,8 +203,8 @@ export function ChannelScreen({ id }: { id: string }) {
             value={tab}
             onChange={setTab}
             options={[
-              { id: 'active', label: 'Active', badge: <span className="text-[11px] text-fg-4 tabular-nums">{active.length + tabFolders.reduce((n, f) => n + f.rows.length, 0)}</span> },
-              { id: 'recent', label: 'Recent', badge: <span className="text-[11px] text-fg-4 tabular-nums">{recent.length + tabFolders.reduce((n, f) => n + f.rows.length, 0)}</span> },
+              { id: 'active', label: 'Active', badge: <span className="text-[11px] text-fg-4 tabular-nums">{activeCount}</span> },
+              { id: 'recent', label: 'Recent', badge: <span className="text-[11px] text-fg-4 tabular-nums">{recentCount}</span> },
             ]}
           />
         </div>

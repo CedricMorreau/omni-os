@@ -727,6 +727,18 @@ private func loaded(_ store: WorkspaceStore, _ api: FakeWorkspaceAPI) async thro
     #expect(!stubs.isEmpty && stubs.allSatisfy { $0.updatedAt != nil })
   }
 
+  @Test func threadStubsKeepBothActivityAndMarkedDoneDates() throws {
+    let json = stub("done", updated: "2026-10-03T00:00:00Z").dropLast() + #", "done_at":"2026-10-02T00:00:00Z"}"#
+    let row = try decode(ThreadStub.self, String(json))
+    #expect(row.updatedAt != nil)
+    #expect(row.doneAt != nil)
+    #expect(row.updatedAt! > row.doneAt!)
+    let copied = ThreadStub(
+      id: row.id, channelID: row.channelID, title: row.title, status: row.status, createdAt: row.createdAt,
+      updatedAt: row.updatedAt, doneAt: row.doneAt)
+    #expect(copied == row)
+  }
+
   @Test func recentIsEmptyOnlyWithNoThreadsAndFallsBackToTheStartTime() throws {
     #expect(SidebarSections.recent([]).isEmpty)
     #expect(SidebarSections.recent([try channel("a")]).isEmpty)

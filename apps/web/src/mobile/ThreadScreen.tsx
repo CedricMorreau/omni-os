@@ -7,7 +7,7 @@ import { Button, ErrorNote, Icon, StatusDot, StatusPill } from '../components/ui
 import { changesView } from '../changes.ts';
 import { duration, plural } from '../format.ts';
 import { ArtifactThumb } from '../pages/Artifacts.tsx';
-import { reasonOf } from '../needs-you.ts';
+import { canMarkDone, reasonOf } from '../needs-you.ts';
 import { isOmnis, parkedLabel } from '../requests.ts';
 import { href } from '../router.ts';
 import { useApp, useNow } from '../store.tsx';
@@ -239,7 +239,7 @@ function Pending({ thread, items, onPending }: { thread: Thread; items: PendingM
 
 function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: string | null; onClose: () => void }) {
   const shell = useShell();
-  const { setPinned, reloadChannels } = useApp();
+  const { setPinned, setDone, reloadChannels } = useApp();
   const { applyThread } = useThread();
   const go = (to: string) => {
     onClose();
@@ -250,6 +250,15 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
     try {
       applyThread(await setPinned(thread, !thread.pinned_at), true);
       shell.toast(thread.pinned_at ? 'Unpinned' : 'Pinned to Activity');
+    } catch (e) {
+      shell.toast(errorText(e));
+    }
+  };
+  const done = async () => {
+    onClose();
+    try {
+      applyThread(await setDone(thread.id, !thread.done_at), true);
+      shell.toast(thread.done_at ? 'Back in Needs you' : 'Marked done');
     } catch (e) {
       shell.toast(errorText(e));
     }
@@ -280,6 +289,9 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
         </MoGroup>
         <MoGroup>
           <MoListRow icon="pin" label={thread.pinned_at ? 'Unpin from Activity' : 'Pin to Activity'} chevron={false} onClick={() => void pin()} />
+          {(thread.done_at || canMarkDone(thread.status)) && (
+            <MoListRow icon="check" label={thread.done_at ? 'Mark as not done' : 'Mark as done'} chevron={false} onClick={() => void done()} />
+          )}
           <MoListRow icon="archive" label={thread.archived ? 'Restore thread' : 'Archive thread'} chevron={false} onClick={() => void archive()} last />
         </MoGroup>
       </div>

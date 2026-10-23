@@ -380,6 +380,8 @@ export async function postMessage(
   // Refused before anything is saved: the other Mac runs it.
   const blocked = turnBlocked(thread, runsHere(threadId));
   if (blocked) throw refusal(blocked, 409);
+  // Ben (or the conductor) wrote in it again, so it is not done: what comes of it shows in Needs you.
+  threads.setDone(threadId, false);
   const { row, fresh } = messageRequests.accept({
     thread_id: threadId,
     request_id: opts.requestId ?? randomUUID(),

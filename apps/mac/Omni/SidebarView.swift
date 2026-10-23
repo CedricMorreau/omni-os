@@ -565,7 +565,7 @@ struct ThreadRow: View {
 
   var body: some View {
     HStack(spacing: z(8)) {
-      ThreadStatusIcon(status: agents > 0 ? .running : thread.status)
+      ThreadStatusIcon(status: agents > 0 ? .running : thread.status, done: thread.doneAt != nil)
         .frame(width: z(12))
       Text(thread.title.isEmpty ? "Untitled" : thread.title)
         .lineLimit(1)
@@ -576,10 +576,10 @@ struct ThreadRow: View {
       }
     }
     .font(.omni(size: 12.5, weight: active ? .medium : .regular))
-    .foregroundStyle(active ? Tok.fg : Tok.fg3)
+    .foregroundStyle(active ? Tok.fg : thread.doneAt != nil ? Tok.fg4 : Tok.fg3)
     .padding(.horizontal, z(12))
     .frame(height: z(28))
-    .help("\(thread.title.isEmpty ? "Untitled" : thread.title) · \(agents > 0 ? "\(Format.plural(agents, "agent")) running" : thread.status.label)")
+    .help("\(thread.title.isEmpty ? "Untitled" : thread.title) · \(agents > 0 ? "\(Format.plural(agents, "agent")) running" : thread.doneAt != nil ? "Marked done" : thread.status.label)")
   }
 }
 
@@ -595,7 +595,7 @@ private struct SectionRow: View {
   var body: some View {
     let title = thread.title.isEmpty ? "Untitled" : thread.title
     HStack(spacing: z(10)) {
-      ThreadStatusIcon(status: agents > 0 ? .running : thread.status)
+      ThreadStatusIcon(status: agents > 0 ? .running : thread.status, done: thread.doneAt != nil)
         .frame(width: z(15))
       Text(title)
         .lineLimit(1)
@@ -689,6 +689,7 @@ private struct TreeLine: View {
 
 struct ThreadStatusIcon: View {
   let status: ThreadStatus
+  var done = false
 
   var body: some View {
     if status == .running {
@@ -696,8 +697,8 @@ struct ThreadStatusIcon: View {
         .foregroundStyle(Tok.live)
         .accessibilityLabel("Running")
     } else {
-      StatusDot(status: status, size: 7)
-        .accessibilityLabel(status.label)
+      StatusDot(status: status, size: 7, done: done)
+        .accessibilityLabel(done ? "Marked done" : status.label)
     }
   }
 }

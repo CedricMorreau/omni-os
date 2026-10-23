@@ -12,7 +12,7 @@ import { readPref, useApp, useNow, writePref } from '../store.tsx';
 import { parseChannelIcon } from '@omni/shared/channel-icon.ts';
 import { ThemeSwitch } from './theme.tsx';
 import { HARNESS_ROWS, HarnessLogo, Loader, OmniMark } from './brand.tsx';
-import { ChannelMark, ErrorNote, Icon, IconButton, Kbd, STATUS_LABEL, StatusDot, Thumb, Ticks, useSlidingThumb, Wordmark, type IconName } from './ui.tsx';
+import { ChannelMark, DoneMark, ErrorNote, Icon, IconButton, Kbd, STATUS_LABEL, StatusDot, Thumb, Ticks, useSlidingThumb, Wordmark, type IconName } from './ui.tsx';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -180,15 +180,15 @@ function ThreadLink({ t, active, tasks, onNavigate }: { t: ThreadStub; active: b
           e.dataTransfer.setData('text/plain', title);
         }}
         onDragEnd={drag.end}
-        title={`${title} · ${agents ? plural(agents, 'agent') + ' running' : (STATUS_LABEL[t.status] ?? t.status)}`}
+        title={`${title} · ${agents ? plural(agents, 'agent') + ' running' : t.done_at ? 'Marked done' : (STATUS_LABEL[t.status] ?? t.status)}`}
         aria-current={active ? 'page' : undefined}
         data-active={active || undefined}
         className={`hov z-[1] flex h-8 items-center gap-2 rounded-full px-3 text-[13px] transition-colors md:h-7 md:text-[12.5px] ml-[25px] ${
-          active ? 'font-medium text-fg [--hov:transparent]' : 'text-fg-3 hover:text-fg'
+          active ? 'font-medium text-fg [--hov:transparent]' : t.done_at ? 'text-fg-4 hover:text-fg' : 'text-fg-3 hover:text-fg'
         }`}
       >
         <span className="grid w-3 shrink-0 place-items-center">
-          {busy ? <Loader size={11} className="text-live-text" /> : <StatusDot status={t.status} size={7} />}
+          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={t.status} size={7} />}
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
         {t.harness && (
@@ -250,7 +250,7 @@ function SectionLink({ t, channel, active, agents, unpin, onNavigate }: { t: Thr
         }`}
       >
         <span className="grid w-[15px] shrink-0 place-items-center">
-          {busy ? <Loader size={11} className="text-live-text" /> : <StatusDot status={t.status} size={7} />}
+          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={t.status} size={7} />}
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
         <span

@@ -19,7 +19,7 @@ const view = (recent: Thread[], needsYou: NeedsYou | null = { items: [], unread:
   activityOf({ recent, needsYou, pinned: [], channel, harness, now: NOW });
 
 describe('Activity', () => {
-  it('answers each blocker with the action the thread page offers', () => {
+  it('answers each blocker with the action the thread page offers, then Mark done', () => {
     const cards = view([], inbox()).needs;
     const byTitle = (t: string) => cards.find((c) => c.thread.title === t)!;
     expect(byTitle('Tidy the copy')).toMatchObject({ kind: 'limited', label: 'Usage limit reached', glyph: 'needs' });
@@ -30,11 +30,11 @@ describe('Activity', () => {
     ]);
     expect(byTitle('Fix the widget').actions).toEqual([
       { kind: 'retry', label: 'Retry' },
-      { kind: 'open', label: 'Open' },
+      { kind: 'done', label: 'Mark done' },
     ]);
     expect(byTitle('Plan the launch').actions).toEqual([
       { kind: 'resume', label: 'Resume' },
-      { kind: 'open', label: 'Open' },
+      { kind: 'done', label: 'Mark done' },
     ]);
   });
 
@@ -59,7 +59,7 @@ describe('Activity', () => {
   it('sends a message that may have reached the agent back to the thread, which names it', () => {
     const n = inbox();
     n.items[0] = { ...n.items[0], blockers: [{ kind: 'uncertain', detail: null, count: 1 }] };
-    expect(view([], n).needs[0].actions).toEqual([{ kind: 'open', label: 'Review' }]);
+    expect(view([], n).needs[0].actions).toEqual([{ kind: 'open', label: 'Review' }, { kind: 'done', label: 'Mark done' }]);
   });
 
   it('heads each card with its channel, role and whether the Conductor sent it', () => {

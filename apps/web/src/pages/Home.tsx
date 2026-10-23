@@ -14,7 +14,8 @@ type Filter = 'all' | 'active' | 'failed';
 const FILTERS: Record<Filter, (t: Thread) => boolean> = {
   all: () => true,
   active: (t) => t.status === 'running' || t.status === 'queued',
-  failed: (t) => t.status === 'failed' || t.status === 'stopped',
+  // A thread Ben marked done has had its look.
+  failed: (t) => (t.status === 'failed' || t.status === 'stopped') && !t.done_at,
 };
 
 function Pulse() {
@@ -37,7 +38,7 @@ export function HomePage() {
   const shown = all?.filter(FILTERS[filter]);
   const count = (f: Filter) => all?.filter(FILTERS[f]).length ?? 0;
   const { status, needsYou, profile } = useApp();
-  const markState = needsYou?.items.length || all?.some((t) => glyphFor(t.status) === 'needs') ? 'attention' : status && status.running > 0 ? 'thinking' : 'idle';
+  const markState = needsYou?.items.length || all?.some((t) => glyphFor(t.status) === 'needs' && !t.done_at) ? 'attention' : status && status.running > 0 ? 'thinking' : 'idle';
   const badge = (n: number) => (n ? <span className="font-num text-[10.5px] text-fg-4 tabular-nums">{n}</span> : null);
 
   return (
