@@ -401,7 +401,7 @@ export function ThreadScreen() {
             Conductor
           </div>
         ) : (
-          (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={thread.harness} />
+          (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={t.harness} />
         )}
         {t.error && <Clamped text={t.error} />}
         {t.prose && <MoProse text={t.prose} />}

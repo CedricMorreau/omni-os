@@ -931,10 +931,11 @@ export function SwitchLine({ it, running }: { it: SwitchItem; running: boolean }
     <div className="py-1 text-center text-[12px] font-medium text-fg-4">
       <div className="flex items-center gap-3">
         <div className="h-px flex-1 bg-line" />
-        <span className="flex min-w-0 items-center gap-2 text-fg-3">
-          <Icon name="refresh" size={12} className="shrink-0" />
-          <span className="min-w-0 break-words">{switchText(it.p)}</span>
-          {waiting && <Loader size={11} />}
+        {/* Inline, so a line that wraps on a phone keeps its icon on the first line. */}
+        <span className="min-w-0 break-words text-fg-3">
+          <Icon name="refresh" size={12} className="mr-1.5 inline-block align-[-1px]" />
+          {switchText(it.p)}
+          {waiting && <Loader size={11} className="ml-1.5 inline-block align-[-1px]" />}
         </span>
         <div className="h-px flex-1 bg-line" />
       </div>
