@@ -103,6 +103,10 @@ private struct PinnedBody: Encodable, Sendable {
   let pinned: Bool
 }
 
+private struct DoneBody: Encodable, Sendable {
+  let done: Bool
+}
+
 /// `{"next_thread": null}`: an explicit null, which a nil optional would leave out.
 private struct DismissNextBody: Encodable, Sendable {
   enum CodingKeys: String, CodingKey { case nextThread = "next_thread" }
@@ -233,6 +237,12 @@ public struct OmniClient: Sendable {
   /// Pins the thread to the sidebar's Pinned section, or unpins it. An archived thread is refused (409).
   public func pinThread(_ id: String, pinned: Bool = true) async throws(OmniAPIError) -> OmniThread {
     try await send("PATCH", "/api/threads/\(uriComponent(id))", body: PinnedBody(pinned: pinned))
+  }
+
+  /// Marks the thread done (out of Needs you until something new happens in it), or not done. A running thread is
+  /// refused (409).
+  public func markThreadDone(_ id: String, done: Bool = true) async throws(OmniAPIError) -> OmniThread {
+    try await send("PATCH", "/api/threads/\(uriComponent(id))", body: DoneBody(done: done))
   }
 
   /// The sidebar's Pinned section: pinned threads in every channel, the latest pin first, without archived ones.

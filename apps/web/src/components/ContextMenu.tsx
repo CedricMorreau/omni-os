@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { api, errorText, type Thread, type ThreadDetail } from '../api.ts';
 import { draftKey, useFolders } from '../folders.tsx';
+import { canMarkDone } from '../needs-you.ts';
 import { navigate, href, openNewThread, useRoute } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { Icon, type IconName } from './ui.tsx';
@@ -61,7 +62,7 @@ export function ContextMenuHost() {
 
 function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
   const { target } = open;
-  const { channel, reloadChannels, setPinned } = useApp();
+  const { channel, reloadChannels, setPinned, setDone } = useApp();
   const route = useRoute();
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: open.x, y: open.y });
@@ -166,6 +167,16 @@ function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
     }
   };
 
+  const toggleDone = async () => {
+    if (!row) return;
+    try {
+      await setDone(row.id, !row.done_at);
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
   const folder = target.kind === 'folder' ? folders.find(target.id) : undefined;
   // The folders the thread can move to: its channel's, once its row has come.
   const choices = row ? (channel(row.channel_id)?.folders ?? []).filter((f) => !f.id.startsWith('tmp-')) : [];
@@ -179,6 +190,10 @@ function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
       ? [
           // Archived threads are out of the lists, so out of Pinned too.
           ...(row && !archived ? [{ label: row.pinned_at ? 'Unpin thread' : 'Pin thread', icon: 'pin' as const, run: () => void togglePin() }] : []),
+          // A running thread brings its own result; done waits until it ends.
+          ...(row && (row.done_at || canMarkDone(row.status))
+            ? [{ label: row.done_at ? 'Mark as not done' : 'Mark as done', icon: 'check' as const, run: () => void toggleDone() }]
+            : []),
           { label: 'Rename thread', icon: 'pencil', run: () => setDraft(current ?? '') },
           ...(row && !row.parent_id ? [{ label: 'Move to folder', icon: 'folder' as const, run: () => setMoving(true) }] : []),
           { label: archived ? 'Unarchive thread' : 'Archive thread', icon: 'archive', run: toggleArchive },

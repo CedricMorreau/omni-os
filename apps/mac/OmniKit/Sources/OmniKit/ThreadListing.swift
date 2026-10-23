@@ -21,8 +21,9 @@ public enum ThreadFilter: String, CaseIterable, Hashable, Sendable {
     }
   }
 
+  /// A thread Ben marked done has had its look, so Needs a look leaves it out.
   public func apply(to threads: [OmniThread]) -> [OmniThread] {
-    self == .all ? threads : threads.filter { matches($0.status) }
+    self == .all ? threads : threads.filter { matches($0.status) && (self != .failed || $0.doneAt == nil) }
   }
 }
 

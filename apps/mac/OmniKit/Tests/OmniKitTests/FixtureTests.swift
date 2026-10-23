@@ -122,7 +122,8 @@ func sseData(_ text: String) -> [String] {
   @Test func readsAThreadMidTurn() throws {
     let d = try decodeFixture(ThreadDetail.self, "thread.json")
     #expect(d.thread.status == .running)
-    #expect(d.thread.effort == nil)
+    // Auto picked the effort for the fixture thread (apps/server/harness/auto.ts).
+    #expect(d.thread.effort == "low")
     #expect(d.channel?.id == "acme")
     #expect(d.pending.map(\.state) == [.held])
     #expect(d.live)

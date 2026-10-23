@@ -268,6 +268,18 @@ public final class AppModel {
     return t != nil
   }
 
+  /// Marks a thread done (or not done) from a right-click, the thread's header or its Needs you row. Needs you drops it
+  /// at once; the server's answer and the next loads are the truth. False when the call failed.
+  @discardableResult
+  public func setThreadDone(_ threadID: String, _ done: Bool) async -> Bool {
+    store.editDone(threadID, on: done)
+    let t = try? await client.markThreadDone(threadID, done: done)
+    if let t { threads.store(threadID)?.merge(t) }
+    await store.reloadNeedsYou()
+    await store.reloadChannels()
+    return t != nil
+  }
+
   /// Starts the server, or attaches to one that answers, then reconnects the feed without waiting out its backoff.
   public func startServer() async {
     startFailure = nil

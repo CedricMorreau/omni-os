@@ -259,6 +259,8 @@ export function migrate() {
   db.exec('CREATE INDEX IF NOT EXISTS threads_folder ON threads(folder_id) WHERE folder_id IS NOT NULL');
   // When Ben pinned the thread to the sidebar's Pinned section, null for every existing thread. Synced with the row.
   ensureColumn('threads', 'pinned_at', 'TEXT');
+  // When Ben marked the thread done, out of Needs you; null for every existing thread. Synced with the row.
+  ensureColumn('threads', 'done_at', 'TEXT');
   // What a new thread in the channel runs on when neither the thread nor its role picks (apps/server/harness/resolve.ts).
   for (const col of ['default_harness', 'default_model', 'default_effort']) ensureColumn('channels', col, 'TEXT');
   // The channel's design system: one standalone HTML file for the pages its threads write, and the file's name.
