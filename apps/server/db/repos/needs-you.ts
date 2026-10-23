@@ -74,10 +74,11 @@ const prefixed = THREAD_COLUMNS.split(', ').map((c) => `t.${c}`).join(', ');
 const marks = PARKED.map((s) => `'${s}'`).join(',');
 
 /**
- * Threads in the lists: not archived, not a team member (listed under its lead). A delegated thread's success
- * went to its parent as a crew report, so only its failures and stops are results for Ben.
+ * Threads in the lists: not archived, not a team member (listed under its lead), not marked done (Ben dismissed it,
+ * whatever it waits on, until something new happens there: db/repos/threads.ts clears it). A delegated thread's
+ * success went to its parent as a crew report, so only its failures and stops are results for Ben.
  */
-const LISTED = `t.archived = 0 AND t.source != 'team'`;
+const LISTED = `t.archived = 0 AND t.source != 'team' AND t.done_at IS NULL`;
 
 export const completions = {
   get: (uid: string) => db.prepare('SELECT * FROM completions WHERE uid = ?').get(uid) as unknown as Completion | undefined,

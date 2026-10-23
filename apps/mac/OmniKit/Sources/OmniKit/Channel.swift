@@ -121,17 +121,20 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
   public internal(set) var folderID: String?
   /// The agent CLI it runs in, for the logo after its title. nil from a server that does not send it.
   public let harness: HarnessID?
+  /// When Ben marked it done (out of Needs you), nil when he has not or from a server that does not send it.
+  public internal(set) var doneAt: Date?
 
   enum CodingKeys: String, CodingKey {
     case id, title, status, harness
     case channelID = "channel_id"
     case createdAt = "created_at"
     case folderID = "folder_id"
+    case doneAt = "done_at"
   }
 
   public init(
     id: String, channelID: String, title: String, status: ThreadStatus, createdAt: Date, folderID: String? = nil,
-    harness: HarnessID? = nil
+    harness: HarnessID? = nil, doneAt: Date? = nil
   ) {
     self.id = id
     self.channelID = channelID
@@ -140,12 +143,16 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
     self.createdAt = createdAt
     self.folderID = folderID
     self.harness = harness
+    self.doneAt = doneAt
   }
 
   /// The sidebar's row for a thread it has the whole of.
   public init(_ t: OmniThread) {
     self.init(
       id: t.id, channelID: t.channelID, title: t.title, status: t.status, createdAt: t.createdAt, folderID: t.folderID,
-      harness: t.harness)
+      harness: t.harness, doneAt: t.doneAt)
   }
+
+  /// A running or queued thread brings its own result, so it cannot be marked done yet; the server refuses it too.
+  public var canMarkDone: Bool { doneAt != nil || !status.isActive }
 }

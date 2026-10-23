@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, openSSE, errorText, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type NeedsYou, type Profile, type Status, type Thread, type ThreadStub } from './api.ts';
-import { coalesced, withoutResult } from './needs-you.ts';
+import { coalesced, withoutResult, withoutThread } from './needs-you.ts';
 import { withPin, type PinnedThread } from './pins.ts';
 import { pageTitle, type Route } from './router.ts';
 import { createSyncNudge } from './sync-nudge.ts';
@@ -40,6 +40,8 @@ interface AppState {
   needsYou: NeedsYou | null;
   /** Ben saw this result: it leaves Needs you at once, and the server keeps it read. */
   readResult: (uid: string) => void;
+  /** Mark a thread done (out of Needs you at once) or not done again. The thread as it is now, or the server's error. */
+  setDone: (threadId: string, on: boolean) => Promise<Thread>;
   /** The thread currently open, so the sidebar can list and highlight it under its channel. */
   openThread: ThreadStub | null;
   setOpenThread: (t: ThreadStub | null) => void;
@@ -136,6 +138,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .finally(reloadNeedsYou);
     },
     [reloadNeedsYou],
+  );
+
+  const setDone = useCallback(
+    async (threadId: string, on: boolean) => {
+      if (on) {
+        needsYouEpoch.current++;
+        setNeedsYou((prev) => (prev ? withoutThread(prev, threadId) : prev));
+      }
+      try {
+        return await api.patch<Thread>(`/threads/${encodeURIComponent(threadId)}`, { done: on });
+      } finally {
+        // Refused or not, the server's inbox and lists are the truth.
+        void reloadNeedsYou();
+        void reloadChannels();
+      }
+    },
+    [reloadNeedsYou, reloadChannels],
   );
 
   const reloadCrew = useCallback(() => {
@@ -264,10 +283,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       channel: (id: string) => channels.find((c) => c.id === id),
       needsYou,
       readResult,
+      setDone,
       openThread,
       setOpenThread,
     }),
-    [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, usage, status, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, openThread],
+    [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, usage, status, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, setDone, openThread],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

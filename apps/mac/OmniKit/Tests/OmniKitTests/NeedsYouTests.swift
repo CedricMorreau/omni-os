@@ -111,6 +111,27 @@ private func withNewer(_ n: NeedsYou, _ title: String, uid: String) -> NeedsYou 
     #expect(try item(newer.withoutResult(try #require(done.result?.uid)), "Audit the checkout").result?.uid == "newer")
   }
 
+  @Test func dropsAThreadMarkedDoneWithItsResultAndBlockers() throws {
+    let n = try inbox()
+    let widget = try item(n, "Fix the widget")
+    let after = n.withoutThread(widget.id)
+    #expect(!after.items.contains { $0.id == widget.id })
+    #expect(after.blocked == n.blocked - 1)
+    #expect(after.unread == n.unread - (widget.result == nil ? 0 : 1))
+    #expect(after.withoutThread(widget.id) == after)
+  }
+
+  @Test func offersDoneOnlyOnceAThreadIsNotRunning() throws {
+    let at = Date(timeIntervalSince1970: 0)
+    #expect(ThreadStub(id: "a", channelID: "c", title: "", status: .failed, createdAt: at).canMarkDone)
+    #expect(!ThreadStub(id: "a", channelID: "c", title: "", status: .running, createdAt: at).canMarkDone)
+    #expect(!ThreadStub(id: "a", channelID: "c", title: "", status: .queued, createdAt: at).canMarkDone)
+    // Already done: reopening is always offered.
+    #expect(ThreadStub(id: "a", channelID: "c", title: "", status: .running, createdAt: at, doneAt: at).canMarkDone)
+    let stub = try decode(ThreadStub.self, #"{"id":"t","channel_id":"c","title":"x","status":"failed","created_at":"2026-01-05T09:00:00.000Z","done_at":"2026-01-05T10:00:00.000Z"}"#)
+    #expect(stub.doneAt != nil)
+  }
+
   @Test func encodesTheReadAsTheFixture() throws {
     let body = try JSONSerialization.jsonObject(with: try OmniJSON.encoder().encode(["uid": "x"])) as? [String: String]
     let recorded = try decodeFixture([String: String].self, "needs-you-read-request.json")
@@ -154,6 +175,31 @@ private func store(_ api: FakeWorkspaceAPI) -> (WorkspaceStore, AsyncStream<SSEE
     #expect(api.calls("needsYou") == calls)
     clock.advance(by: .milliseconds(500))
     try await waitFor("the inbox after the burst") { s.needsYou == api.needsYouAnswer }
+  }
+
+  @Test func marksDoneAtOnceAndAnOlderLoadCannotBringItBack() async throws {
+    let api = try FakeWorkspaceAPI.standard()
+    api.needsYouAnswer = try inbox()
+    let (s, feed, _) = store(api)
+    defer { s.stop(); feed.finish() }
+    try await waitFor("the inbox") { s.needsYou != nil }
+    let widget = try item(api.needsYouAnswer, "Fix the widget")
+
+    // A load is out, from before the server had the mark, when Ben marks it done.
+    let calls = api.calls("needsYou")
+    let gate = api.holdNextNeedsYou()
+    feed.yield(.message(.needsYou(threadID: widget.id)))
+    try await waitFor("the load to be out") { api.calls("needsYou") == calls + 1 }
+    s.editDone(widget.id, on: true)
+    #expect(s.needsYou?.items.contains { $0.id == widget.id } == false)
+    gate.open()
+    await settle()
+    #expect(s.needsYou?.items.contains { $0.id == widget.id } == false)
+
+    // Reopened: the server lists it again and the next load brings it back.
+    s.editDone(widget.id, on: false)
+    await s.reloadNeedsYou()
+    #expect(s.needsYou?.items.contains { $0.id == widget.id } == true)
   }
 
   @Test func aBurstFromSyncLoadsTwice() async throws {

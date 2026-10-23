@@ -186,6 +186,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  'mark_thread_done',
+  {
+    description:
+      `Mark a thread done so it leaves ${USER}'s Needs you list (failed, blocked or unread), or done: false to reopen it. ` +
+      `Only when ${USER} asks. It stays in its channel; a new message or run in it clears done by itself. A running thread cannot be marked done.`,
+    inputSchema: {
+      thread_id: z.string(),
+      done: z.boolean().optional().describe('false reopens it. Default true.'),
+    },
+  },
+  async ({ thread_id, done }) => {
+    const t = await call(`/threads/${thread_id}`, { method: 'PATCH', body: JSON.stringify({ done: done ?? true }) });
+    return text({ thread_id: t.id, channel: t.channel_id, status: t.status, done_at: t.done_at });
+  },
+);
+
+server.registerTool(
   'list_harnesses',
   {
     description:

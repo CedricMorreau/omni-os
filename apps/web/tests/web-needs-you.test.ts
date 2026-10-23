@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { NeedsYou, NeedsYouItem } from '../src/api.ts';
-import { coalesced, inChannel, reasonOf, shownResult, withoutResult } from '../src/needs-you.ts';
+import { canMarkDone, coalesced, inChannel, reasonOf, shownResult, withoutResult, withoutThread } from '../src/needs-you.ts';
 
 // The Web UI's side of Needs you (apps/web/src/needs-you.ts), against the same recorded server answers the Mac app's Swift
 // tests decode (apps/server/tests/mac-fixtures.test.ts records them): every kind of result and blocker, then a read.
@@ -68,6 +68,22 @@ describe('reading a result', () => {
     const kept = byTitle(withoutResult(n, widget.result!.uid), 'Fix the widget');
     expect(kept.result).toBeNull();
     expect(kept.blockers.map((b) => b.kind)).toEqual(['setup', 'recovered']);
+  });
+
+  it('drops a thread marked done at once, its result and blockers with it', () => {
+    const n = inbox();
+    const widget = byTitle(n, 'Fix the widget');
+    const after = withoutThread(n, widget.thread.id);
+    expect(after.items.some((i) => i.thread.id === widget.thread.id)).toBe(false);
+    expect(after.blocked).toBe(n.blocked - 1);
+    expect(after.unread).toBe(n.unread - (widget.result ? 1 : 0));
+    expect(withoutThread(after, widget.thread.id)).toEqual(after);
+  });
+
+  it('offers done only once a thread is not running', () => {
+    expect(['done', 'failed', 'stopped', 'imported'].every(canMarkDone)).toBe(true);
+    expect(canMarkDone('running')).toBe(false);
+    expect(canMarkDone('queued')).toBe(false);
   });
 
   it('leaves a later result unread when an older read lands, and takes repeated visits', () => {

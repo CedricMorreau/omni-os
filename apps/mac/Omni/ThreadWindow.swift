@@ -145,6 +145,11 @@ private struct OpenInNewWindow: ViewModifier {
             let on = model.store.pinned.contains { $0.id == threadID }
             Button(on ? "Unpin Thread" : "Pin Thread") { Task { await model.setThreadPinned(pin, !on) } }
           }
+          // A running thread brings its own result; done waits until it ends.
+          if !archived, let stub, stub.canMarkDone {
+            let done = stub.doneAt != nil
+            Button(done ? "Mark as Not Done" : "Mark as Done") { Task { await model.setThreadDone(threadID, !done) } }
+          }
           if let stub { MoveToFolderMenu(model: model, thread: stub) }
           Button(archived ? "Unarchive Thread" : "Archive Thread") { Task { await model.setThreadArchived(threadID, !archived) } }
         }

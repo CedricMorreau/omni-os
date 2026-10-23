@@ -17,12 +17,12 @@ const ROUTE: Partial<Record<NeedsAction['kind'], (a: NeedsAction) => string>> = 
   limit: (a) => `limit/${a.kind === 'limit' ? LIMIT_ACTION[a.action].path : ''}`,
 };
 
-const DONE: Partial<Record<NeedsAction['kind'], string>> = { retry: 'Preparing the worktree again', resume: 'Resumed', read: 'Marked read' };
+const DONE: Partial<Record<NeedsAction['kind'], string>> = { retry: 'Preparing the worktree again', resume: 'Resumed', read: 'Marked read', done: 'Marked done' };
 
 /** Runs a card's action. `onRecovered` gets the thread page's answer, so an open thread shows it before the stream does. */
 export function useNeedsAction(onRecovered?: (r: Recovered) => void) {
   const shell = useShell();
-  const { readResult } = useApp();
+  const { readResult, setDone } = useApp();
   const [busy, setBusy] = useState<NeedsAction | null>(null);
   const run = async (card: Pick<NeedsCard, 'id'>, a: NeedsAction) => {
     if (a.kind === 'open') return shell.open(href.thread(card.id));
@@ -30,8 +30,19 @@ export function useNeedsAction(onRecovered?: (r: Recovered) => void) {
       readResult(a.uid);
       return shell.toast(DONE.read!);
     }
-    const route = ROUTE[a.kind]!(a);
     setBusy(a);
+    if (a.kind === 'done') {
+      try {
+        await setDone(card.id, true);
+        shell.toast(DONE.done!);
+      } catch (e) {
+        shell.toast(errorText(e));
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+    const route = ROUTE[a.kind]!(a);
     try {
       const res = await api.post<Recovered>(`/threads/${encodeURIComponent(card.id)}/${route}`, {});
       onRecovered?.(res);

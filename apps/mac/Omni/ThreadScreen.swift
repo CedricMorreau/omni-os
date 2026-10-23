@@ -164,6 +164,18 @@ private struct ThreadHeader: View {
         .accessibilityLabel(on ? "Unpin thread" : "Pin thread")
         .accessibilityAddTraits(on ? .isSelected : [])
       }
+      if !thread.archived, ThreadStub(thread).canMarkDone {
+        let done = thread.doneAt != nil
+        Button {
+          Task { await model.setThreadDone(thread.id, !done) }
+        } label: {
+          OmniIcon(name: "check", size: 15)
+        }
+        .buttonStyle(.icon(size: 28, active: done))
+        .help(done ? "Marked done. Click to bring it back to Needs you." : "Mark as done: out of Needs you until something new happens here")
+        .accessibilityLabel(done ? "Mark as not done" : "Mark as done")
+        .accessibilityAddTraits(done ? .isSelected : [])
+      }
       if thread.archived {
         // Opened from its channel's Archived list or a search: put it back in the lists.
         Button {

@@ -43,6 +43,11 @@ export interface Thread {
   folder_id: string | null;
   /** When Ben pinned it to the sidebar's Pinned section, null when it is not pinned. Synced with the row. */
   pinned_at: string | null;
+  /**
+   * When Ben marked it done, null when he has not. Out of Needs you (db/repos/needs-you.ts) while set, still listed in
+   * its channel and folder. A new message, a run starting or a setup retry clears it. Synced with the row.
+   */
+  done_at: string | null;
   /** Null once the thread's folder is ready, which is always for a thread that needs no worktree. Local only, not synced. */
   setup: ThreadSetup | null;
   /** Why the worktree could not be prepared, while setup is `failed`. */
@@ -112,7 +117,7 @@ const json = (v: object | null) => (v ? JSON.stringify(v) : null);
 
 /** The columns clients read, without sync's run_machine, the limit stop's id and owner, or the session state. */
 export const THREAD_COLUMNS =
-  'id, channel_id, title, status, role, model, harness, effort, auto_reason, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, setup, setup_error, limit_state, limit_resets_at, limit_elsewhere, created_at, updated_at';
+  'id, channel_id, title, status, role, model, harness, effort, auto_reason, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, limit_state, limit_resets_at, limit_elsewhere, created_at, updated_at';
 
 /** Who runs a thread with this status: this machine while it is running or queued here and sync is set up, else nobody. */
 const runMachine = (status: ThreadStatus) => (status === 'running' || status === 'queued' ? outbox.machineId() : null);
@@ -173,7 +178,7 @@ export const threads = {
   create(
     t: Omit<
       Thread,
-      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'archived' | 'folder_id' | 'pinned_at' | 'setup' | 'setup_error' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere'
+      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere'
     > & {
       has_run?: number; created_at?: string; harness?: string; effort?: string; auto_reason?: string | null; folder_id?: string | null; setup?: ThreadSetup | null;
     },
@@ -211,6 +216,8 @@ export const threads = {
     if (!('updated_at' in patch)) (sets.push('updated_at = ?'), vals.push(now()));
     // Every status write says who runs the thread, so the row itself tells the other Mac (apps/server/sync/guard.ts).
     if (patch.status) (sets.push('run_machine = ?'), vals.push(runMachine(patch.status)));
+    // A run starting, or Ben retrying its setup, is news: a thread marked done comes back to Needs you when it ends.
+    if (patch.status === 'running' || patch.status === 'queued' || patch.setup === 'preparing') sets.push('done_at = NULL');
     tx(() => {
       if (db.prepare(`UPDATE threads SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id).changes) record('thread', id);
     });
@@ -224,6 +231,18 @@ export const threads = {
     return tx(() => {
       const changed =
         db.prepare(`UPDATE threads SET pinned_at = ? WHERE id = ? AND (pinned_at IS NULL) = ?`).run(pinned ? now() : null, id, pinned ? 1 : 0).changes > 0;
+      if (changed) record('thread', id);
+      return changed;
+    });
+  },
+  /**
+   * Mark it done, or not done. Done takes it out of Needs you whatever it waits on; like a pin it keeps the thread's
+   * place in the lists. The row syncs, so the other Mac has it too. True when it changed.
+   */
+  setDone(id: string, done: boolean) {
+    return tx(() => {
+      const changed =
+        db.prepare(`UPDATE threads SET done_at = ? WHERE id = ? AND (done_at IS NULL) = ?`).run(done ? now() : null, id, done ? 1 : 0).changes > 0;
       if (changed) record('thread', id);
       return changed;
     });
