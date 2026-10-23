@@ -14,9 +14,18 @@ A harness is the agent CLI a thread runs on. Pick one per channel (its default) 
 - Each harness has its own concurrency cap (4 by default): `OMNI_MAX_CONCURRENT` (Claude Code), `OMNI_MAX_CONCURRENT_CODEX`, `OMNI_MAX_CONCURRENT_CURSOR`, `OMNI_MAX_CONCURRENT_HERMES`. A full harness never holds up threads on another.
 - Some features are Claude Code only: published artifact cards and [mods](mods.md).
 
+## Switching mid-thread
+
+Between turns, the model and effort pickers in a thread's reply box move it to another model, effort or harness. Not while a turn runs or messages wait, and not to or from Hermes, which has no worktree on this Mac.
+
+- Same harness: its session carries on with the new model or effort.
+- Another harness: your next message starts a session there with a handover ahead of it. Omni builds it from the thread's transcript: title, folder, artifacts, open todos, then the messages, replies and tool calls, the newest kept whole when it runs past 32K characters. The transcript shows "Handing over from ... to ...", then how much the new session read.
+- Back to a harness the thread ran on before: its own earlier session resumes and reads only what happened since. Straight back before anything ran elsewhere needs no handover.
+- The Conductor can do the same with `switch_thread_run`, when you ask it to.
+
 ## Auto
 
-Auto is the first entry in the model picker and the default for a new thread. Omni reads the first prompt and picks the harness, model and effort for it. The thread's model pill then reads "Auto · <model>", and hovering it shows why, for example "Hard code task: Opus 5.5, high effort". Once picked, the run is fixed for the thread like any other.
+Auto is the first entry in the model picker and the default for a new thread. Omni reads the first prompt and picks the harness, model and effort for it. The thread's model pill then reads "Auto · <model>", and hovering it shows why, for example "Hard code task: Opus 5.5, high effort". Once picked, it is the thread's run like any other, and [switching](#switching-mid-thread) it drops the "Auto".
 
 - It sorts the prompt into a kind (code, math, research, writing, ops, quick) and scores how much it asks: its length, the code it names, and cues such as a migration, a race, a typo or a lookup. Light work runs on Haiku, standard on Sonnet, hard on Opus at high effort, the hardest on Opus at xhigh. Code and math never start below Sonnet.
 - It also reads what the brief needs, and that can pick the harness. First match wins:
