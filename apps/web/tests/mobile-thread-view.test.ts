@@ -94,4 +94,24 @@ describe('threadView', () => {
     expect(v.turns[1].reports[0].role).toBe('researcher');
     expect(v.turns[1].children.map((c) => c.id)).toEqual(['late']);
   });
+
+  it('shows a run switch under the turn it followed, not as a step', () => {
+    const claude = { harness: 'claude', model: '', effort: '', harnessName: 'Claude Code', modelLabel: 'Opus' };
+    const codex = { harness: 'codex', model: '', effort: '', harnessName: 'Codex', modelLabel: 'GPT-5.5' };
+    const events = [
+      user('Fix the cart', 0),
+      text('Fixed.', 1),
+      result(2),
+      ev('switch', { from: claude, to: codex, mode: 'handover' }, 3),
+      user('Now the tests', 4),
+      ev('handover', { to: codex, session: 'fresh', entries: 3, omitted: 0, chars: 300 }, 4),
+      text('Running them.', 5),
+    ];
+    const v = threadView({ events, thread: thread('running'), artifacts: [], children: [] });
+    expect(v.turns).toHaveLength(2);
+    expect(v.turns[0].switches.map((s) => [s.p.to.harness, s.done?.entries])).toEqual([['codex', 3]]);
+    expect(v.turns[0].items.map((it) => it.type)).toEqual(['user', 'text', 'result']);
+    expect(v.turns[1].switches).toEqual([]);
+    expect(v.turns[1].prompts.map((p) => p.text)).toEqual(['Now the tests']);
+  });
 });

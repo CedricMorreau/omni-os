@@ -393,7 +393,7 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
                 pin();
               }}
               // A rename keeps updated_at, so it has to win a tie.
-              onRenamed={(t) => applyThread(t)}
+              onChanged={(t) => applyThread(t)}
               extra={
                 thread.branch ? <ThreadPR thread={thread} slotBusy={slotBusy} busy={prBusy} onOpen={openPR} /> : undefined
               }

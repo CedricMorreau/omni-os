@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { threadRunLabels, type RunCatalogHarness } from '../src/thread-run.ts';
+import { pickedRun, threadChoice, threadRunLabels, type RunCatalogHarness } from '../src/thread-run.ts';
 
 const catalog: RunCatalogHarness[] = [
   {
@@ -53,5 +53,30 @@ describe('threadRunLabels', () => {
       harnessName: 'Claude Code',
       effort: 'high',
     });
+  });
+});
+
+describe('pickedRun', () => {
+  const codex: RunCatalogHarness = { id: 'codex', name: 'Codex', models: [{ id: 'gpt', label: 'GPT', default: true, efforts: ['low', 'high'], defaultEffort: 'low' }] };
+  const both = [...catalog, codex];
+  const opusHigh = { harness: 'claude-code', model: 'opus', effort: 'high' };
+
+  it('starts a new model at its default effort', () => {
+    expect(pickedRun(opusHigh, both, { harness: 'claude-code', model: 'sonnet' })).toEqual({ harness: 'claude-code', model: 'sonnet', effort: '' });
+    expect(pickedRun(opusHigh, both, { harness: 'codex', model: 'gpt' })).toEqual({ harness: 'codex', model: 'gpt', effort: '' });
+  });
+
+  it('keeps the model when only the effort changes', () => {
+    expect(pickedRun(opusHigh, both, { effort: 'low' })).toEqual({ harness: 'claude-code', model: 'opus', effort: 'low' });
+    expect(pickedRun({ harness: 'claude-code', model: null, effort: '' }, both, { effort: 'low' })).toEqual({ harness: 'claude-code', model: '', effort: 'low' });
+  });
+
+  it('changes nothing when the pick is what the thread runs', () => {
+    expect(pickedRun(opusHigh, both, { harness: 'claude-code', model: 'opus' })).toBeNull();
+    expect(pickedRun(opusHigh, both, { effort: 'high' })).toBeNull();
+    // No stored model runs the harness default, so picking that default is no switch.
+    const byDefault = { harness: 'claude-code', model: null, effort: '' };
+    expect(threadChoice(byDefault, both)).toEqual({ harness: 'claude-code', model: 'sonnet' });
+    expect(pickedRun(byDefault, both, { harness: 'claude-code', model: 'sonnet' })).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ import { slashPieces } from '@omni/shared/slash-pills.ts';
 import { statusLabel } from '../status-line.ts';
 import type { SlashHit } from '@omni/shared/slash.ts';
 import { publishedFrom, type Published } from '@omni/shared/published.ts';
+import { handoverNote, switchText } from '@omni/shared/run-switch.ts';
 import {
   buildItems,
   buildTasks,
@@ -26,6 +27,7 @@ import {
   type TaskView,
   type Todo,
   type ModLine,
+  type SwitchItem,
   type ToolCall,
   type UserP,
 } from '../transcript/fold.ts';
@@ -921,6 +923,26 @@ function ResultLine({ p }: { p: ResultP }) {
   );
 }
 
+/** A run switch: a quiet divider like the result line, with the handover's progress under it. The phone shows it too. */
+export function SwitchLine({ it, running }: { it: SwitchItem; running: boolean }) {
+  const note = handoverNote(it.p, it.done, it.superseded);
+  const waiting = it.p.mode === 'handover' && !it.done && !it.superseded && running;
+  return (
+    <div className="py-1 text-center text-[12px] font-medium text-fg-4">
+      <div className="flex items-center gap-3">
+        <div className="h-px flex-1 bg-line" />
+        <span className="flex min-w-0 items-center gap-2 text-fg-3">
+          <Icon name="refresh" size={12} className="shrink-0" />
+          <span className="min-w-0 break-words">{switchText(it.p)}</span>
+          {waiting && <Loader size={11} />}
+        </span>
+        <div className="h-px flex-1 bg-line" />
+      </div>
+      {note && <div className="mt-1 px-6 font-normal">{note}</div>}
+    </div>
+  );
+}
+
 /** Mod log lines: dim system rows, each with the plugin that wrote it, in the status line's quiet style. */
 function ModLog({ lines }: { lines: ModLine[] }) {
   return (
@@ -1098,6 +1120,8 @@ export const Transcript = memo(function Transcript({
               return <ReportCard key={it.key} p={it.p} />;
             case 'mod':
               return <ModLog key={it.key} lines={it.lines} />;
+            case 'switch':
+              return <SwitchLine key={it.key} it={it} running={running} />;
             default:
               return null;
           }
