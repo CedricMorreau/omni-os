@@ -302,6 +302,42 @@ struct ResultLineView: View {
   }
 }
 
+/// SwitchLine in Transcript.tsx: a run switch as a quiet divider like the result line, with the handover's progress
+/// under it.
+struct SwitchLineView: View {
+  let row: SwitchRow
+  let running: Bool
+
+  var body: some View {
+    VStack(spacing: z(4)) {
+      HStack(spacing: z(12)) {
+        rule
+        HStack(spacing: z(8)) {
+          Image(systemName: "arrow.triangle.2.circlepath").font(.omni(size: 11))
+          Text(row.text).multilineTextAlignment(.center)
+          if row.isPending && running { Loader(size: 11) }
+        }
+        .font(.omni(size: 12, weight: .medium))
+        .foregroundStyle(Tok.fg3)
+        .fixedSize(horizontal: false, vertical: true)
+        rule
+      }
+      if let note = row.note {
+        Text(note)
+          .font(.omni(size: 12))
+          .foregroundStyle(Tok.fg4)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, z(24))
+      }
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, z(4))
+    .accessibilityElement(children: .combine)
+  }
+
+  private var rule: some View { Rectangle().fill(Tok.line).frame(height: 1) }
+}
+
 /// ErrorCallout in Transcript.tsx: a surface card, the needs diamond and Error in ink, the text in mono fg-2.
 struct ErrorCallout: View {
   let text: String

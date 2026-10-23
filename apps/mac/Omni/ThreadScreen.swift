@@ -535,6 +535,8 @@ private struct TranscriptRow: View {
       ReportCard(report: report, document: markdown.document(for: id, text: report.text.isEmpty ? "(no reply)" : report.text), model: model)
     case .mod(_, let lines):
       ModLogView(lines: lines)
+    case .runSwitch(let row):
+      SwitchLineView(row: row, running: running)
     }
   }
 
