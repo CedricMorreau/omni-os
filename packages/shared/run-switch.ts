@@ -51,6 +51,8 @@ const named = (r: RunName) => `${r.harnessName} (${r.modelLabel})`;
 export function switchText(p: SwitchP): string {
   switch (p.mode) {
     case 'settings':
+      // A harness change on a thread that never ran has no session to hand over, so it reads as a plain switch.
+      if (p.from.harness !== p.to.harness) return `Switched to ${named(p.to)}, ${effortText(p.to)}`;
       return p.from.model === p.to.model ? `Switched to ${effortText(p.to)}` : `Switched to ${p.to.modelLabel}, ${effortText(p.to)}`;
     case 'handover':
       return `Handing over from ${named(p.from)} to ${named(p.to)}`;
