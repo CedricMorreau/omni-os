@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { api, errorText, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
-import { bytes } from '../format.ts';
+import { bytes, CHANNEL_KIND } from '../format.ts';
 import { dropNewThreadPreset, navigate, openNewThread, peekNewThreadPreset, takeComposerFocus } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { ErrorNote, Icon, IconButton, Kbd, Loader, Picker, type IconName, type PickerOption } from './ui.tsx';
@@ -68,7 +68,7 @@ const isImage = (f: File) => f.type.startsWith('image/');
 const sameFile = (a: File, b: File) => a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
 
 /** Files staged for the next message: paperclip, drag-and-drop and paste all land here. */
-function useAttachments() {
+export function useAttachments() {
   const { status } = useApp();
   const maxMb = status?.maxUploadMb ?? 25;
   const [files, setFiles] = useState<File[]>([]);
@@ -146,7 +146,7 @@ function Thumb({ file }: { file: File }) {
 }
 
 /** Staged attachments, above the input, each removable until the message is sent. */
-function AttachmentStrip({ files, onRemove }: { files: File[]; onRemove: (f: File) => void }) {
+export function AttachmentStrip({ files, onRemove }: { files: File[]; onRemove: (f: File) => void }) {
   if (!files.length) return null;
   return (
     <div className="flex flex-wrap gap-1.5 px-3 pt-3 pb-0.5">
@@ -188,8 +188,6 @@ function AttachButton({ onPick, disabled }: { onPick: (files: File[]) => void; d
     </>
   );
 }
-
-const KIND: Record<string, string> = { client: 'Client', internal: 'Internal', personal: 'Personal', system: 'System' };
 
 /** Bencho "cmd" go button: quiet until there is something to send, then ink. */
 function SendButton({ armed, busy, onClick, children }: { armed: boolean; busy: boolean; onClick: () => void; children: ReactNode }) {
@@ -537,7 +535,7 @@ export function NewThreadComposer({
   const channelOptions: PickerOption<string>[] = visibleChannels.map((c) => ({
     value: c.id,
     label: c.id === 'conductor' ? 'Conductor' : c.name,
-    sub: KIND[c.kind] ?? c.kind,
+    sub: CHANNEL_KIND[c.kind] ?? c.kind,
     avatar: c.name,
     icon: c.id === 'conductor' ? 'target' : undefined,
   }));
@@ -764,6 +762,29 @@ function ThreadRunPills({ thread }: { thread: Thread }) {
 }
 
 /** Follow-up composer pinned under a thread. On a busy thread it steers by default. */
+/**
+ * Sends a reply to a thread. A message keeps its request id until it goes through, so retrying one whose answer was
+ * lost is not delivered twice.
+ */
+export function useReplySend(threadId: string) {
+  // The last send that failed: retrying the same message reuses its request id.
+  const lastRequest = useRef<PendingRequest | null>(null);
+  useEffect(() => {
+    lastRequest.current = null;
+  }, [threadId]);
+  return useCallback(
+    async (prompt: string, mode: SendMode | undefined, files: File[]) => {
+      const request = requestIdFor(lastRequest.current, sendKey(prompt, mode, files));
+      lastRequest.current = request;
+      const body = { prompt, ...(mode && { mode }), request_id: request.id };
+      const t = await api.send<Thread>(`/threads/${encodeURIComponent(threadId)}/messages`, body, files);
+      lastRequest.current = null;
+      return t;
+    },
+    [threadId],
+  );
+}
+
 export function ReplyComposer({
   thread,
   canSteer = true,
@@ -786,12 +807,10 @@ export function ReplyComposer({
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const att = useAttachments();
-  // The last send that failed: retrying the same message reuses its request id.
-  const lastRequest = useRef<PendingRequest | null>(null);
+  const sendReply = useReplySend(threadId);
   useAutosize(ref, text, 240);
 
   useEffect(() => {
-    lastRequest.current = null;
     setText(drafts.get(key) ?? '');
     setError(null);
     att.clear();
@@ -822,12 +841,8 @@ export function ReplyComposer({
     if (!prompt || busy) return;
     setBusy(true);
     setError(null);
-    const request = requestIdFor(lastRequest.current, sendKey(prompt, mode, att.files));
-    lastRequest.current = request;
     try {
-      const body = { prompt, ...(mode && { mode }), request_id: request.id };
-      const t = await api.send<Thread>(`/threads/${encodeURIComponent(threadId)}/messages`, body, att.files);
-      lastRequest.current = null;
+      const t = await sendReply(prompt, mode, att.files);
       // Keep anything typed while the send was in flight.
       if (drafts.get(key) === raw) drafts.delete(key);
       if (latest.current === raw) setText('');
