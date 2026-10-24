@@ -3,9 +3,9 @@ import Foundation
 /// How a reply is sent, from what the harness can do and whether the thread is busy
 /// (`SteerButton` and `ReplyComposer` in apps/web/src/components/Composer.tsx).
 public enum SendRules {
-  /// The harness's own answer when it is known, else every harness but Cursor steers.
+  /// The harness's own answer when it is known, else every harness but Cursor and Cursor Cloud steers.
   public static func canSteer(harness: HarnessID, capabilities: HarnessCapabilities?) -> Bool {
-    capabilities?.steer ?? (harness != .cursor)
+    capabilities?.steer ?? (harness != .cursor && harness != .cursorCloud)
   }
 
   /// The modes the split button offers, in order.
@@ -45,8 +45,10 @@ public enum SendRules {
   /// The main half of the button: "Steer" or, where steering isn't supported, "Queue".
   public static func buttonTitle(canSteer: Bool) -> String { canSteer ? "Steer" : "Queue" }
 
-  public static func placeholder(busy: Bool) -> String {
-    busy ? "Steer the agent. It reads this at its next step." : "Reply"
+  /// What the reply box says. Busy, it says what Send does: steer the turn, or queue for after it where steering isn't supported.
+  public static func placeholder(busy: Bool, canSteer: Bool = true) -> String {
+    guard busy else { return "Reply" }
+    return canSteer ? "Steer the agent. It reads this at its next step." : "Queue a message. It runs when this turn ends."
   }
 }
 

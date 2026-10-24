@@ -58,10 +58,23 @@ private struct FoldItem: Decodable, Equatable {
   var turns: Int? = nil
   var taskId: String? = nil
   var lines: [FoldModLine]? = nil
+  // A cloud agent card: its newest state, flattened onto the item.
+  var agentId: String? = nil
+  var url: String? = nil
+  var name: String? = nil
+  var runId: String? = nil
+  var status: String? = nil
+  var repo: String? = nil
+  var ref: String? = nil
+  var branch: String? = nil
+  var prUrl: String? = nil
 
   enum CodingKeys: String, CodingKey {
-    case type, key, text, total, calls, ok, subtype, turns, lines
+    case type, key, text, total, calls, ok, subtype, turns, lines, url, name, status, repo, ref, branch
     case taskId = "task_id"
+    case agentId = "agent_id"
+    case runId = "run_id"
+    case prUrl = "pr_url"
   }
 }
 
@@ -114,6 +127,10 @@ private func project(_ transcript: Transcript) -> (items: [FoldItem], plan: Fold
       items.append(FoldItem(type: "report", key: id, text: report.text, taskId: report.taskID))
     case .mod(let id, let lines):
       items.append(FoldItem(type: "mod", key: id, lines: lines.map { FoldModLine(key: $0.id, plugin: $0.plugin, text: $0.text) }))
+    case .cloud(let id, let s):
+      items.append(FoldItem(
+        type: "cloud", key: id, agentId: s.agentID, url: s.url, name: s.name, runId: s.runID, status: s.status,
+        repo: s.repo.isEmpty ? nil : s.repo, ref: s.ref, branch: s.branch, prUrl: s.prURL))
     }
   }
   return (items, plan)
@@ -125,7 +142,7 @@ private func project(_ transcript: Transcript) -> (items: [FoldItem], plan: Fold
     let corpus = try OmniJSON.decoder().decode(Corpus.self, from: Data(contentsOf: url))
     let names = Set(corpus.cases.map(\.name))
     #expect(names == Set([
-      "first-string-field", "grouping", "mod-logs", "plan-placement", "result-before-call", "self-parent", "undecodable-tool-use",
+      "cloud-agent", "first-string-field", "grouping", "mod-logs", "plan-placement", "result-before-call", "self-parent", "undecodable-tool-use",
       "zero-turn-success",
     ]))
     for c in corpus.cases {

@@ -212,7 +212,7 @@ private struct ReplyComposerView: View {
         AttachmentStrip(files: reply.files, remove: reply.removeFile)
       }
       ComposerTextView(
-        text: $reply.text, placeholder: suggestion ?? SendRules.placeholder(busy: busyThread), running: busyThread,
+        text: $reply.text, placeholder: suggestion ?? SendRules.placeholder(busy: busyThread, canSteer: canSteer), running: busyThread,
         interrupting: store.interrupting, focusTick: focusTick, callbacks: callbacks, caretRequest: caret,
         scale: UIZoom.settings.scale
       )
