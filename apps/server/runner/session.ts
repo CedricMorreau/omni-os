@@ -16,7 +16,7 @@ import {
   deliveryPhase,
   drop,
   emitThread,
-  harnessSteers,
+  deliveryCaps,
   isShuttingDown,
   lives,
   setShuttingDown,
@@ -176,7 +176,7 @@ export function interruptThread(threadId: string) {
   }
   // A process already being stopped needs nothing more; what waited for its successor was dropped above.
   if (live?.turn && !live.closing) {
-    const action = resolveDelivery('interrupt', { steer: harnessSteers(threadId) }, deliveryPhase(live));
+    const action = resolveDelivery('interrupt', deliveryCaps(threadId), deliveryPhase(live));
     switch (action) {
       case 'stop-startup':
         // Still starting up (MCP servers can take 13s): no turn to wind down, and a queued message would run anyway.
