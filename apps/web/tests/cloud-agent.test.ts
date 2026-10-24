@@ -48,7 +48,7 @@ describe('phone turn with a cloud agent', () => {
       ev(2, 'cloud_agent', { ...base, status: 'CREATING' }),
       ev(3, 'cloud_agent', { ...base, status: 'RUNNING', branch: 'cursor/move' }),
     ];
-    const v = threadView({ events, thread: { status: 'running', cwd: '' } as Pick<Thread, 'status' | 'cwd'>, artifacts: [], children: [] });
+    const v = threadView({ events, thread: { status: 'running', cwd: '', harness: 'cursor-cloud' } as Pick<Thread, 'status' | 'cwd' | 'harness'>, artifacts: [], children: [] });
     expect(v.turns).toHaveLength(1);
     expect(v.turns[0].cloud).toMatchObject({ status: 'RUNNING', branch: 'cursor/move' });
     expect(v.now).toEqual({ verb: 'Cursor cloud agent: working', target: '' });

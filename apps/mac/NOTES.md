@@ -22,6 +22,7 @@ Notes from the tracer, #62 (parts A to D), for whoever builds the next screens. 
 | `StreamMessage.swift` | `ThreadStreamMessage` and `FeedEvent`: one SSE `data:` message each |
 | `Client.swift` | `OmniClient`, `HTTPTransport`, `OmniAPIError`, `NewThread`. `send` is internal so extensions in other files can use it |
 | `Client+Secrets.swift` | `secrets()`, `setSecret(scope:name:value:)`, `deleteSecret(scope:name:)` on `OmniClient` |
+| `Client+GrokBot.swift` | `sendThreadToGrokBot(threadID:)` on `OmniClient`. Posts the thread id. The server sends the text |
 | `Secrets.swift` | `SecretScope`, `SecretRow`, `SecretName` (the Web UI's name rules), `SecretGroup`, `SecretScopeOption`, `SecretsModel` (the Secrets tab) |
 | `RelTime.swift` | `RelTime.label`: `relTime` in `apps/web/src/format.ts` |
 | `Appearance.swift` | `Appearance`, `AppearanceSettings` (in UserDefaults, `-appearance` for a run) |
@@ -40,6 +41,7 @@ Notes from the tracer, #62 (parts A to D), for whoever builds the next screens. 
 | `Client+Thread.swift` | `ThreadAPI` (the calls `ThreadStore` makes), `artifactURL` and `uploadURL` on `OmniClient` |
 | `ThreadStore.swift` | `ThreadStore` (one thread, live), `ThreadStoreRegistry` |
 | `Transcript.swift` | `Transcript` (the Web UI's `buildItems`, incremental), `TranscriptItem`, `ToolGroup`, `ToolCall`, `Plan`, `Todo`, `TurnResult.line` |
+| `RunSwitch.swift` | `Run`, `RunName`, `SwitchP`, `HandoverP`, `RunSwitch` (`switchText` and `handoverNote` from `packages/shared/run-switch.ts`, the pickers' run, `queued`, `shown`, `describe`), `SwitchRow` (a transcript switch row), `switchRun` on `OmniClient` |
 | `ToolText.swift` | `ToolText`: a tool's label, one-line summary, SF Symbol and font, from `web/src/tool-summary.ts` and `Transcript.tsx`. Internal `JSONKeyOrder` |
 | `StatusLine.swift` | `StatusLine.label` (`apps/web/src/status-line.ts`) and `betweenTurns` |
 | `Format.swift` | `Format`: `relTime`, `clock`, `shortDate`, `duration(ms:)`, `bytes`, `plural`, `shortPath`, from `apps/web/src/format.ts` |
@@ -505,7 +507,7 @@ The slash grammar, ranking, hints and pills are the TypeScript in `packages/shar
 - `SlashEngine.shared` (OmniKit): `query`, `sections`, `pick`, `reply`, `newThreadHint`, `pieces`, `omniCommands`. All offsets are UTF-16 units. `String.index(utf16Offset:)` and `utf16Offset(of:)` (in `SlashTypes.swift`) are the only place they become Swift indices; `AttributedString` has the same pair in `SlashMenuView.swift`.
 - `SlashCommandsStore` (`@MainActor @Observable`): the list for a `CommandsSource` (`.thread(id)` or `.newThread(harness:channel:)`), fetched as `useCommands` does: cached, then `wait=1`; an older `fetchedAt` never replaces a newer list; a failure with no list is `.unavailable`. Set `source` when the new-thread picker changes.
 - `SlashMenuModel`: open/closed, sections, highlight, Esc dismissal, keys, pick, `reply` (what Send does) and `hint`. It loads the list on focus and when the menu opens.
-- `OmniCommands.run(action, in: thread, client:)` does `/clear`, `/new` (new thread, or `.openNewThread(preset)` when there is no prompt) and `/rename`. `/model`, `/effort` and `/fast` do nothing; offer `NewThreadPreset.otherModel(thread)`. Attachments on `/clear <prompt>` are not sent.
+- `OmniCommands.run(action, in: thread, client:)` does `/clear`, `/new` (new thread, or `.openNewThread(preset)` when there is no prompt) and `/rename`. `/model`, `/effort` and `/fast` do nothing: the hint points at the reply box's model and effort pickers, and still offers `NewThreadPreset.otherModel(thread)`. Attachments on `/clear <prompt>` are not sent.
 - Pills in user bubbles already use `SlashPiece.split` (native); a test pins it to the engine's `pieces`.
 
 Wiring it into the composer (apps/mac/Omni/SlashMenuDemo.swift is a working example, Debug only, `-OmniQASlashDemo YES`):
@@ -520,7 +522,7 @@ The overlay sits above the composer, like the Web UI's, not at the caret: `TextE
 Wired (both composers):
 
 - `ComposerCallbacks` got `slash` (arrows, Return, Tab from the text view's `doCommandBy`, Esc from `cancelOperation`; not while an input method composes) and `edited` (text and caret on every change, selection move and focus). `CaretRequest` sets the caret after a pick. `.slashMenu(menu)` is on the composer's shell for its overlay; its key handler never sees the keys because the AppKit text view takes them first.
-- Reply box: `menu.reply` decides the Send button (`Rename`, `New thread`, ...) and Return; `runOmni()` calls `OmniKit.OmniCommands.run` (qualified: the app has its own `OmniCommands: Commands`). `/model`, `/effort`, `/fast` show the hint with "New thread on another model".
+- Reply box: `menu.reply` decides the Send button (`Rename`, `New thread`, ...) and Return; `runOmni()` calls `OmniKit.OmniCommands.run` (qualified: the app has its own `OmniCommands: Commands`). `/model`, `/effort`, `/fast` show the hint (switch with the pickers below) with "New thread on another model".
 - New thread: `.slashMenu(menu, below: true)`; `menu.commands.source` and `menu.harness` follow the pickers. `AppModel.openNewThread(preset)` puts the preset in `shell.newThreadPreset` and opens the channel; that channel's composer takes it (`NewThreadComposerModel.apply`) and opens the model list for `pickModel`.
 - QA: `{"type": ...}` also focuses the box. In this environment, opening a thread with `{"route": "#/t/<id>"}` crashes the app (window constraint loop) on main too; use `{"openThread": "<id>"}` and read `-window1.png`.
 
@@ -565,6 +567,9 @@ Wired (both composers):
 
 - OmniKit: `SendRules` (steer/queue/interrupt per harness, `EscapeGate` for Esc), `Attachments.swift` (`StagedFile`, `AttachmentRules.add`: 10 files, `maxUploadMb`, empty files dropped, Web UI wording), `DraftStore` (one file per key in `~/Library/Application Support/Omni/Drafts`), `ReplyComposerModel` (text as draft, staged files, send, Open PR), `OmniClient.reply(to:prompt:mode:files:)` (JSON, or multipart with a `payload` field and `files` parts when there are files; an idle thread sends no `mode`).
 - App: `ComposerTextView.swift` (AppKit text view: IME, spellcheck, undo, grows to 240pt, Return sends in `doCommandBy`, Cmd-Return newline and Shift-Cmd-Return interrupt in `performKeyEquivalent`, Esc in `cancelOperation`, file drop and paste, screenshot paste to a temp `image.png`), `ComposerView.swift` (`ReplyComposerHost` is the one line in the thread screen; split Steer button; paperclip; Open PR; toolbar Interrupt), `ThreadCommands.swift` (Thread > Interrupt, Cmd-period). If another slice adds a "Thread" menu, merge the two.
+- Model and effort: `ModelPickerButton` (`offersAuto: false`, `autoReason` so a thread Auto started reads "Auto · <model>" until it switches) and `EffortMenu`, bound to the thread's run. A pick posts `switchRun` (`/api/threads/:id/run`), which switches the next turn (same harness: settings; other harness: a handover). `RunSwitch.picking` gives nil for the run already shown and resets effort on a new model; an effort pick keeps the stored model, empty for the harness default. Nothing changes until the server answers; its refusal shows above the box. While a turn runs the server queues the pick (`queuedHarness`, `queuedModel`, `queuedEffort` on `OmniThread`): the pickers show `RunSwitch.shown` ringed in live after a `NextTurnChip`, whose click posts `RunSwitch.current` to drop it, and nothing steers (the box queues) until the turn ends.
+- Switch rows: `TranscriptItem.runSwitch(SwitchRow)`, drawn by `SwitchLineView` (MessageViews.swift) as a quiet divider with `handoverNote` under it and a loader while a handover waits and the thread runs. A `handover` event completes the pending handover row; a later handover or back switch marks it superseded. The `run-switch` corpus case keeps it in step with the Web UI.
+- QA step `{"run": {"harness": "codex", "model": "gpt-6.1", "effort": "high"}}` uses the reply box picker callback to switch the next run. Effort is optional.
 - QA steps: `{"type": "text"}` fills the reply box, `{"send": "reply"}` (or `steer`, `queue`, `interrupt`) sends it. `QARunner` also got a stub for `.expand`, which the tree did not handle (Debug build failed on it); replace it with the real one.
 - Not built: the slash menu (Esc gating has a slot for it), scroll-to-bottom on send.
 

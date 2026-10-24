@@ -795,6 +795,392 @@
       "plan": null
     },
     {
+      "name": "run-switch",
+      "events": [
+        {
+          "id": 1,
+          "thread_id": "t",
+          "kind": "user",
+          "payload": "{\"text\":\"fix the cart\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 2,
+          "thread_id": "t",
+          "kind": "init",
+          "payload": "{\"model\":\"claude-opus-4-7\",\"cwd\":\"/x\",\"tools\":1,\"mcp\":[]}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 3,
+          "thread_id": "t",
+          "kind": "tool_use",
+          "payload": "{\"id\":\"r\",\"name\":\"Read\",\"input\":{\"file_path\":\"/x/cart.ts\"},\"parent\":null}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 4,
+          "thread_id": "t",
+          "kind": "tool_result",
+          "payload": "{\"tool_use_id\":\"r\",\"text\":\"ok\",\"is_error\":false,\"truncated\":false}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 5,
+          "thread_id": "t",
+          "kind": "switch",
+          "payload": "{\"from\":{\"harness\":\"claude\",\"model\":\"claude-opus-4-7\",\"effort\":\"\",\"harnessName\":\"Claude Code\",\"modelLabel\":\"Opus 4.7\"},\"to\":{\"harness\":\"claude\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"high\",\"harnessName\":\"Claude Code\",\"modelLabel\":\"Sonnet 4.6\"},\"mode\":\"settings\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 6,
+          "thread_id": "t",
+          "kind": "tool_use",
+          "payload": "{\"id\":\"g\",\"name\":\"Grep\",\"input\":{\"pattern\":\"total\"},\"parent\":null}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 7,
+          "thread_id": "t",
+          "kind": "result",
+          "payload": "{\"ok\":true,\"subtype\":\"success\",\"turns\":2}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 8,
+          "thread_id": "t",
+          "kind": "switch",
+          "payload": "{\"from\":{\"harness\":\"claude\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"high\",\"harnessName\":\"Claude Code\",\"modelLabel\":\"Sonnet 4.6\"},\"to\":{\"harness\":\"codex\",\"model\":\"gpt-5.5\",\"effort\":\"\",\"harnessName\":\"Codex\",\"modelLabel\":\"GPT-5.5\"},\"mode\":\"handover\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 9,
+          "thread_id": "t",
+          "kind": "user",
+          "payload": "{\"text\":\"carry on\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 10,
+          "thread_id": "t",
+          "kind": "init",
+          "payload": "{\"model\":\"gpt-5.5\",\"cwd\":\"/x\",\"tools\":1,\"mcp\":[]}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 11,
+          "thread_id": "t",
+          "kind": "handover",
+          "payload": "{\"to\":{\"harness\":\"codex\",\"model\":\"gpt-5.5\",\"effort\":\"\",\"harnessName\":\"Codex\",\"modelLabel\":\"GPT-5.5\"},\"session\":\"fresh\",\"entries\":6,\"omitted\":0,\"chars\":1480}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 12,
+          "thread_id": "t",
+          "kind": "assistant_text",
+          "payload": "{\"text\":\"Picked it up.\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 13,
+          "thread_id": "t",
+          "kind": "result",
+          "payload": "{\"ok\":true,\"subtype\":\"success\",\"turns\":1}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 14,
+          "thread_id": "t",
+          "kind": "switch",
+          "payload": "{\"from\":{\"harness\":\"codex\",\"model\":\"gpt-5.5\",\"effort\":\"\",\"harnessName\":\"Codex\",\"modelLabel\":\"GPT-5.5\"},\"to\":{\"harness\":\"cursor\",\"model\":\"\",\"effort\":\"\",\"harnessName\":\"Cursor Agent\",\"modelLabel\":\"default model\"},\"mode\":\"handover\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 15,
+          "thread_id": "t",
+          "kind": "switch",
+          "payload": "{\"from\":{\"harness\":\"cursor\",\"model\":\"\",\"effort\":\"\",\"harnessName\":\"Cursor Agent\",\"modelLabel\":\"default model\"},\"to\":{\"harness\":\"codex\",\"model\":\"gpt-5.5\",\"effort\":\"\",\"harnessName\":\"Codex\",\"modelLabel\":\"GPT-5.5\"},\"mode\":\"back\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 16,
+          "thread_id": "t",
+          "kind": "user",
+          "payload": "{\"text\":\"one more\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 17,
+          "thread_id": "t",
+          "kind": "assistant_text",
+          "payload": "{\"text\":\"Done.\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 18,
+          "thread_id": "t",
+          "kind": "result",
+          "payload": "{\"ok\":true,\"subtype\":\"success\",\"turns\":1}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 19,
+          "thread_id": "t",
+          "kind": "switch",
+          "payload": "{\"from\":{\"harness\":\"codex\",\"model\":\"gpt-5.5\",\"effort\":\"\",\"harnessName\":\"Codex\",\"modelLabel\":\"GPT-5.5\"},\"to\":{\"harness\":\"claude\",\"model\":\"claude-opus-4-7\",\"effort\":\"\",\"harnessName\":\"Claude Code\",\"modelLabel\":\"Opus 4.7\"},\"mode\":\"handover\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "id": 20,
+          "thread_id": "t",
+          "kind": "switch",
+          "payload": "{\"from\":{\"harness\":\"claude\",\"model\":\"claude-opus-4-7\",\"effort\":\"\",\"harnessName\":\"Claude Code\",\"modelLabel\":\"Opus 4.7\"},\"to\":{\"harness\":\"claude\",\"model\":\"claude-opus-4-7\",\"effort\":\"high\",\"harnessName\":\"Claude Code\",\"modelLabel\":\"Opus 4.7\"},\"mode\":\"settings\"}",
+          "created_at": "2026-10-23T09:00:00.000Z"
+        }
+      ],
+      "items": [
+        {
+          "type": "user",
+          "key": 1,
+          "text": "fix the cart"
+        },
+        {
+          "type": "tools",
+          "key": 3,
+          "total": 1,
+          "calls": [
+            {
+              "id": "r",
+              "name": "Read",
+              "parent": null,
+              "orphan": false,
+              "input": {
+                "file_path": "/x/cart.ts"
+              },
+              "summary": "/x/cart.ts",
+              "result": {
+                "text": "ok",
+                "is_error": false,
+                "truncated": false
+              },
+              "children": []
+            }
+          ]
+        },
+        {
+          "type": "switch",
+          "key": 5,
+          "p": {
+            "from": {
+              "harness": "claude",
+              "model": "claude-opus-4-7",
+              "effort": "",
+              "harnessName": "Claude Code",
+              "modelLabel": "Opus 4.7"
+            },
+            "to": {
+              "harness": "claude",
+              "model": "claude-sonnet-4-6",
+              "effort": "high",
+              "harnessName": "Claude Code",
+              "modelLabel": "Sonnet 4.6"
+            },
+            "mode": "settings"
+          },
+          "done": null,
+          "superseded": false
+        },
+        {
+          "type": "tools",
+          "key": 6,
+          "total": 1,
+          "calls": [
+            {
+              "id": "g",
+              "name": "Grep",
+              "parent": null,
+              "orphan": false,
+              "input": {
+                "pattern": "total"
+              },
+              "summary": "total",
+              "result": null,
+              "children": []
+            }
+          ]
+        },
+        {
+          "type": "result",
+          "key": 7,
+          "ok": true,
+          "subtype": "success",
+          "turns": 2
+        },
+        {
+          "type": "switch",
+          "key": 8,
+          "p": {
+            "from": {
+              "harness": "claude",
+              "model": "claude-sonnet-4-6",
+              "effort": "high",
+              "harnessName": "Claude Code",
+              "modelLabel": "Sonnet 4.6"
+            },
+            "to": {
+              "harness": "codex",
+              "model": "gpt-5.5",
+              "effort": "",
+              "harnessName": "Codex",
+              "modelLabel": "GPT-5.5"
+            },
+            "mode": "handover"
+          },
+          "done": {
+            "to": {
+              "harness": "codex",
+              "model": "gpt-5.5",
+              "effort": "",
+              "harnessName": "Codex",
+              "modelLabel": "GPT-5.5"
+            },
+            "session": "fresh",
+            "entries": 6,
+            "omitted": 0,
+            "chars": 1480
+          },
+          "superseded": false
+        },
+        {
+          "type": "user",
+          "key": 9,
+          "text": "carry on"
+        },
+        {
+          "type": "text",
+          "key": 12,
+          "text": "Picked it up."
+        },
+        {
+          "type": "result",
+          "key": 13,
+          "ok": true,
+          "subtype": "success",
+          "turns": 1
+        },
+        {
+          "type": "switch",
+          "key": 14,
+          "p": {
+            "from": {
+              "harness": "codex",
+              "model": "gpt-5.5",
+              "effort": "",
+              "harnessName": "Codex",
+              "modelLabel": "GPT-5.5"
+            },
+            "to": {
+              "harness": "cursor",
+              "model": "",
+              "effort": "",
+              "harnessName": "Cursor Agent",
+              "modelLabel": "default model"
+            },
+            "mode": "handover"
+          },
+          "done": null,
+          "superseded": true
+        },
+        {
+          "type": "switch",
+          "key": 15,
+          "p": {
+            "from": {
+              "harness": "cursor",
+              "model": "",
+              "effort": "",
+              "harnessName": "Cursor Agent",
+              "modelLabel": "default model"
+            },
+            "to": {
+              "harness": "codex",
+              "model": "gpt-5.5",
+              "effort": "",
+              "harnessName": "Codex",
+              "modelLabel": "GPT-5.5"
+            },
+            "mode": "back"
+          },
+          "done": null,
+          "superseded": false
+        },
+        {
+          "type": "user",
+          "key": 16,
+          "text": "one more"
+        },
+        {
+          "type": "text",
+          "key": 17,
+          "text": "Done."
+        },
+        {
+          "type": "result",
+          "key": 18,
+          "ok": true,
+          "subtype": "success",
+          "turns": 1
+        },
+        {
+          "type": "switch",
+          "key": 19,
+          "p": {
+            "from": {
+              "harness": "codex",
+              "model": "gpt-5.5",
+              "effort": "",
+              "harnessName": "Codex",
+              "modelLabel": "GPT-5.5"
+            },
+            "to": {
+              "harness": "claude",
+              "model": "claude-opus-4-7",
+              "effort": "",
+              "harnessName": "Claude Code",
+              "modelLabel": "Opus 4.7"
+            },
+            "mode": "handover"
+          },
+          "done": null,
+          "superseded": false
+        },
+        {
+          "type": "switch",
+          "key": 20,
+          "p": {
+            "from": {
+              "harness": "claude",
+              "model": "claude-opus-4-7",
+              "effort": "",
+              "harnessName": "Claude Code",
+              "modelLabel": "Opus 4.7"
+            },
+            "to": {
+              "harness": "claude",
+              "model": "claude-opus-4-7",
+              "effort": "high",
+              "harnessName": "Claude Code",
+              "modelLabel": "Opus 4.7"
+            },
+            "mode": "settings"
+          },
+          "done": null,
+          "superseded": false
+        }
+      ],
+      "plan": null
+    },
+    {
       "name": "cloud-agent",
       "events": [
         {

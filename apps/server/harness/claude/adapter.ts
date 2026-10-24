@@ -2,6 +2,7 @@
 // process handling, moved here unchanged: the same args, the same env (with the API
 // auth vars stripped), the same stream-json parsing.
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -81,6 +82,8 @@ export const claudeAdapter: HarnessAdapter = {
   id: 'claude-code',
   capabilities: CAPABILITIES['claude-code'],
   resumeOnDisk: sessionOnDisk,
+  // Never the thread id: the session the thread had here before it moved away may sit under it.
+  freshSessionId: () => randomUUID(),
 
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const { thread, mcpFile, secretEnv, systemPrompt } = ctx;

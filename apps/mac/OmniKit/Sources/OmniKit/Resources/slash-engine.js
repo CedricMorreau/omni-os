@@ -114,7 +114,7 @@
           return { action: { kind: "rename", title }, armed: !!title && !hint, label: "Rename", hint };
         }
         default:
-          return { action: { kind: "fixed" }, armed: false, label: null, hint: "The model, effort and fast mode are fixed per thread." };
+          return { action: { kind: "fixed" }, armed: false, label: null, hint: "Switch the model and effort with the pills below. The next turn uses them." };
       }
     }
     return { action: { kind: "send" }, armed: !!text.trim(), label: null, hint: textHint(text, r, list, harness, "reply") };

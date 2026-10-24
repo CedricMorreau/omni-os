@@ -10,7 +10,8 @@
 #   scripts/qa-stack.sh logs            tail the server and vite logs
 #
 # QA_SERVER_PORT (default 4757) and QA_WEB_PORT (default 4768) move the ports, QA_DIR the state dir
-# (default $TMPDIR/omni-qa-<server port>). Threads run on fake-claude, so a prompt with directives such as
+# (default $TMPDIR/omni-qa-<server port>). QA_CLAUDE_BIN, QA_CODEX_BIN and QA_CURSOR_BIN swap a fake CLI for a real one
+# (a live turn spends that plan). Otherwise threads run on fake-claude, so a prompt with directives such as
 # RICH, TOOL:<ms> or LIMIT drives a turn without spending a plan (see packages/test-fixtures/fake-claude.mjs).
 # Cursor Cloud threads talk to a fake Cursor API (packages/test-fixtures/fake-cursor-api.mjs) with a stand-in key, so
 # the real CURSOR_API_KEY is never read; they need a channel with a GitHub repo set.
@@ -68,7 +69,7 @@ SH
   [ -n "$cursor_api" ] || die "fake Cursor API did not start"
   # OMNI_TOKEN cleared: an agent's shell carries the live server's, and this stack makes its own.
   OMNI_TOKEN= OMNI_PORT="$SERVER_PORT" OMNI_DATA_DIR="$DIR/data" OMNI_BRAIN_DIR="$DIR/brain" \
-    OMNI_CLAUDE_BIN="$fx/fake-claude.mjs" OMNI_CODEX_BIN="$fx/fake-codex.mjs" OMNI_CURSOR_BIN="$fx/fake-cursor.mjs" \
+    OMNI_CLAUDE_BIN="${QA_CLAUDE_BIN:-$fx/fake-claude.mjs}" OMNI_CODEX_BIN="${QA_CODEX_BIN:-$fx/fake-codex.mjs}" OMNI_CURSOR_BIN="${QA_CURSOR_BIN:-$fx/fake-cursor.mjs}" \
     OMNI_BROWSER=0 OMNI_SUGGESTIONS=0 OMNI_HERMES_URL= OMNI_AUTOMATIONS_DIR="$DIR/automations" \
     OMNI_CURSOR_API_URL="$cursor_api" OMNI_CURSOR_CLOUD_POLL_MS=1500 PATH="$DIR/bin:$PATH" \
     NODE_OPTIONS=--disable-warning=ExperimentalWarning \
@@ -85,7 +86,7 @@ SH
   api /channels >/dev/null 2>&1 || { tail -20 "$DIR/server.log" >&2; die "server not healthy after 30s"; }
   curl -fsS "$WEB" >/dev/null 2>&1 || { tail -20 "$DIR/web.log" >&2; die "vite not up after 30s"; }
 
-  for i in $(seq 1 "$seed"); do
+  for ((i = 1; i <= seed; i++)); do
     local prompt="Sample thread $i"
     [ "$i" = 1 ] && prompt="Sample thread 1 RICH"
     api /threads -X POST -H 'content-type: application/json' \

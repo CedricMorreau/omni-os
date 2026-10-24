@@ -15,7 +15,7 @@ private func file(_ name: String, size: Int = 10, modified: Double = 0) -> Stage
   }
 
   @Test func saysABusyReplyQueuesWhereItCannotSteer() {
-    #expect(SendRules.placeholder(busy: true, canSteer: false) == "Queue a message. It runs when this turn ends.")
+    #expect(SendRules.placeholder(busy: true, canSteer: false) == "Queue a message. It runs after this turn.")
     #expect(SendRules.placeholder(busy: true) == "Steer the agent. It reads this at its next step.")
     #expect(SendRules.placeholder(busy: false, canSteer: false) == "Reply")
   }

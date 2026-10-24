@@ -84,6 +84,8 @@ export const agentIdOf = (thread: { id: string; session_id: string }) => (thread
 export const cursorCloudAdapter: HarnessAdapter = {
   id: 'cursor-cloud',
   capabilities: CAPABILITIES['cursor-cloud'],
+  // The thread id means no agent yet: agentIdOf makes it bc-<thread id>. A run switch never moves a thread here anyway.
+  freshSessionId: (thread) => thread.id,
 
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const thread = ctx.thread;

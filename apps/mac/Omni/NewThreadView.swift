@@ -324,6 +324,8 @@ struct EffortMenu: View {
   let options: [EffortOption]
   let value: String
   var auto = false
+  /// Why it can't be picked now. nil when it can.
+  var disabledHelp: String? = nil
   let pick: (String) -> Void
 
   var body: some View {
@@ -343,7 +345,9 @@ struct EffortMenu: View {
         PickerPill(text: label) { PillIcon(name: "sliders") }
       }
       .pillMenu()
-      .help("Effort")
+      .disabled(disabledHelp != nil)
+      .opacity(disabledHelp != nil ? 0.45 : 1)
+      .help(disabledHelp ?? "Effort")
       .accessibilityLabel("Effort: \(label)")
     }
   }
@@ -364,6 +368,12 @@ struct ModelPickerButton: View {
   var openRequest = 0
   /// The search the list opens with on `openRequest`.
   var openQuery = ""
+  /// A thread's reply box leaves Auto out: Auto only picks a run for a new thread.
+  var offersAuto = true
+  /// Why Auto picked this model. The pill then reads "Auto · <model>".
+  var autoReason: String? = nil
+  /// Why it can't be picked now. nil when it can.
+  var disabledHelp: String? = nil
   @State private var open = false
   @State private var query = ""
 
@@ -385,8 +395,10 @@ struct ModelPickerButton: View {
       }
     }
     .buttonStyle(.plain)
-    .help("Model")
-    .accessibilityLabel(AutoRun.isAuto(model) ? "Model: Auto" : "Model: \(c.model?.label ?? "none")\(c.harness.map { " on \($0.name)" } ?? "")")
+    .disabled(disabledHelp != nil)
+    .opacity(disabledHelp != nil ? 0.45 : 1)
+    .help(disabledHelp ?? autoReason ?? "Model")
+    .accessibilityLabel(AutoRun.isAuto(model) ? "Model: Auto" : "Model: \(autoReason == nil ? "" : "Auto · ")\(c.model?.label ?? "none")\(c.harness.map { " on \($0.name)" } ?? "")")
     .popover(isPresented: $open, arrowEdge: .bottom) { list }
     .onChange(of: openRequest) {
       query = openQuery
@@ -395,9 +407,14 @@ struct ModelPickerButton: View {
     }
   }
 
+  private func title(_ c: (harness: HarnessInfo?, model: ModelEntry?)) -> String {
+    let label = c.model?.label ?? placeholder
+    return autoReason == nil ? label : "Auto · \(label)"
+  }
+
   private func pill(_ c: (harness: HarnessInfo?, model: ModelEntry?), harness: Bool) -> some View {
     let auto = AutoRun.isAuto(model)
-    return PickerPill(text: auto ? "Auto" : c.model?.label ?? placeholder, secondary: harness && c.model != nil ? c.harness?.name : nil) {
+    return PickerPill(text: auto ? "Auto" : title(c), secondary: harness && c.model != nil ? c.harness?.name : nil) {
       if !auto, let h = c.harness {
         PillAvatar(fill: Tok.bg) { HarnessLogo(harness: h.id.rawValue, size: 13).foregroundStyle(Tok.fg) }
       } else {
@@ -420,7 +437,7 @@ struct ModelPickerButton: View {
       .padding(.bottom, z(4))
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-          if "auto".hasPrefix(query.trimmingCharacters(in: .whitespaces).lowercased()) { autoRow }
+          if offersAuto && "auto".hasPrefix(query.trimmingCharacters(in: .whitespaces).lowercased()) { autoRow }
           ForEach(groups) { group in
             Section {
               rows(group)

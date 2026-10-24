@@ -21,12 +21,15 @@ public enum TranscriptItem: Hashable, Sendable, Identifiable {
   case mod(eventID: Int, [ModLine])
   /// A Cursor cloud agent's run: one card where the run first showed, with its newest state.
   case cloud(eventID: Int, CloudAgentState)
+  /// Ben switched the thread's harness, model or effort.
+  case runSwitch(SwitchRow)
 
   public var id: TranscriptItemID {
     switch self {
     case .user(let id, _, _), .text(let id, _, _), .result(let id, _), .error(let id, _), .report(let id, _, _), .mod(let id, _), .cloud(let id, _):
       .event(id)
     case .tools(let g): .event(g.eventID)
+    case .runSwitch(let r): .event(r.eventID)
     case .plan: .plan
     }
   }
@@ -180,6 +183,8 @@ public struct Transcript: Sendable {
   private var planIndex: Int?
   /// Each cloud agent run's card, by run: the event it sits at.
   private var cloudRuns: [String: Int] = [:]
+  /// The handover switch row the next `handover` event completes.
+  private var pendingSwitch: Int?
 
   public init() {}
 
@@ -252,10 +257,23 @@ public struct Transcript: Sendable {
         cloudRuns[s.runKey] = e.id
         close(.cloud(eventID: e.id, s))
       }
+    case .runSwitch(let p):
+      if p.mode != .settings, let id = pendingSwitch { withSwitch(id) { $0.superseded = true } }
+      close(.runSwitch(SwitchRow(eventID: e.id, at: e.createdAt, p: p)))
+      if p.mode != .settings { pendingSwitch = p.mode == .handover ? e.id : nil }
+    case .handover(let h):
+      if let id = pendingSwitch { withSwitch(id) { $0.done = h } }
+      pendingSwitch = nil
     case .status, .sessionInit, .task: break
     case .unknown(let kind, _):
       if Self.breaking.contains(kind) { close(nil) }
     }
+  }
+
+  private mutating func withSwitch(_ eventID: Int, _ body: (inout SwitchRow) -> Void) {
+    guard let i = items.lastIndex(where: { $0.id == .event(eventID) }), case .runSwitch(var r) = items[i] else { return }
+    body(&r)
+    items[i] = .runSwitch(r)
   }
 
   /// A `tool_use` whose payload does not decode still folds, the way the Web UI's parsePayload does:
@@ -311,7 +329,7 @@ public struct Transcript: Sendable {
   }
 
   /// Kinds that end a group of calls.
-  static let breaking: Set<String> = ["user", "assistant_text", "result", "error", "crew_report"]
+  static let breaking: Set<String> = ["user", "assistant_text", "result", "error", "crew_report", "switch"]
 
   private mutating func close(_ item: TranscriptItem?) {
     open = nil
@@ -394,6 +412,7 @@ extension Transcript {
     var group: Group?
     var plan: Plan?
     var cloudRows: [String: Int] = [:]
+    var pendingSwitch: Int?
     for e in events {
       switch Self.content(of: e) {
       case .toolUse(let use):
@@ -443,6 +462,20 @@ extension Transcript {
           cloudRows[s.runKey] = rows.count
           rows.append(.item(.cloud(eventID: e.id, s)))
         }
+      case .runSwitch(let p):
+        group = nil
+        if let i = pendingSwitch, case .item(.runSwitch(var r)) = rows[i], p.mode != .settings {
+          r.superseded = true
+          rows[i] = .item(.runSwitch(r))
+        }
+        rows.append(.item(.runSwitch(SwitchRow(eventID: e.id, at: e.createdAt, p: p))))
+        if p.mode != .settings { pendingSwitch = p.mode == .handover ? rows.count - 1 : nil }
+      case .handover(let h):
+        if let i = pendingSwitch, case .item(.runSwitch(var r)) = rows[i] {
+          r.done = h
+          rows[i] = .item(.runSwitch(r))
+        }
+        pendingSwitch = nil
       case .unknown(let kind, _):
         if breaking.contains(kind) { group = nil }
       }

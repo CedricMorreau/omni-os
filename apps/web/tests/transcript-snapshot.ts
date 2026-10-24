@@ -60,6 +60,8 @@ function projectItem(it: Item) {
       return { type: 'mod' as const, key: it.key, lines: it.lines.map((l) => ({ key: l.key, plugin: l.plugin, text: l.text })) };
     case 'cloud':
       return { type: 'cloud' as const, key: it.key, ...it.p };
+    case 'switch':
+      return { type: 'switch' as const, key: it.key, p: it.p, done: it.done, superseded: it.superseded };
     default: {
       const unreachable: never = it;
       return unreachable;

@@ -1,11 +1,13 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { errorText, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
+import { api, errorText, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
 import { HarnessLogo } from '../components/brand.tsx';
 import { AttachmentStrip, useAttachments, useReplySend } from '../components/Composer.tsx';
-import { modelOf } from '../components/ModelPicker.tsx';
 import { ErrorNote, Icon, type IconName } from '../components/ui.tsx';
 import { canSteer } from '../steer.ts';
+import { currentRun, pickedRun, shownRun, threadChoice, threadRunLabels } from '../thread-run.ts';
+import type { Run } from '@omni/shared/run-switch.ts';
 import { useDictation, withPhrase } from './dictation.ts';
+import { ModelSheet } from './ModelSheet.tsx';
 import { MoDiff, MoGroup, MoListRow, MoRound, MoSheet } from './parts.tsx';
 
 export interface ComposerChip {
@@ -23,11 +25,30 @@ const PICK = { photo: 'image/*', camera: 'image/*', file: undefined } as const;
 type Pick = keyof typeof PICK;
 
 /**
- * What the + opens: a photo, the camera or a file for the next message, and the thread's model and effort, which
- * are set when the thread starts and shown here only.
+ * What the + opens: a photo, the camera or a file for the next message, and the thread's model and effort. Tapping
+ * those opens the model sheet, which switches the run for the next turn, or once this one ends while it runs. A switch
+ * queued that way shows here, with a row that drops it.
  */
-function PlusSheet({ thread, harnesses, onPick, onClose }: { thread: Thread; harnesses?: HarnessWithRunning[]; onPick: (p: Pick) => void; onClose: () => void }) {
-  const { harness, model } = harnesses ? modelOf(harnesses, { harness: thread.harness, model: thread.model ?? '' }) : { harness: undefined, model: undefined };
+function PlusSheet({
+  thread,
+  harnesses,
+  onPick,
+  onRun,
+  onKeep,
+  onClose,
+}: {
+  thread: Thread;
+  harnesses?: HarnessWithRunning[];
+  onPick: (p: Pick) => void;
+  onRun?: () => void;
+  onKeep: () => void;
+  onClose: () => void;
+}) {
+  const shown = shownRun(thread);
+  const queued = shown !== thread;
+  const labels = threadRunLabels(shown, harnesses);
+  const now = threadRunLabels(thread, harnesses);
+  const busy = thread.status === 'running' || thread.status === 'queued';
   const tiles: [Pick, IconName, string][] = [
     ['photo', 'image', 'Photo'],
     ['camera', 'maximize', 'Camera'],
@@ -46,15 +67,22 @@ function PlusSheet({ thread, harnesses, onPick, onClose }: { thread: Thread; har
       <div className="px-3">
         <MoGroup>
           <MoListRow
-            icon={<HarnessLogo harness={thread.harness} size={15} />}
-            label="Model"
-            sub={harness?.name}
-            right={model?.label ?? thread.model ?? 'Default'}
-            chevron={false}
+            icon={<HarnessLogo harness={shown.harness} size={15} />}
+            label={queued ? <span className="text-live-text">Next turn</span> : 'Model'}
+            sub={labels.harnessName || undefined}
+            right={labels.model}
+            onClick={onRun}
           />
-          <MoListRow icon="gauge" label="Effort" right={thread.effort || model?.defaultEffort || 'Default'} chevron={false} last />
+          <MoListRow icon="gauge" label="Effort" right={labels.effort} onClick={onRun} last={!queued} />
+          {queued && <MoListRow icon="x" label={`Keep ${now.model}`} sub={`${now.harnessName ? `${now.harnessName}, ` : ''}${now.effort}`} onClick={onKeep} chevron={false} last />}
         </MoGroup>
-        <p className="m-0 px-2 pt-2.5 text-[12.5px] leading-[1.45] text-fg-3">A thread keeps the model it started on. Start a new thread to use another.</p>
+        <p className="m-0 px-2 pt-2.5 text-[12.5px] leading-[1.45] text-fg-3">
+          {queued
+            ? `${labels.model} takes over when this turn ends. What you send now waits for it.`
+            : busy
+              ? 'A new model or effort takes over when this turn ends.'
+              : 'A new model or effort takes over from the next message.'}
+        </p>
       </div>
     </MoSheet>
   );
@@ -69,18 +97,23 @@ export function MoComposer({
   chips,
   placeholder,
   onSent,
+  onSwitched,
 }: {
   thread: Thread;
   chips: ComposerChip[];
   /** A function gets whether a busy thread steers, so it can say queue where the harness cannot steer. */
   placeholder: string | ((steers: boolean) => string);
   onSent: (t: Thread, mode?: SendMode) => void;
+  /** The thread after its run switched. */
+  onSwitched: (t: Thread) => void;
 }) {
   const [text, setText] = useState(() => drafts.get(thread.id) ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plus, setPlus] = useState(false);
-  const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
+  const [runSheet, setRunSheet] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const { data: harnesses, reload } = useApi<HarnessWithRunning[]>('/harnesses');
   const att = useAttachments();
   const send = useReplySend(thread.id);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -99,7 +132,8 @@ export function MoComposer({
   }, [text]);
 
   const busyThread = thread.status === 'running' || thread.status === 'queued';
-  const steers = canSteer(thread.harness, harnesses);
+  // A switch queued behind the turn: the message waits for it too (apps/server/runner/queue.ts), so it queues.
+  const steers = canSteer(thread.harness, harnesses) && !thread.queued_harness;
   const hint = typeof placeholder === 'function' ? placeholder(steers) : placeholder;
   const submit = async () => {
     const prompt = text.trim();
@@ -122,6 +156,27 @@ export function MoComposer({
     }
   };
 
+  const shown = shownRun(thread);
+  const next = shown !== thread ? threadRunLabels(shown, harnesses).model : null;
+  const switchRun = async (choice: { harness: string; model: string }, effort: string) => {
+    const now = threadChoice(shown, harnesses);
+    await post(pickedRun(shown, harnesses, choice.harness === now.harness && choice.model === now.model ? { effort } : choice));
+  };
+  const post = async (run: Run | null) => {
+    if (!run || switching) return;
+    setSwitching(true);
+    setError(null);
+    try {
+      onSwitched(await api.post<Thread>(`/threads/${encodeURIComponent(thread.id)}/run`, run));
+    } catch (e) {
+      setError(errorText(e));
+      // The error shows above the composer, which the sheet covers.
+      setRunSheet(false);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   const pick = (p: Pick) => {
     setPlus(false);
     const el = file.current;
@@ -135,8 +190,20 @@ export function MoComposer({
   return (
     // Not positioned, so the + sheet covers the screen rather than the composer.
     <div className="shrink-0 bg-bg px-3 pt-1.5" style={{ paddingBottom: 'max(12px, calc(env(safe-area-inset-bottom) - 2px))' }}>
-      {chips.length > 0 && (
+      {(chips.length > 0 || next) && (
         <div className="mo-scroll flex gap-2 overflow-x-auto pt-0.5 pb-2.5">
+          {next && (
+            <button
+              type="button"
+              onClick={() => setPlus(true)}
+              aria-label={`Next turn runs on ${next}`}
+              className="mo-press inline-flex h-9 shrink-0 items-center gap-[7px] rounded-full bg-surface-2 px-3.5 text-[13.5px] leading-none font-medium text-fg ring-1 ring-live ring-inset"
+            >
+              <Icon name="clock" size={15} className="text-live-text" />
+              <span className="text-live-text">Next turn</span>
+              {next}
+            </button>
+          )}
           {chips.map((c) => (
             <button
               key={c.label}
@@ -169,7 +236,7 @@ export function MoComposer({
             className="min-w-0 flex-1 resize-none self-center bg-transparent px-1 py-2 text-[16px] leading-[1.35] text-fg outline-none placeholder:text-fg-4"
           />
           {text.trim() || !mic.supported ? (
-            <MoRound ink icon="send" label={busyThread ? 'Send to the running turn' : 'Send'} onClick={() => void submit()} disabled={!text.trim() || busy} />
+            <MoRound ink icon="send" label={!busyThread ? 'Send' : next ? 'Send after this turn' : 'Send to the running turn'} onClick={() => void submit()} disabled={!text.trim() || busy} />
           ) : (
             <MoRound quiet={!mic.on} ink={mic.on} icon={mic.on ? 'stop' : 'mic'} label={mic.on ? 'Stop dictating' : 'Dictate'} onClick={mic.toggle} />
           )}
@@ -185,7 +252,36 @@ export function MoComposer({
           e.target.value = '';
         }}
       />
-      {plus && <PlusSheet thread={thread} harnesses={harnesses} onPick={pick} onClose={() => setPlus(false)} />}
+      {plus && (
+        <PlusSheet
+          thread={thread}
+          harnesses={harnesses}
+          onPick={pick}
+          onRun={
+            harnesses
+              ? () => {
+                  setPlus(false);
+                  reload();
+                  setRunSheet(true);
+                }
+              : undefined
+          }
+          onKeep={() => {
+            setPlus(false);
+            void post(currentRun(thread));
+          }}
+          onClose={() => setPlus(false)}
+        />
+      )}
+      {runSheet && harnesses && (
+        <ModelSheet
+          harnesses={harnesses}
+          choice={threadChoice(shown, harnesses)}
+          effort={shown.effort}
+          onChange={(c, e) => void switchRun(c, e)}
+          onClose={() => setRunSheet(false)}
+        />
+      )}
     </div>
   );
 }

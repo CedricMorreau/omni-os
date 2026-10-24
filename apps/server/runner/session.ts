@@ -9,6 +9,7 @@ import { suggestNextThread, suggestReply } from './aux.ts';
 import { finishTurnSnapshot, settleSnapshots } from './snapshots.ts';
 import { pump, reportToParent } from './queue.ts';
 import { endTasks } from './records.ts';
+import { applyQueued } from './switch.ts';
 import {
   alive,
   browserHolder,
@@ -54,17 +55,22 @@ export function hardKill(live: Live) {
   live.closing = true;
   clearTimeout(live.idleTimer);
   const id = live.threadId;
-  if (live.held.length) {
-    for (const m of live.held) track(m, 'waiting');
-    waitingMsgs.set(id, [...live.held.splice(0), ...(waitingMsgs.get(id) ?? [])]);
-    if (!waiting.includes(id)) waiting.push(id);
-  }
+  requeueHeld(live);
   if (alive(child)) {
     live.hardStop = true;
     child.kill('SIGINT');
     setTimeout(() => alive(child) && child.kill('SIGKILL'), 5000);
   }
   emitThread(id);
+}
+
+/** Messages held for after this turn wait for the next process instead, ahead of any already waiting. */
+export function requeueHeld(live: Live) {
+  if (!live.held.length) return;
+  const id = live.threadId;
+  for (const m of live.held) track(m, 'waiting');
+  waitingMsgs.set(id, [...live.held.splice(0), ...(waitingMsgs.get(id) ?? [])]);
+  if (!waiting.includes(id)) waiting.push(id);
 }
 
 /** Nothing to wind down yet (MCP servers can take 13s to connect): drop what is held and kill it. */
@@ -120,28 +126,34 @@ export function abortStart(live: Live, status: ThreadStatus) {
   unread(live, [...live.inflight, ...live.held]);
   teardown(live);
   threads.update(live.threadId, { status });
+  applyQueued(live.threadId);
   finishTurnSnapshot(live);
   emitThread(live.threadId);
   pump();
 }
 
-export function endTurn(live: Live, status: ThreadStatus) {
+/**
+ * The turn ended. A switch Ben queued during it applies here. `more`: messages sent behind the turn wait to run on
+ * that switch's process, so the thread is queued, not finished, and reports and suggests nothing yet.
+ */
+export function endTurn(live: Live, status: ThreadStatus, more = false) {
   const id = live.threadId;
   live.turn = false;
   clearInterrupt(live);
   const runText = events.lastRunText(id, live.turnFrom);
   live.turnFrom = 0;
   const t = threads.update(id, {
-    status,
+    status: more ? 'queued' : status,
     has_run: 1,
     last_text: runText ? runText.slice(0, 600) : threads.get(id)?.last_text ?? null,
   });
+  applyQueued(id);
   // Shown done at once; the checkout after the turn is saved behind it.
   finishTurnSnapshot(live);
   emitThread(id);
   // Even while Omni shuts down: the report is saved and parked for Resume (queue.ts), not lost.
-  if (t?.parent_id) reportToParent(id, status, runText);
-  if (status === 'done' && !t?.parent_id && runText && !isShuttingDown()) {
+  if (t?.parent_id && !more) reportToParent(id, status, runText);
+  if (status === 'done' && !more && !t?.parent_id && runText && !isShuttingDown()) {
     suggestReply(id, runText);
     suggestNextThread(id, runText);
   }

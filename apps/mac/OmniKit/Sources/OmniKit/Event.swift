@@ -44,6 +44,8 @@ public enum EventPayload: Hashable, Sendable {
   case task(TaskEvent)
   case mod(ModLog)
   case cloudAgent(CloudAgentState)
+  case runSwitch(SwitchP)
+  case handover(HandoverP)
   case unknown(kind: String, payload: JSONValue)
 
   public init(kind: String, json: String) {
@@ -67,6 +69,8 @@ public enum EventPayload: Hashable, Sendable {
       case "task": self = .task(try d.decode(TaskEvent.self, from: data))
       case "mod": self = .mod(try d.decode(ModLog.self, from: data))
       case "cloud_agent": self = .cloudAgent(try d.decode(CloudAgentState.self, from: data))
+      case "switch": self = .runSwitch(try d.decode(SwitchP.self, from: data))
+      case "handover": self = .handover(try d.decode(HandoverP.self, from: data))
       default: self = .unknown(kind: kind, payload: JSONValue.parse(json))
       }
     } catch {

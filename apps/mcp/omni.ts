@@ -260,6 +260,28 @@ server.registerTool(
 );
 
 server.registerTool(
+  'switch_thread_run',
+  {
+    description:
+      'Move an existing thread to another harness, model or effort. Its next message runs on the new one. ' +
+      'Same harness: its session carries on with the new model or effort. Another harness: the next session reads the thread so far first. ' +
+      'While a turn runs, the switch waits and applies once the turn ends (`queued_*` on the result); its current run picked again drops it. ' +
+      `Only when ${USER} asks. Refused to or from Hermes or Cursor Cloud. Ids come from list_harnesses.`,
+    inputSchema: {
+      thread_id: z.string(),
+      harness: z.string().describe('claude-code, codex or cursor.'),
+      model: z.string().optional().describe("A model id from list_harnesses. Omit for the harness's default."),
+      effort: z.string().optional().describe("One of the model's effort levels. Omit for its default."),
+    },
+  },
+  async ({ thread_id, harness, model, effort }) => {
+    const t = await call(`/threads/${thread_id}/run`, { method: 'POST', body: JSON.stringify({ harness, model: model ?? '', effort: effort ?? '' }) });
+    const queued = t.queued_harness ? { harness: t.queued_harness, model: t.queued_model, effort: t.queued_effort } : null;
+    return text({ thread_id: t.id, harness: t.harness, model: t.model, effort: t.effort, queued });
+  },
+);
+
+server.registerTool(
   'get_thread',
   { description: 'Status, last reply and artifacts of a thread.', inputSchema: { thread_id: z.string() } },
   async ({ thread_id }) => text(await call(`/threads/${thread_id}/summary`)),
@@ -342,6 +364,27 @@ server.registerTool(
   async ({ thread_id, url }) => {
     const t = await call(`/threads/${thread_id}/published/comments`, { method: 'POST', body: JSON.stringify({ url }) });
     return text({ thread_id: t.id, status: t.status });
+  },
+);
+
+server.registerTool(
+  'send_to_grok_bot',
+  {
+    description:
+      `Send text to ${USER}'s Grok Bot, only when ${USER} asks. Pass request for that text, or thread_id alone to send the thread's title and messages. ` +
+      'A thread_id also adds that thread\'s channel id and thread id to the context. The webhook is configured in Settings, Secrets, or .env.',
+    inputSchema: {
+      request: z.string().min(1).max(100_000).optional(),
+      thread_id: z.string().min(1).max(200).optional(),
+      context: z.record(z.string(), z.unknown()).optional(),
+    },
+  },
+  async ({ request, thread_id, context }) => {
+    const body: { request?: string; thread_id?: string; context?: Record<string, unknown> } = {};
+    if (request !== undefined) body.request = request;
+    if (thread_id !== undefined) body.thread_id = thread_id;
+    if (context !== undefined) body.context = context;
+    return text(await call('/grokbot', { method: 'POST', body: JSON.stringify(body) }));
   },
 );
 
