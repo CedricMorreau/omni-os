@@ -77,6 +77,11 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
   /// Why Auto picked the harness, model and effort above (apps/server/harness/auto.ts). Nil when the thread was not
   /// on Auto, and from older servers.
   public let autoReason: String?
+  /// The run Ben picked while a turn ran, which the thread switches to once it ends (apps/server/runner/switch.ts).
+  /// Nil when none waits, and from older servers. An empty model or effort is the default, as above.
+  public let queuedHarness: HarnessID?
+  public let queuedModel: String?
+  public let queuedEffort: String?
   public let sessionID: String?
   public let hasRun: Bool
   public let cwd: String?
@@ -115,6 +120,9 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
   enum CodingKeys: String, CodingKey {
     case id, title, status, role, model, harness, effort, cwd, branch, source, automation, suggestion, archived, setup
     case autoReason = "auto_reason"
+    case queuedHarness = "queued_harness"
+    case queuedModel = "queued_model"
+    case queuedEffort = "queued_effort"
     case setupError = "setup_error"
     case limit = "limit_state"
     case limitResetsAt = "limit_resets_at"
@@ -145,6 +153,9 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
     harness = try c.decodeIfPresent(HarnessID.self, forKey: .harness) ?? .claudeCode
     effort = try c.decodeEffort(.effort)
     autoReason = try c.decodeIfPresent(String.self, forKey: .autoReason)
+    queuedHarness = try c.decodeIfPresent(HarnessID.self, forKey: .queuedHarness)
+    queuedModel = try c.decodeIfPresent(String.self, forKey: .queuedModel)
+    queuedEffort = try c.decodeIfPresent(String.self, forKey: .queuedEffort)
     sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
     hasRun = try c.decodeFlag(.hasRun)
     cwd = try c.decodeIfPresent(String.self, forKey: .cwd)

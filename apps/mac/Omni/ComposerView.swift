@@ -163,9 +163,10 @@ private struct ReplyComposerView: View {
     guard !busyThread, reply.text.isEmpty, let s = thread.suggestion, !s.isEmpty else { return nil }
     return s
   }
+  /// A switch queued behind the turn: what Ben sends waits for it too (apps/server/runner/queue.ts), so nothing steers.
   private var canSteer: Bool {
     let caps = model.store.harnesses.first { $0.id == thread.harness }?.capabilities
-    return SendRules.canSteer(harness: thread.harness, capabilities: caps)
+    return SendRules.canSteer(harness: thread.harness, capabilities: caps) && RunSwitch.queued(thread) == nil
   }
 
   var body: some View {
@@ -220,7 +221,7 @@ private struct ReplyComposerView: View {
         AttachmentStrip(files: reply.files, remove: reply.removeFile)
       }
       ComposerTextView(
-        text: $reply.text, placeholder: suggestion ?? SendRules.placeholder(busy: busyThread), running: busyThread,
+        text: $reply.text, placeholder: suggestion ?? SendRules.placeholder(busy: busyThread, canSteer: canSteer), running: busyThread,
         interrupting: store.interrupting, focusTick: focusTick, callbacks: callbacks, caretRequest: caret,
         scale: UIZoom.settings.scale
       )
@@ -272,20 +273,25 @@ private struct ReplyComposerView: View {
     .padding(.top, z(6))
   }
 
-  /// The model and effort the thread runs on. A pick switches its next turn, so not while a turn runs or waits.
-  private var runPickers: some View {
+  /// The model and effort the thread runs on. A pick switches its next turn. While a turn runs it waits for that turn:
+  /// the pickers show it, ringed, after a "Next turn" chip whose click keeps the current run. Separate views, so the
+  /// footer wraps between them in a narrow window.
+  @ViewBuilder private var runPickers: some View {
     let harnesses = fetchedHarnesses ?? model.store.harnesses
-    let current = RunSwitch.current(thread)
-    let disabled = busyThread ? "Switch after this turn" : switching ? "Switching" : nil
-    return HStack(spacing: z(6)) {
-      ModelPickerButton(
-        harnesses: harnesses, harness: current.harness, model: RunSwitch.shownModel(current, harnesses: harnesses),
-        pick: { switchRun(RunSwitch.picking(harness: $0, model: $1, from: current, harnesses: harnesses)) },
-        refresh: refreshHarnesses, offersAuto: false, autoReason: thread.autoReason, disabledHelp: disabled)
-      EffortMenu(
-        options: EffortRules.options(for: EffortRules.model(harness: current.harness, model: current.model, in: harnesses)),
-        value: current.effort, disabledHelp: disabled) { switchRun(RunSwitch.picking(effort: $0, from: current)) }
-    }
+    let shown = RunSwitch.shown(thread)
+    let queued = RunSwitch.queued(thread) != nil
+    let disabled = switching ? "Switching" : nil
+    let ring = Capsule().strokeBorder(queued ? Tok.live : .clear, lineWidth: 1)
+    if queued { NextTurnChip(now: RunSwitch.describe(RunSwitch.current(thread), harnesses: harnesses)) { switchRun(RunSwitch.current(thread)) } }
+    ModelPickerButton(
+      harnesses: harnesses, harness: shown.harness, model: RunSwitch.shownModel(shown, harnesses: harnesses),
+      pick: { switchRun(RunSwitch.picking(harness: $0, model: $1, from: shown, harnesses: harnesses)) },
+      refresh: refreshHarnesses, offersAuto: false, autoReason: queued ? nil : thread.autoReason, disabledHelp: disabled)
+      .overlay(ring)
+    EffortMenu(
+      options: EffortRules.options(for: EffortRules.model(harness: shown.harness, model: shown.model, in: harnesses)),
+      value: shown.effort, disabledHelp: disabled) { switchRun(RunSwitch.picking(effort: $0, from: shown)) }
+      .overlay(ring)
   }
 
   private func refreshHarnesses() {
@@ -294,7 +300,7 @@ private struct ReplyComposerView: View {
     }
   }
 
-  /// Nothing changes until the server answers: it refuses while a turn runs or messages wait, and checks the catalog.
+  /// Nothing changes until the server answers: it checks the catalog, and queues the pick while a turn runs.
   private func switchRun(_ run: Run?) {
     guard let run, !switching else { return }
     switching = true
@@ -395,6 +401,35 @@ private struct ReplyComposerView: View {
       return
     }
     reply.addFiles([StagedFile(url: url, size: data.count, modified: .now, isTemporary: true)])
+  }
+}
+
+/// The chip ahead of the pickers while a switch waits for the turn to end. Clicking it keeps the run the thread is on.
+private struct NextTurnChip: View {
+  /// The run the thread is on, named.
+  let now: String
+  let keep: () -> Void
+  @State private var hover = false
+
+  var body: some View {
+    Button(action: keep) {
+      HStack(spacing: z(6)) {
+        OmniIcon(name: "clock", size: 13)
+        Text("Next turn").font(.omni(size: 12, weight: .semibold))
+        OmniIcon(name: "x", size: 12).foregroundStyle(Tok.fg4)
+      }
+      .foregroundStyle(Tok.live)
+      .padding(.leading, z(10))
+      .padding(.trailing, z(8))
+      .frame(height: z(32))
+      .background(hover ? Tok.surface3 : Tok.surface2, in: Capsule())
+      .contentShape(Capsule())
+      .onHover { hover = $0 }
+    }
+    .buttonStyle(.plain)
+    .fixedSize()
+    .help("Runs on \(now) until this turn ends. Click to keep it.")
+    .accessibilityLabel("Keep \(now) for the next turn")
   }
 }
 

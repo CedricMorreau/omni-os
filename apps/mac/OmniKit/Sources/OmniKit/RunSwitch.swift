@@ -109,6 +109,23 @@ public enum RunSwitch {
     Run(harness: t.harness, model: t.model ?? "", effort: t.effort ?? "")
   }
 
+  /// The run Ben picked while a turn ran, which the thread switches to once it ends. Nil when none waits.
+  public static func queued(_ t: OmniThread) -> Run? {
+    t.queuedHarness.map { Run(harness: $0, model: t.queuedModel ?? "", effort: t.queuedEffort ?? "") }
+  }
+
+  /// The run the pickers show and pick from: the one queued for after this turn, else the one the thread is on.
+  public static func shown(_ t: OmniThread) -> Run {
+    queued(t) ?? current(t)
+  }
+
+  /// A run's model and effort as the pickers name them, for example "Sonnet 5.5, Default (high)".
+  public static func describe(_ run: Run, harnesses: [HarnessInfo]) -> String {
+    let m = EffortRules.model(harness: run.harness, model: run.model, in: harnesses)
+    let effort = EffortRules.options(for: m).first { $0.value == run.effort }?.label ?? (run.effort.isEmpty ? "default effort" : run.effort)
+    return "\(m?.label ?? (run.model.isEmpty ? "default model" : run.model)), \(effort)"
+  }
+
   /// The model the list marks: the run's, or the harness default's when it has none.
   public static func shownModel(_ run: Run, harnesses: [HarnessInfo]) -> String {
     run.model.isEmpty ? EffortRules.model(harness: run.harness, model: "", in: harnesses)?.id ?? "" : run.model
@@ -147,8 +164,8 @@ public struct SwitchRow: Hashable, Sendable {
 }
 
 extension OmniClient {
-  /// Switches the thread's harness, model or effort between turns. 409 while it runs or messages wait, 400 for a run
-  /// the catalog does not have or a move to or from Hermes.
+  /// Switches the thread's harness, model or effort. While a turn runs the switch waits for it (`queuedHarness`), and
+  /// the current run sent again drops it. 400 for a run the catalog does not have or a move to or from Hermes.
   public func switchRun(_ id: String, to run: Run) async throws(OmniAPIError) -> OmniThread {
     try await send("POST", "/api/threads/\(uriComponent(id))/run", body: run)
   }
