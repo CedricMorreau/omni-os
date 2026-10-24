@@ -16,11 +16,25 @@ const input = (events: EventRow[], over: Partial<HandoverInput> = {}): HandoverI
   user: 'Ben',
   thread: { title: 'Fix the cart', cwd: '/w/acme', branch: 'omni/cart' },
   artifacts: [],
+  uploadsDir: '/this-mac/threads/t/uploads',
   events,
   ...over,
 });
 
 describe('buildHandover', () => {
+  it('keeps attachment references at this Mac\'s upload paths, including image-only messages', () => {
+    const h = buildHandover(input([
+      ev('user', {
+        text: '',
+        attachments: [{ name: 'cart.png', path: '/other-mac/threads/t/uploads/cart.png', mime: 'image/png', image: true }],
+      }),
+      ev('user', { text: 'Check this brief', attachments: [{ name: 'brief.pdf', path: '/other-mac/brief.pdf' }] }),
+    ]));
+    expect(h.text).toContain('Attachment: cart.png, read from /this-mac/threads/t/uploads/cart.png');
+    expect(h.text).toContain('Attachment: brief.pdf, read from /this-mac/threads/t/uploads/brief.pdf');
+    expect(h.text).not.toContain('/other-mac');
+  });
+
   it('carries the thread facts and every entry, with Ben’s message to follow', () => {
     const h = buildHandover(
       input(

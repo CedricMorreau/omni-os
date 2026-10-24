@@ -1,6 +1,14 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { startRunner } from './runner-boot.ts';
 import { FAKE_CODEX } from './support.ts';
+
+// Runner regressions use fake CLIs and isolated state, with no access to the Mac's Keychain.
+vi.mock('../secrets.ts', async (original) => ({
+  ...await original<typeof import('../secrets.ts')>(),
+  globalSecret: async () => null,
+  secretsEnv: async () => ({}),
+}));
+
 
 // Switching a thread's run between turns, through POST /api/threads/:id/run and the real runner, against the fake
 // claude and codex CLIs.
@@ -12,7 +20,7 @@ const codex = { harness: 'codex', model: '', effort: '' };
 
 beforeAll(async () => {
   H = await startRunner({ OMNI_CODEX_BIN: FAKE_CODEX });
-  await (await import('../harness/catalog-service.ts')).loadCatalog();
+  await (await import('../harness/catalog-service.ts')).loadCatalog(['codex']);
   ({ app } = await import('../app.ts'));
 });
 

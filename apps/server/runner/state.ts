@@ -256,9 +256,10 @@ export function refreshContext(threadId: string): boolean {
   return !!l?.child && !l.closing && !!l.requestContext?.();
 }
 
-/** The commands a thread's running process listed itself, MCP prompts included. Null while none has. */
+/** The current process's commands, MCP prompts included. A closing process may belong to the previous harness. */
 export function threadCommands(threadId: string): CommandList | null {
-  return lives.get(threadId)?.commands ?? null;
+  const live = lives.get(threadId);
+  return live && !live.closing ? live.commands : null;
 }
 
 type ShownPayload = { text?: string; source?: string; task_id?: string | null; role?: string | null; thread_id?: string | null };

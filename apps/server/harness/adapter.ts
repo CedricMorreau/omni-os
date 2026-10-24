@@ -28,6 +28,8 @@ export interface AdapterContext {
   omniUrl: string;
   /** Whether the CLI should resume its stored session rather than start fresh. */
   resume: boolean;
+  /** A switched session still needs its history, including a retry into an empty native session. */
+  handoverPending?: boolean;
 }
 
 /** A harness command a message names, resolved when it was sent. `end` is exclusive. */

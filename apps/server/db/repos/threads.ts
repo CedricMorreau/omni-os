@@ -87,7 +87,7 @@ export interface PendingHandover {
   from: RunName;
   /** 0: a fresh session reads the whole thread. Above 0: the harness's earlier session resumes and reads the events after it. */
   since: number;
-  /** The fresh session already ran a command (the first message was one), so the next spawn resumes it. */
+  /** The fresh native session exists, so the next spawn resumes it while its history still waits. */
   started?: boolean;
 }
 /** How a thread's sessions stand across harness switches (apps/server/runner/switch-plan.ts). Synced, kept out of the API. */

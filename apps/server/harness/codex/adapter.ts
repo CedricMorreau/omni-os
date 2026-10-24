@@ -41,6 +41,7 @@ interface Outgoing {
   uuid: string;
   attachments: Attachment[];
   commands: CommandUse[];
+  accepted?: boolean;
 }
 
 /**
@@ -111,6 +112,7 @@ export const codexAdapter: HarnessAdapter = {
     // The request that starts the turn, in flight or answered, resolving to the turn id when the
     // answer has one. A steer or interrupt that arrives before the id is known waits on it.
     let starting: Promise<string | null> | null = null;
+    let startingMessage: Outgoing | null = null;
     // The built-in the running turn is, if it is one.
     let builtin: string | null = null;
     let initSent = false;
@@ -120,8 +122,14 @@ export const codexAdapter: HarnessAdapter = {
     let lastFailure: TurnError | null = null;
     let plans = 0;
     const outbox: Outgoing[] = [];
+    const steering = new Set<Promise<void>>();
 
     const emit = (rec: StreamRecord) => cb.record(rec);
+    const accepted = (m: Outgoing) => {
+      if (m.accepted) return;
+      m.accepted = true;
+      emit({ kind: 'replay', payload: { uuid: m.uuid, text: m.text } });
+    };
 
     const client = new CodexClient({ bin, cwd: thread.cwd, env: harnessEnv('codex', {
       OMNI_URL: ctx.omniUrl,
@@ -146,6 +154,9 @@ export const codexAdapter: HarnessAdapter = {
           // Also covers a turn Codex starts by itself. A review announces itself under an id its
           // turn/completed doesn't carry; review/start's answer has the right one.
           turnActive = true;
+          // Notifications can arrive in the same stdout chunk as the request's answer,
+          // before its promise runs. A started turn also confirms that Codex took its input.
+          if (startingMessage) accepted(startingMessage);
           if (builtin !== 'review') currentTurnId ??= (p.turn as CodexTurn | undefined)?.id ?? null;
           turnBegan();
           break;
@@ -170,23 +181,10 @@ export const codexAdapter: HarnessAdapter = {
         }
         case 'turn/completed': {
           const turn = p.turn as CodexTurn | undefined;
-          const error = turn?.status === 'failed' ? turnErrorText(turn.error?.message ?? '') || lastError || 'Codex turn failed.' : '';
-          // Stopped at the plan's usage limit: said before the result, so the runner keeps it as a limit stop.
-          const limit = turn?.status === 'failed' ? (codexLimit(turn.error, usageFor('codex')) ?? codexLimit(lastFailure, usageFor('codex'))) : null;
-          // Clear the active turn before emitting the result: the runner delivers the next queued
-          // message synchronously, and it must start a new turn rather than steer this finished one.
-          turnActive = false;
-          currentTurnId = null;
-          starting = null;
-          builtin = null;
-          initSent = false;
-          lastError = '';
-          lastFailure = null;
-          if (limit) emit({ kind: 'limit', payload: limit });
-          if (error) emit({ kind: 'error', payload: { text: error } });
-          const subtype = turn?.status === 'completed' ? 'success' : turn?.status === 'interrupted' ? 'interrupted' : 'error';
-          emit({ kind: 'result', payload: { ok: subtype === 'success', subtype, turns: 1 } });
-          pump();
+          // A steer answer can share this stdout chunk. Let its delivery receipt run
+          // before the result, or the runner would keep its unread message inflight.
+          if (steering.size) void Promise.allSettled([...steering]).then(() => completeTurn(turn));
+          else completeTurn(turn);
           break;
         }
         case 'account/rateLimits/updated': {
@@ -207,6 +205,27 @@ export const codexAdapter: HarnessAdapter = {
         default:
           break;
       }
+    }
+
+    function completeTurn(turn: CodexTurn | undefined) {
+      const error = turn?.status === 'failed' ? turnErrorText(turn.error?.message ?? '') || lastError || 'Codex turn failed.' : '';
+      // Stopped at the plan's usage limit: said before the result, so the runner keeps it as a limit stop.
+      const limit = turn?.status === 'failed' ? (codexLimit(turn.error, usageFor('codex')) ?? codexLimit(lastFailure, usageFor('codex'))) : null;
+      // Clear the active turn before emitting the result: the runner delivers the next queued
+      // message synchronously, and it must start a new turn rather than steer this finished one.
+      turnActive = false;
+      currentTurnId = null;
+      starting = null;
+      startingMessage = null;
+      builtin = null;
+      initSent = false;
+      lastError = '';
+      lastFailure = null;
+      if (limit) emit({ kind: 'limit', payload: limit });
+      if (error) emit({ kind: 'error', payload: { text: error } });
+      const subtype = turn?.status === 'completed' ? 'success' : turn?.status === 'interrupted' ? 'interrupted' : 'error';
+      emit({ kind: 'result', payload: { ok: subtype === 'success', subtype, turns: 1 } });
+      pump();
     }
 
     /**
@@ -249,10 +268,12 @@ export const codexAdapter: HarnessAdapter = {
       builtin = use?.name ?? null;
       lastError = '';
       lastFailure = null;
-      // The runner moves the message from "pending" to the transcript when it sees the replay.
-      emit({ kind: 'replay', payload: { uuid: m.uuid, text: m.text } });
+      startingMessage = m;
       const what = builtin === 'review' ? 'start the review' : builtin === 'compact' ? 'compact the conversation' : 'start the turn';
       const started = begin(m, use).then((turnId) => {
+        // A successful JSON-RPC answer confirms delivery; a rejected request must leave
+        // both the message and any handover unread for the runner's retry path.
+        accepted(m);
         // Unless the turn already completed.
         if (starting === started) {
           if (turnId) currentTurnId = turnId;
@@ -267,10 +288,10 @@ export const codexAdapter: HarnessAdapter = {
 
     /** A steer passes the message into the running turn; if the turn already ended, it runs next. */
     async function steer(m: Outgoing) {
-      emit({ kind: 'replay', payload: { uuid: m.uuid, text: m.text } });
       try {
         const turnId = currentTurnId ?? (await starting);
         await client.request('turn/steer', { threadId: codexThreadId, input: buildInput(m.text, m.attachments, m.commands), expectedTurnId: turnId });
+        accepted(m);
       } catch {
         // Lost the race with the end of the turn: run it as the next turn instead.
         outbox.push(m);
@@ -334,7 +355,11 @@ export const codexAdapter: HarnessAdapter = {
           const m = omniOf(o);
           // Mid-turn goes in as a steer; otherwise it starts (or is queued for) the next turn. A
           // built-in runs as a turn of its own, and nothing steers into one.
-          if (turnActive && !builtin && !builtinOf(m)) void steer(m);
+          if (turnActive && !builtin && !builtinOf(m)) {
+            const sent = steer(m);
+            steering.add(sent);
+            void sent.finally(() => steering.delete(sent));
+          }
           else {
             outbox.push(m);
             pump();

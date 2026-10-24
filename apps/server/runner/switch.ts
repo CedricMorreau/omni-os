@@ -2,6 +2,7 @@
 // this applies it; the next spawn hands the thread over when the harness changed (handover.ts).
 import { sameRun, type Run, type RunName, type SwitchP } from '@omni/shared/run-switch.ts';
 import { artifacts, events, threads, type Thread } from '../db.ts';
+import { uploadsDir } from '../config.ts';
 import { forgetContext } from '../context.ts';
 import { userName } from '../profile.ts';
 import { getHarness, resolveModel, unavailableError, validateRun, type Catalog } from '../harness/catalog.ts';
@@ -109,11 +110,16 @@ export function takeHandover(live: Live, thread: Thread): { thread: Thread; resu
   }
   const target = live.inflight.find((m) => !leadsWithCommand(m));
   if (target) handOverWith(live, target, thread, handover);
-  else {
-    live.handoverDue = true;
-    if (fresh) threads.update(thread.id, { handover: { ...handover, started: true } });
-  }
+  else live.handoverDue = true;
   return { thread, resume: !fresh };
+}
+
+/** A native session now exists, so a pending command-first handover can resume it after the process exits. */
+export function sessionStarted(live: Live) {
+  const { handover } = threads.sessionState(live.threadId);
+  if (handover && !handover.since && !handover.started) {
+    threads.update(live.threadId, { handover: { ...handover, started: true } });
+  }
 }
 
 const leadsWithCommand = (m: Msg) => !!m.commands?.some((c) => c.start === m.text.length - m.text.trimStart().length);
@@ -131,6 +137,7 @@ export function handOverWith(live: Live, m: Msg, thread = threads.get(live.threa
     session,
     user: userName(),
     thread,
+    uploadsDir: uploadsDir(thread.id),
     artifacts: artifacts.byThread(thread.id).reverse().slice(0, 20).map((a) => a.name),
     // The messages about to go are not in the transcript yet: each lands there when the harness reads it.
     events: events.since(thread.id, handover.since),

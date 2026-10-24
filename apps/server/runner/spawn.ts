@@ -19,7 +19,7 @@ import { onExit, onRecord } from './records.ts';
 import { abortStart } from './session.ts';
 import { adapterFor, addEvent, browserHolder, cliLabel, crash, emitThread, lives, omniUrl, track, userLine, writeLine, type Live, type Msg } from './state.ts';
 import { failSetup } from './setup.ts';
-import { takeHandover } from './switch.ts';
+import { sessionStarted, takeHandover } from './switch.ts';
 import { startTurnSnapshot } from './snapshots.ts';
 
 export function launch(threadId: string, first: Msg): Live | undefined {
@@ -150,14 +150,20 @@ async function spawnLive(live: Live, thread: Thread) {
     cdpEndpoint,
     omniUrl: omniUrl(),
     resume: run.resume,
+    handoverPending: !!threads.sessionState(thread.id).handover,
   };
   const session = adapterFor(thread.harness).spawn(ctx, {
-    record: (rec) => onRecord(live, rec),
+    record: (rec) => {
+      // Claude chooses its id before spawning. Its user replay confirms that the session accepted input.
+      if (thread.harness === 'claude-code' && rec.kind === 'replay') sessionStarted(live);
+      onRecord(live, rec);
+    },
     usage: (u) => recordUsage(thread.harness as HarnessId, u),
     session: (sid) => {
       live.sessionId = sid;
       const t = threads.get(thread.id);
       if (t && t.session_id !== sid) threads.update(thread.id, { session_id: sid, updated_at: t.updated_at });
+      sessionStarted(live);
     },
     commandsChanged: () => invalidateCommands(thread.harness as HarnessId),
     commands: (list) => (live.commands = { status: 'ready', commands: runnableCommands(list), fetchedAt: Date.now() }),

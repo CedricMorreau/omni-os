@@ -184,6 +184,10 @@ private struct ReplyComposerView: View {
           reply.text = $0
           focusTick += 1
         },
+        run: { run throws(QAScriptError) in
+          guard !busyThread, !switching else { throw QAScriptError("switch after this turn") }
+          switchRun(run)
+        },
         send: { mode throws(QAScriptError) in
           guard reply.canSend else { throw QAScriptError("the reply box has nothing to send") }
           guard let t = await reply.send(mode: mode) else { throw QAScriptError(reply.sendError ?? "the send failed") }
@@ -564,6 +568,7 @@ private struct Thumb: View {
 enum QAComposerProbe {
   struct Hooks {
     let setText: (String) -> Void
+    let run: (Run) throws(QAScriptError) -> Void
     let send: (SendMode?) async throws(QAScriptError) -> Void
   }
 

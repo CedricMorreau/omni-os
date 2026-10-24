@@ -1,6 +1,7 @@
 // The handover: what a thread's next session reads ahead of Ben's message after he moved the thread to another
 // harness. Built from Omni's own transcript, since no harness can read another's session. Pure (spawn.ts feeds it).
 import { switchText, type RunName, type SwitchP } from '@omni/shared/run-switch.ts';
+import { basename, join } from 'node:path';
 import type { EventRow } from '../db.ts';
 import { toolLabel } from '../tool-label.ts';
 
@@ -19,6 +20,8 @@ export interface HandoverInput {
   thread: { title: string; cwd: string; branch: string | null };
   /** File names in the thread's artifacts folder, newest first. */
   artifacts: string[];
+  /** This Mac's upload folder, since an attachment event may carry another Mac's absolute path. */
+  uploadsDir: string;
   /** The slice to hand over, oldest first. */
   events: EventRow[];
   /** What the history entries may take, in characters. */
@@ -56,7 +59,12 @@ function history(i: HandoverInput) {
     if (p?.dropped) continue;
     if (kind === 'user') {
       if (first < 0) first = lines.length;
-      lines.push(`[${i.user}] ${cut(p.text ?? '', MESSAGE_MAX)}`);
+      const attachments = (Array.isArray(p.attachments) ? p.attachments : []).flatMap((a: { name?: string }) => {
+        if (typeof a?.name !== 'string') return [];
+        const name = basename(a.name.replace(/\\/g, '/'));
+        return name && name !== '.' && name !== '..' ? [`  - Attachment: ${name}, read from ${join(i.uploadsDir, name)}`] : [];
+      });
+      lines.push([`[${i.user}] ${cut(p.text ?? '', MESSAGE_MAX)}`, ...attachments].join('\n'));
     } else if (kind === 'crew_report') {
       lines.push(`[Crew report: ${p.title ?? p.task_id ?? 'task'}, ${p.status}] ${cut(p.text ?? '', MESSAGE_MAX)}`);
     } else if (kind === 'assistant_text') {
