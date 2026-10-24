@@ -37,9 +37,15 @@
 //   FULLMETER         a rate_limit_event at 100% that is still allowed, then the turn runs as usual
 //   CTX:<tokens>      set the context in use before the turn; each model call adds 1.5K, /compact sets it to 8K.
 //                     get_context_usage and the usage on each assistant message report it, in a 200K window
+//   ASK               before the answer, ask the user with Omni's ask_user_question as the real CLI calls an MCP tool: start
+//                     the omni-ask server from --mcp-config, call the tool with four fixed questions (its tool_use first,
+//                     its tool_result once it returns), and wait as long as MCP_TOOL_TIMEOUT allows (else the SDK's 60s).
+//                     Interruptible like TOOL. Messages sent meanwhile join after its result; the answer quotes the result
+//   ASK_ONE           ASK with only the first of those questions
 // Env:
 //   FAKE_CLAUDE_CRASH_ON=<text>   exit 1 with a stderr message when a message containing <text> starts
-//   FAKE_CLAUDE_LOG=<file>        append one JSON line per invocation (pid, args, mode, session, thread, api auth vars seen)
+//   FAKE_CLAUDE_LOG=<file>        append one JSON line per invocation (pid, args, mode, session, thread, api auth vars seen,
+//                                 MCP_TOOL_TIMEOUT)
 //   FAKE_CLAUDE_LATENCY_MS=<ms>   simulated model call latency per step (default 20)
 //   FAKE_CLAUDE_RESUME_FLUSH=1    on --resume, emit a zero-turn success result at startup like the real CLI can
 //   FAKE_CLAUDE_STARTUP_MS=<ms>   stream mode: read no stdin until then, like the real CLI connecting its MCP servers
@@ -65,6 +71,53 @@ import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const VERSION = '2.1.278';
+/** What ASK asks, the shape of Claude Code's AskUserQuestion. */
+const QUESTIONS = [
+  {
+    question: 'Which Q4 goal should get the most of your time between now and December?',
+    header: 'Q4 focus',
+    multiSelect: false,
+    options: [
+      { label: 'Acne POC', description: 'Prove the SFCC to Shopify move on one market before the scoping call.' },
+      { label: 'Volero hypercare', description: 'Stay close to the new theme and imports while orders ramp up.' },
+      { label: 'KE go-live', description: 'Land the Shopify Plus migration and the POS rollout for Kamera Express.' },
+      { label: 'Pink Gellac', description: 'Finish the APA theme pages in time for the brand refresh.' },
+    ],
+  },
+  {
+    question: 'Which clients should get a weekly status email?',
+    header: 'Status mail',
+    multiSelect: true,
+    options: [
+      { label: 'Volero', description: 'Imports, translations and open theme tickets.' },
+      { label: 'Kamera Express', description: 'Migration milestones and POS readiness.' },
+      { label: 'Pink Gellac', description: 'Page builds and what is left before launch.' },
+      { label: 'Acne Studios', description: 'POC scope and the discovery findings.' },
+    ],
+  },
+  {
+    question: 'How should I hand over the Volero import runbook?',
+    header: 'Handover',
+    multiSelect: false,
+    options: [
+      { label: 'Notion page', description: 'A written runbook in the project space, step by step.' },
+      { label: 'Loom video', description: 'A ten minute walkthrough of one full import run.' },
+      { label: 'Live session', description: 'Thirty minutes with the team, running it together.' },
+    ],
+  },
+  {
+    question: 'When should the next CRO audit start?',
+    header: 'CRO audit',
+    multiSelect: false,
+    options: [
+      { label: 'This week', description: 'Use the GA4 data that is already in.' },
+      { label: 'Next sprint', description: 'After the checkout fixes have shipped.' },
+      { label: 'After go-live', description: 'Once a month of post-launch traffic is in.' },
+    ],
+  },
+];
+/** How long the CLI lets an MCP call run, as the real one reads it. */
+const TOOL_TIMEOUT = Number(process.env.MCP_TOOL_TIMEOUT) || 60_000;
 const TOOLS = ['Task', 'Bash', 'Glob', 'Grep', 'Read', 'Edit', 'Write', 'WebFetch', 'WebSearch', 'TodoWrite'];
 const REJECTED =
   "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, " +
@@ -166,6 +219,19 @@ function mcpServers() {
     }
   }
   return out;
+}
+
+/** One MCP server's entry in the --mcp-config files, by name. */
+function mcpEntry(name) {
+  for (const cfg of opts['--mcp-config'] ?? []) {
+    try {
+      const json = JSON.parse(existsSync(cfg) ? readFileSync(cfg, 'utf8') : cfg);
+      if (json.mcpServers?.[name]) return json.mcpServers[name];
+    } catch {
+      /* as mcpServers() */
+    }
+  }
+  return null;
 }
 
 const textOf = (content) =>
@@ -272,6 +338,52 @@ async function richCalls(t) {
   return done;
 }
 
+/**
+ * ASK: one model call that uses ask_user_question on the omni-ask server, which this process starts as the real CLI
+ * starts an MCP server. Resolves to the tool's result text, or null once interrupted (the call is rejected).
+ */
+async function askUser(t, questions) {
+  const id = `toolu_fake_${++seq}`;
+  const input = { questions };
+  assistant(`msg_fake_${seq}`, [{ type: 'tool_use', id, name: 'mcp__omni-ask__ask_user_question', input }]);
+  const server = mcpEntry('omni-ask');
+  if (!server) {
+    toolResult(id, 'No such tool available: mcp__omni-ask__ask_user_question', true);
+    return 'no omni-ask server';
+  }
+  const ac = new AbortController();
+  t.abort = () => ac.abort();
+  let client = null;
+  try {
+    if (t.interrupted) throw new Error('interrupted');
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    client = new Client({ name: 'claude-code', version: VERSION });
+    const transport = new StdioClientTransport({ command: server.command, args: server.args ?? [], env: { ...process.env, ...server.env }, stderr: 'ignore' });
+    await client.connect(transport, { signal: ac.signal });
+    const res = await client.callTool({ name: 'ask_user_question', arguments: input }, undefined, { signal: ac.signal, timeout: TOOL_TIMEOUT });
+    emit({
+      type: 'user',
+      message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content: res.content, is_error: !!res.isError }] },
+      parent_tool_use_id: null,
+      timestamp: now(),
+      tool_use_result: res.content,
+    });
+    return res.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+  } catch (err) {
+    if (t.interrupted) {
+      toolResult(id, REJECTED, true);
+      marker('[Request interrupted by user for tool use]');
+      return null;
+    }
+    toolResult(id, `MCP error: ${err.message}`, true);
+    return `MCP error: ${err.message}`;
+  } finally {
+    t.abort = null;
+    await client?.close().catch(() => {});
+  }
+}
+
 const marker = (text) =>
   emit({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, parent_tool_use_id: null, timestamp: now() });
 
@@ -295,6 +407,7 @@ async function runTurn() {
   let modClear = false;
   let limit = null;
   let fullMeter = false;
+  let ask = null;
   const publishes = [];
   const scripts = [];
   let steps = 0;
@@ -331,6 +444,8 @@ async function runTurn() {
       const lim = m.text.match(/LIMIT(?::(\d+))?/);
       if (lim) limit = { resetsAt: lim[1] ? Number(lim[1]) : null };
       if (m.text.includes('FULLMETER')) fullMeter = true;
+      const asks = m.text.match(/\bASK(_ONE)?\b/);
+      if (asks) ask = asks[1] ? QUESTIONS.slice(0, 1) : QUESTIONS;
       for (const x of m.text.matchAll(/PUBLISH:(\S+)/g)) publishes.push(x[1]);
       for (const x of m.text.matchAll(/RUN:(\S+)/g)) scripts.push(x[1]);
     }
@@ -403,6 +518,18 @@ async function runTurn() {
     assistant(`msg_fake_${seq}`, [{ type: 'tool_use', id: toolId, name: 'Artifact', input: { file_path: file, description: 'A fake page', icon: 'chart' } }]);
     toolResult(toolId, `Published ${file} at https://claude.ai/code/artifact/00000000-0000-4000-8000-${String(seq).padStart(12, '0')}`, false);
   }
+  const answers = [];
+  if (ask && (await pause(t, LATENCY))) {
+    steps++;
+    const answer = await askUser(t, ask);
+    if (dead) return;
+    if (answer === null) toolRejected = true;
+    else {
+      answers.push(answer);
+      // Steers sent while it waited join the conversation here, as after any tool.
+      if (!take()) return;
+    }
+  }
   for (;;) {
     // One model call: either a tool call or the final answer.
     if (!(await pause(t, LATENCY))) break;
@@ -437,7 +564,7 @@ async function runTurn() {
     }
     if (think && !(await pause(t, think))) break;
     steps++;
-    finalText = `ack: ${seen.join(' | ')}`;
+    finalText = `ack: ${[...seen, ...answers].join(' | ')}`;
     assistant(`msg_fake_${++seq}`, [{ type: 'text', text: finalText }]);
     emit({ type: 'system', subtype: 'post_turn_summary', status_category: 'completed', status_detail: 'fake turn', needs_action: '' });
     break;
@@ -667,7 +794,7 @@ async function main() {
         pid: process.pid, time: Date.now(), cwd: process.cwd(), args: process.argv.slice(2), mode,
         session_id: sessionId, resume: resumed, model, effort: opts['--effort'] ?? null, unknown, thread_id: process.env.OMNI_THREAD_ID ?? null,
         api_auth: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].filter((k) => k in process.env),
-        entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT ?? null,
+        entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT ?? null, mcp_tool_timeout: process.env.MCP_TOOL_TIMEOUT ?? null,
       }) + '\n',
     );
   }

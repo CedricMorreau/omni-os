@@ -31,6 +31,8 @@ public struct NeedsYouBlocker: Decodable, Hashable, Sendable {
     public let rawValue: String
     public init(rawValue: String) { self.rawValue = rawValue }
 
+    /// The agent asked Ben a question and waits on his answer. `detail` is the first question, `count` how many wait.
+    public static let question: Self = "question"
     /// Its worktree could not be prepared. `detail` says why.
     public static let setup: Self = "setup"
     /// Messages a restart kept for Resume.
@@ -106,6 +108,7 @@ public struct NeedsYouItem: Decodable, Hashable, Sendable, Identifiable {
     let many = { (n: Int, one: String, more: String) in n == 1 ? one : more.replacingOccurrences(of: "#", with: String(n)) }
     if let b = blockers.first {
       switch b.kind {
+      case .question: return (.needs, "Waiting on your answer", b.detail)
       case .setup: return (.needs, "Worktree could not be prepared", b.detail)
       case .uncertain: return (.needs, many(b.count, "A message may not have been sent", "# messages may not have been sent"), preview)
       case .recovered: return (.needs, many(b.count, "A message waits for Resume", "# messages wait for Resume"), preview)

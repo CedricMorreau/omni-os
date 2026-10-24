@@ -17,6 +17,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.r
 export function reasonOf(item: NeedsYouItem): Reason {
   const preview = item.thread.last_text ? item.thread.last_text.replace(/\s+/g, ' ').trim().slice(0, 240) : null;
   const b = item.blockers[0];
+  if (b?.kind === 'question') return { glyph: 'needs', label: plural(b.count, 'Waiting on your answer', '# questions wait on your answer'), detail: b.detail };
   if (b?.kind === 'setup') return { glyph: 'needs', label: 'Worktree could not be prepared', detail: b.detail };
   if (b?.kind === 'limited') {
     const at = b.resets_at ? resetLabel(b.resets_at) : null;

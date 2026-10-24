@@ -1,4 +1,5 @@
 import type { HandoverP, SwitchP } from '@omni/shared/run-switch.ts';
+import { isQuestionTool, QUESTION_EVENT, questionsIn, type ThreadQuestion } from '@omni/shared/question.ts';
 import type { SlashRecord } from '@omni/shared/slash.ts';
 import { parsePayload, shortPath } from '../format.ts';
 
@@ -117,7 +118,9 @@ export type Item =
   | { type: 'report'; key: number; at: string; p: ReportP }
   /** Mod log lines in a row. They do not end a group of calls, so a busy hook does not split it. */
   | { type: 'mod'; key: number; lines: ModLine[] }
-  | SwitchItem;
+  | SwitchItem
+  /** A question the agent asked Ben, where it asked it. The card stands in for the ask_user_question call. */
+  | { type: 'question'; key: number; at: string; q: ThreadQuestion };
 
 /**
  * A run switch. A handover switch stays pending until its `handover` event fills `done`, or a later handover or back
@@ -173,6 +176,7 @@ export function buildItems(events: TranscriptEvent[]): { items: Item[]; plan: Fo
       if (p.tool_use_id) results.set(p.tool_use_id, p);
     }
   }
+  const questions = new Map(questionsIn(events).map((q) => [q.event_id, q]));
   const items: Item[] = [];
   // Every call so far, not just this group's: a background agent's calls land after later text and turns.
   const byId = new Map<string, ToolCall>();
@@ -187,6 +191,7 @@ export function buildItems(events: TranscriptEvent[]): { items: Item[]; plan: Fo
         const p = parsePayload<ToolUseP>(e);
         // A call that names itself as its parent is dropped. It is not shown at the top of the group.
         if (p.parent && p.parent === p.id) break;
+        if (isQuestionTool(p.name ?? '')) break;
         const call: ToolCall = {
           id: p.id,
           name: p.name ?? 'tool',
@@ -261,6 +266,13 @@ export function buildItems(events: TranscriptEvent[]): { items: Item[]; plan: Fo
         if (pending) pending.done = parsePayload<HandoverP>(e);
         pending = null;
         break;
+      case QUESTION_EVENT: {
+        const q = questions.get(e.id);
+        if (!q) break;
+        group = null;
+        items.push({ type: 'question', key: e.id, at: e.created_at, q });
+        break;
+      }
       case 'mod': {
         const p = parsePayload<{ plugin?: unknown; text?: unknown }>(e);
         const text = str(p.text);
@@ -277,6 +289,9 @@ export function buildItems(events: TranscriptEvent[]): { items: Item[]; plan: Fo
   }
   return { items, plan };
 }
+
+/** Whether the agent waits on Ben's answer to a question it asked in these events. */
+export const isAsking = (events: TranscriptEvent[]) => questionsIn(events).some((q) => q.state === 'pending');
 
 // ---------- tool summaries ----------
 

@@ -38,14 +38,24 @@ enum Glyph {
 
 /// A thread's status, as StatusPill in ui.tsx: neutral, except needs and done, which fill with their pop.
 struct StatusPill: View {
-  let status: ThreadStatus
-  var label: String?
+  let glyph: Glyph
+  let label: String
+
+  init(status: ThreadStatus, label: String? = nil) {
+    glyph = Glyph(status)
+    self.label = label ?? status.label
+  }
+
+  /// A state that is not the thread's status, such as a question waiting on Ben.
+  init(glyph: Glyph, label: String) {
+    self.glyph = glyph
+    self.label = label
+  }
 
   var body: some View {
-    let glyph = Glyph(status)
     HStack(spacing: z(6)) {
       GlyphView(glyph: glyph, size: 6, onPop: glyph == .needs || glyph == .done)
-      Text(label ?? status.label)
+      Text(label)
     }
     .font(.omni(size: 12, weight: .medium))
     .foregroundStyle(fg(glyph))

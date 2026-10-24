@@ -19,6 +19,7 @@ import { assembling, deliver, settleTeam } from './queue.ts';
 import { fallbackTitle, generateTitle } from './aux.ts';
 import { addEvent, emitThread, isShuttingDown, refusal, requestMsg, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
 import { bindResume, retrySetup, saveStart, setUpThread, START_REQUEST } from './setup.ts';
+import { dismissQuestions } from './questions.ts';
 
 // ---------- slash commands ----------
 
@@ -385,6 +386,8 @@ export async function postMessage(
   if (blocked) throw refusal(blocked, 409);
   // Ben (or the conductor) wrote in it again, so it is not done: what comes of it shows in Needs you.
   threads.setDone(threadId, false);
+  // Ben wrote instead of answering the agent's questions: a call waiting on them returns, so this message is read now.
+  if (source === 'ben' && mode !== 'queue') dismissQuestions(threadId);
   const { row, fresh } = messageRequests.accept({
     thread_id: threadId,
     request_id: opts.requestId ?? randomUUID(),

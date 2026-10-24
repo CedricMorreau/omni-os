@@ -206,3 +206,25 @@ describe('offline', () => {
     expect(unread(b, 't-6')).toBeNull();
   });
 });
+
+describe('a question an agent asked', () => {
+  const Q = { question: 'Which goal comes first?', options: [{ label: 'Acne POC', description: '' }, { label: 'KE go-live', description: '' }], multiSelect: false };
+  const asked = (m: Mac) => m.db.needsYou().items.find((i) => i.thread.id === 't-q')?.blockers ?? [];
+
+  it('waits in Needs you on both Macs, and an answer on either clears it on both', async () => {
+    started(a, 't-q');
+    await exchange();
+    a.db.events.add('t-q', 'question', { id: 'q-1', questions: [Q] });
+    b.feed.length = 0;
+    await exchange();
+    expect(asked(b)).toEqual([{ kind: 'question', detail: 'Which goal comes first?', count: 1 }]);
+    expect(b.feed).toContainEqual({ type: 'needs_you', thread_id: 't-q' });
+
+    b.db.events.add('t-q', 'question_answer', { id: 'q-1', state: 'answered', answers: [{ selected: ['KE go-live'], other: null }], via: 'tool' });
+    a.feed.length = 0;
+    await exchange();
+    expect(asked(a)).toEqual([]);
+    expect(asked(b)).toEqual([]);
+    expect(a.feed).toContainEqual({ type: 'needs_you', thread_id: 't-q' });
+  });
+});

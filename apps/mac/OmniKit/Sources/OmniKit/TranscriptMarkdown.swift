@@ -18,6 +18,7 @@ public enum TranscriptMarkdown {
     case .report(_, _, let r): r.text
     case .mod(_, let lines): lines.map { "\($0.plugin): \($0.text)" }.joined(separator: "\n")
     case .runSwitch(let r): ([r.text] + (r.note.map { [$0] } ?? [])).joined(separator: "\n")
+    case .question(let q): q.questions.indices.map { i in [q.questions[i].question, q.words(at: i)].compactMap { $0 }.joined(separator: "\n") }.joined(separator: "\n\n")
     }
   }
 
@@ -51,6 +52,9 @@ public enum TranscriptMarkdown {
       return parts.joined(separator: "\n\n")
     case .mod(_, let lines):
       return lines.map { "*\($0.plugin)* \($0.text)" }.joined(separator: "\n")
+    case .question(let q):
+      let rows = q.questions.indices.map { i in "- \(q.questions[i].question)" + (q.words(at: i).map { " **\($0)**" } ?? "") }
+      return (["**Question** · \(q.state.label)"] + rows).joined(separator: "\n")
     case .text, .tools:
       return copyText(item, cwd: cwd)
     }

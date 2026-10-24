@@ -10,7 +10,7 @@
 // thread/compact/start instead of turn/start. Codex steers neither of them.
 import { apiToken } from '../../api-token.ts';
 import { artifactsDir, threadDir } from '../../config.ts';
-import { buildMcpConfig } from '../../sandbox.ts';
+import { ASK_SERVER, ASK_TIMEOUT_SEC, buildMcpConfig } from '../../sandbox.ts';
 import { describeAttachments, type Attachment } from '../../uploads.ts';
 import { usageFor } from '../../usage.ts';
 import { fromCodexTokenUsage } from '@omni/shared/context-meter.ts';
@@ -82,9 +82,11 @@ const omniOf = (obj: any): Outgoing => ({
  * inherits everything so secrets reach the agent's shell, and ChatGPT-only login. Secret
  * values live in the process env, never in this config.
  */
-export function threadConfig(mcpServers: Record<string, unknown>) {
+export function threadConfig(mcpServers: Record<string, object>) {
+  // Codex gives an MCP call 60 seconds by default; ask_user_question waits for the user.
+  const entry = (name: string, server: object) => (name === ASK_SERVER ? { ...server, tool_timeout_sec: ASK_TIMEOUT_SEC } : server);
   return {
-    ...Object.fromEntries(Object.entries(mcpServers).map(([name, server]) => [`mcp_servers.${name}`, server])),
+    ...Object.fromEntries(Object.entries(mcpServers).map(([name, server]) => [`mcp_servers.${name}`, entry(name, server)])),
     'shell_environment_policy.inherit': 'all',
     forced_login_method: 'chatgpt',
   };

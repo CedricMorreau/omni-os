@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { apiToken } from '../../api-token.ts';
 import { config, paths, artifactsDir, threadDir } from '../../config.ts';
 import type { Thread } from '../../db.ts';
+import { ASK_TIMEOUT_SEC } from '../../sandbox.ts';
 import { parseEvent, LineSplitter } from '../../stream.ts';
 import { harnessEnv } from '../env-guard.ts';
 import { normalizeClaudeCommands } from './commands.ts';
@@ -104,6 +105,8 @@ export const claudeAdapter: HarnessAdapter = {
     if (thread.effort) args.push('--effort', thread.effort);
     if (thread.cwd !== config.brainDir && existsSync(config.brainDir)) args.push('--add-dir', config.brainDir);
     if (mcpFile) args.push('--mcp-config', mcpFile);
+    // Its own AskUserQuestion cannot be answered in -p mode: agents ask with Omni's ask_user_question instead.
+    args.push('--disallowedTools', 'AskUserQuestion');
     for (const dir of modDirs()) args.push('--plugin-dir', dir);
     args.push(resume ? '--resume' : '--session-id', thread.session_id);
 
@@ -118,6 +121,8 @@ export const claudeAdapter: HarnessAdapter = {
         OMNI_THREAD_DIR: threadDir(thread.id),
         OMNI_ARTIFACTS_DIR: artifactsDir(thread.id),
         OMNI_CHANNEL: thread.channel_id,
+        // An ask_user_question call waits for the user.
+        MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_SEC * 1000),
         ...compactEnv(model),
       }, secretEnv),
       stdio: ['pipe', 'pipe', 'pipe'],

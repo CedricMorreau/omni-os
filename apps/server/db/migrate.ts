@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_thread ON events(thread_id, id);
 -- Messages only, for the recent commands every slash menu asks for.
 CREATE INDEX IF NOT EXISTS events_user ON events(id) WHERE kind = 'user';
+-- Questions an agent asked and their answers, which Needs you looks for in every thread.
+CREATE INDEX IF NOT EXISTS events_question ON events(id) WHERE kind = 'question';
+CREATE INDEX IF NOT EXISTS events_question_answer ON events(thread_id) WHERE kind = 'question_answer';
 
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
   body, thread_id UNINDEXED, event_id UNINDEXED, tokenize = 'porter unicode61'
