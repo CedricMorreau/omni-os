@@ -2,7 +2,8 @@
 // top of the transcript fold (transcript/fold.ts), so it reads the same events the desktop transcript does.
 import type { Artifact, Thread } from '../api.ts';
 import { toDate } from '../format.ts';
-import { buildItems, toolLabel, toolSummary, type Item, type ReportP, type ResultP, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
+import { cloudStatus } from '../cloud-agent.ts';
+import { buildItems, toolLabel, toolSummary, type CloudAgentP, type Item, type ReportP, type ResultP, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
 
 export type TurnStatus = 'running' | 'queued' | 'done' | 'failed' | 'stopped';
 
@@ -25,6 +26,8 @@ export interface TurnView {
   children: Thread[];
   result: ResultP | null;
   error: string | null;
+  /** The Cursor cloud agent run this turn launched or followed up, as it stands now. */
+  cloud: CloudAgentP | null;
   status: TurnStatus;
   /** The turn's rows, for the Steps screen. */
   items: Item[];
@@ -103,7 +106,7 @@ export function threadView({
   const { items, plan } = buildItems(events);
   const turns: TurnView[] = [];
   const start = (key: number, at: string): TurnView => {
-    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, reports: [], artifacts: [], children: [], result: null, error: null, status: 'done', items: [] };
+    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, reports: [], artifacts: [], children: [], result: null, error: null, cloud: null, status: 'done', items: [] };
     turns.push(t);
     return t;
   };
@@ -128,6 +131,9 @@ export function threadView({
     } else if (it.type === 'error') {
       cur ??= start(it.key, '');
       cur.error = it.p.text;
+    } else if (it.type === 'cloud') {
+      cur ??= start(it.key, '');
+      cur.cloud = it.p;
     }
     cur?.items.push(it);
   }
@@ -166,6 +172,7 @@ export function threadView({
   return {
     turns,
     plan: planned && { todos: planned, done: planned.filter((x) => x.status === 'completed').length },
-    now: open ? nowDoing(open, thread.cwd) : { verb: 'Thinking', target: '' },
+    // A cloud agent works on Cursor's machines: its run's status is all there is to say.
+    now: open ? nowDoing(open, thread.cwd) : latest.cloud ? { verb: `Cursor cloud agent: ${cloudStatus(latest.cloud.status).label.toLowerCase()}`, target: '' } : { verb: 'Thinking', target: '' },
   };
 }

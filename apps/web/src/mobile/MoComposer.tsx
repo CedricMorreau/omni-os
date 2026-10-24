@@ -64,7 +64,18 @@ function PlusSheet({ thread, harnesses, onPick, onClose }: { thread: Thread; har
  * The thread's composer on a phone: action chips, one line that grows, + for files and mic or send. It sends the way
  * the desktop reply box does: a busy thread is steered, or queued where the harness cannot steer.
  */
-export function MoComposer({ thread, chips, placeholder, onSent }: { thread: Thread; chips: ComposerChip[]; placeholder: string; onSent: (t: Thread, mode?: SendMode) => void }) {
+export function MoComposer({
+  thread,
+  chips,
+  placeholder,
+  onSent,
+}: {
+  thread: Thread;
+  chips: ComposerChip[];
+  /** A function gets whether a busy thread steers, so it can say queue where the harness cannot steer. */
+  placeholder: string | ((steers: boolean) => string);
+  onSent: (t: Thread, mode?: SendMode) => void;
+}) {
   const [text, setText] = useState(() => drafts.get(thread.id) ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,10 +99,12 @@ export function MoComposer({ thread, chips, placeholder, onSent }: { thread: Thr
   }, [text]);
 
   const busyThread = thread.status === 'running' || thread.status === 'queued';
+  const steers = canSteer(thread.harness, harnesses);
+  const hint = typeof placeholder === 'function' ? placeholder(steers) : placeholder;
   const submit = async () => {
     const prompt = text.trim();
     if (!prompt || busy) return;
-    const mode: SendMode | undefined = busyThread ? (canSteer(thread.harness, harnesses) ? 'steer' : 'queue') : undefined;
+    const mode: SendMode | undefined = busyThread ? (steers ? 'steer' : 'queue') : undefined;
     setBusy(true);
     setError(null);
     try {
@@ -151,8 +164,8 @@ export function MoComposer({ thread, chips, placeholder, onSent }: { thread: Thr
             onChange={(e) => update(e.target.value)}
             onPaste={att.onPaste}
             enterKeyHint="send"
-            placeholder={placeholder}
-            aria-label={placeholder}
+            placeholder={hint}
+            aria-label={hint}
             className="min-w-0 flex-1 resize-none self-center bg-transparent px-1 py-2 text-[16px] leading-[1.35] text-fg outline-none placeholder:text-fg-4"
           />
           {text.trim() || !mic.supported ? (

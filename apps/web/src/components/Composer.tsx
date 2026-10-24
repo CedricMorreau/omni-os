@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
-import { api, errorText, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
+import { api, errorText, harnessesPath, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
 import { bytes, CHANNEL_KIND } from '../format.ts';
 import { dropNewThreadPreset, navigate, openNewThread, peekNewThreadPreset, takeComposerFocus } from '../router.ts';
 import { useApp } from '../store.tsx';
@@ -420,7 +420,8 @@ export function NewThreadComposer({
   const [effort, setEffort] = useState(preset?.effort ?? '');
   // "New thread here" on a sidebar folder files the thread in it, until Ben takes it out.
   const [folder, setFolder] = useState(preset?.folder ?? null);
-  const { data: harnesses, reload: reloadHarnesses } = useApi<HarnessWithRunning[]>('/harnesses');
+  // As the channel sees them: Cursor Cloud needs its GitHub repo.
+  const { data: harnesses, reload: reloadHarnesses } = useApi<HarnessWithRunning[]>(harnessesPath(channel));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -930,7 +931,13 @@ export function ReplyComposer({
           void submit(busyThread ? busyMode : undefined);
         }}
         rows={1}
-        placeholder={busyThread ? 'Steer the agent. It reads this at its next step.' : suggestion ?? 'Reply'}
+        placeholder={
+          busyThread
+            ? canSteer
+              ? 'Steer the agent. It reads this at its next step.'
+              : 'Queue a message. It runs when this turn ends.'
+            : (suggestion ?? 'Reply')
+        }
         className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-4"
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">

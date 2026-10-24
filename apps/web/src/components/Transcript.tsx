@@ -5,6 +5,7 @@ import { href } from '../router.ts';
 import { useApp, useNow } from '../store.tsx';
 import { BranchFace, DelegationCard, RailItem, ROW_CARD } from './Delegation.tsx';
 import { PublishedCard } from './Published.tsx';
+import { CloudAgentCard } from './thread/CloudAgentCard.tsx';
 import { Markdown } from './Markdown.tsx';
 import { Button, CheckItem, copyText, Icon, IconButton, Loader, Modal, StatusDot, StatusPill, Ticks } from './ui.tsx';
 import { isOmnis, isParked, parkedHeading, parkedLabel, parkedOf, requestIdFor } from '../requests.ts';
@@ -1098,6 +1099,8 @@ export const Transcript = memo(function Transcript({
               return <ReportCard key={it.key} p={it.p} />;
             case 'mod':
               return <ModLog key={it.key} lines={it.lines} />;
+            case 'cloud':
+              return <CloudAgentCard key={it.key} p={it.p} />;
             default:
               return null;
           }

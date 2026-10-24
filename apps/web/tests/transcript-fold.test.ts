@@ -19,6 +19,7 @@ const REQUIRED = [
   'undecodable-tool-use',
   'first-string-field',
   'mod-logs',
+  'cloud-agent',
 ];
 
 describe('transcript fold', () => {

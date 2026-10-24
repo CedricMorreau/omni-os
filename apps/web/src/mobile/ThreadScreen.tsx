@@ -3,6 +3,7 @@ import { api, errorText, useApi, type Artifact, type BranchChanges, type Pending
 import { harnessLabel, OmniMark } from '../components/brand.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
+import { CloudAgentCard } from '../components/thread/CloudAgentCard.tsx';
 import { handOff, HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx';
 import { deviceRows } from '../handoff.ts';
 import { Button, ErrorNote, Icon, Loader, StatusDot, StatusPill } from '../components/ui.tsx';
@@ -441,6 +442,7 @@ export function ThreadScreen() {
             view.now && <NowLine now={view.now} meta={view.plan ? `step ${Math.min(view.plan.done + 1, view.plan.todos.length)}/${view.plan.todos.length}` : sinceStart(t)} />
           )}
           {view.plan && <Plan plan={view.plan} />}
+          {t.cloud && <CloudAgentCard p={t.cloud} />}
           {delegated}
           {t.steps > 0 && <StepsRow t={t} live onClick={() => steps(t)} />}
         </>
@@ -459,6 +461,7 @@ export function ThreadScreen() {
           (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={thread.harness} />
         )}
         {t.error && <Clamped text={t.error} />}
+        {t.cloud && <CloudAgentCard p={t.cloud} />}
         {t.prose && <MoProse text={t.prose} />}
         {delegated}
         {t.artifacts.map((a) => (
@@ -521,7 +524,7 @@ export function ThreadScreen() {
       <MoComposer
         thread={thread}
         chips={chips}
-        placeholder={conductor ? 'Reply to the Conductor' : slotBusy ? `Steer ${theirs}` : 'Follow up'}
+        placeholder={(steers) => (conductor ? 'Reply to the Conductor' : slotBusy ? (steers ? `Steer ${theirs}` : 'Queue a follow-up') : 'Follow up')}
         onSent={(t) => applyThread(t, true)}
       />
       {menu && <MenuSheet thread={thread} prLabel={pr?.pr ? `PR #${pr.pr.number} · ${plural(changes?.files.length ?? 0, 'file')}` : null} onClose={() => setMenu(false)} />}
