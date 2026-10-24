@@ -341,4 +341,21 @@ server.registerTool(
   async ({ query }) => text(await call(`/search?q=${encodeURIComponent(query)}`)),
 );
 
+server.registerTool('tool_failures', {
+  description: 'Inspect machine-local tool failures grouped by harness, tool and category, most frequent first. With group_id, list occurrences with thread/call references. No raw arguments or error bodies. Use before for older occurrences.',
+  inputSchema: { group_id: z.string().optional(), status: z.enum(['open', 'investigating', 'fixed', 'avoid', 'replacement']).optional(), before: z.number().int().positive().optional() },
+}, async ({ group_id, status, before }) => text(await call(group_id
+  ? `/tool-failures/${encodeURIComponent(group_id)}/occurrences${before ? `?before=${before}` : ''}`
+  : `/tool-failures${status ? `?status=${status}` : ''}`)));
+
+server.registerTool('triage_tool_failure', {
+  description: 'Record tool failure remediation status and safe human-written fix/replacement/avoidance guidance. Never include raw errors, arguments, private data or credentials. Does not disable tools. A later failure reopens a fixed group.',
+  inputSchema: { group_id: z.string(), status: z.enum(['open', 'investigating', 'fixed', 'avoid', 'replacement']), guidance: z.string().max(1000) },
+}, async ({ group_id, ...body }) => text(await call(`/tool-failures/${encodeURIComponent(group_id)}`, { method: 'PATCH', body: JSON.stringify(body) })));
+
+server.registerTool('note_tool_failure_recovery', {
+  description: 'Record observed recovery for a tool failure occurrence. Do not infer recovery from an unrelated success. Optionally link a failed retry to an earlier failure ID with retry_of.',
+  inputSchema: { id: z.string(), recovery: z.enum(['recovered', 'not_recovered', 'unknown']), retry_of: z.string().optional() },
+}, async ({ id, ...body }) => text(await call(`/tool-failures/occurrences/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })));
+
 await server.connect(new StdioServerTransport());

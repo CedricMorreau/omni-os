@@ -3,6 +3,7 @@ import { config, artifactsDir, browserOutDir, designSystemFile } from '../config
 import { artifacts, type Channel, type Thread } from '../db.ts';
 import type { CrewRole } from '../crew.ts';
 import { getProfile, objectPronoun, userName, userPossessive } from '../profile.ts';
+import { TOOL_FAILURE_POLICY } from '../tool-failure-policy.ts';
 
 /** Claude Code's Artifact tool publishes to claude.ai. Omni links a publish to its file and keeps the URL per channel. */
 function publishedLines(channelId: string) {
@@ -33,6 +34,7 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
   const name = userName();
   const lines = [
     '# Omni OS context',
+    TOOL_FAILURE_POLICY,
     remote
       ? `You are Hermes, running on your own server and reached by Omni OS over HTTP. ${name} is on their Mac; you are not. Nobody can answer permission prompts, so finish the task or clearly state what is blocking you.`
       : `You are running headless inside Omni OS, ${userPossessive()} local agent workspace. Nobody can answer permission prompts, so finish the task or clearly state what is blocking you.`,

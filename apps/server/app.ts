@@ -21,6 +21,7 @@ import { terminalApi } from './terminal-api.ts';
 import { threadActionsApi, threadRoutesApi } from './thread-routes-api.ts';
 import { threadsApi } from './threads-api.ts';
 import { requestGuard } from './request-guard.ts';
+import { toolFailuresApi } from './tool-failures-api.ts';
 
 // Every /api route, and the Web UI. apps/server/index.ts boots it.
 export const app = new Hono();
@@ -56,6 +57,7 @@ api.route('/mentions', mentionsApi);
 api.route('/links', linksApi);
 api.route('/sync', syncApi);
 api.route('/setup', setupApi);
+api.route('/tool-failures', toolFailuresApi);
 
 // Last, so only a request no route above takes lands here, and never on the Web UI's index.html.
 api.all('*', (c) => c.json({ error: 'Not found' }, 404));

@@ -78,6 +78,10 @@ describe('cursor tracer', () => {
     await H.untilResults(t.id, 1, 12000);
     expect(H.thread(t.id).status).toBe('done');
     expect(turns(t.id).some((r: any) => r.resume === chatId)).toBe(true);
+    expect(turns(t.id).at(-1).prompt).toContain('Omni records tool failures reported by your harness automatically.');
+    H.runner.sendMessage(t.id, 'follow up after resume');
+    await H.untilResults(t.id, 2, 12000);
+    expect(turns(t.id).at(-1).prompt).toBe('follow up after resume');
   });
 });
 

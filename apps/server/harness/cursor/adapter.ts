@@ -6,6 +6,7 @@
 // a steer and stops the thread by killing the holder (the next message resumes the chat).
 import { spawn, type ChildProcess } from 'node:child_process';
 import { apiToken } from '../../api-token.ts';
+import { TOOL_FAILURE_POLICY } from '../../tool-failure-policy.ts';
 import { closePipesAfterExit } from '../../child.ts';
 import { artifactsDir, threadDir } from '../../config.ts';
 import { writeCursorPlugin } from '../../sandbox.ts';
@@ -92,10 +93,12 @@ export const cursorAdapter: HarnessAdapter = {
     function runTurn(m: Outgoing) {
       // Omni's context goes in front of the first message of a new session only.
       const addContext = firstTurn && !resume;
+      const addPolicy = firstTurn && resume;
       firstTurn = false;
       let prompt = m.text;
       if (m.attachments.length) prompt += `\n\n${describeAttachments(m.attachments)}`;
       if (addContext) prompt = `${ctx.systemPrompt}\n\n---\n\n${prompt}`;
+      else if (addPolicy) prompt = `${TOOL_FAILURE_POLICY}\n\n---\n\n${prompt}`;
 
       const args = ['-p', '--output-format', 'stream-json', '--model', modelId, '--trust', '--force', '--sandbox', 'disabled', '--approve-mcps', '--plugin-dir', pluginDir];
       if (chatId) args.push('--resume', chatId);
