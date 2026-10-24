@@ -27,7 +27,7 @@ Every `/api` request needs this install's token. The server makes it on first st
 | --- | --- |
 | Mac app | Reads `data/api-token` (or `OMNI_DATA_DIR`'s) and sends `Authorization: Bearer`. Before it attaches to whatever answers on the port, it asks `GET /api/auth/proof?nonce=` for an HMAC of the port and a fresh nonce, keyed with the token, so a program squatting on the port never gets the token or your secrets, even by relaying the nonce to an Omni on another port. It sends the token only to that server's exact host and port: images on any other URL load without it, and it never goes in a shared cookie store |
 | `scripts/omni.sh`, `npm run setup` | `OMNI_TOKEN`, else `data/api-token` |
-| Threads | `OMNI_TOKEN` in their environment, next to `OMNI_URL`. The conductor MCP (`apps/mcp/omni.ts`) gets `OMNI_TOKEN_FILE`, a path, so no token is written into `mcp.json` |
+| Threads | `OMNI_TOKEN` in their environment, next to `OMNI_URL`. Omni's MCP servers (`apps/mcp/omni.ts`, `apps/mcp/ask.ts`) get `OMNI_TOKEN_FILE`, a path, so no token is written into `mcp.json` |
 | Web UI | Pairs once (below), then holds the token in a cookie |
 
 The Web UI and its assets are served without the token and never contain it, so opening the page gets you only the pairing screen. Pairing sends the token once to `POST /api/auth/pair`, which answers with an `HttpOnly`, `SameSite=Strict` cookie on `/api` (`Secure` behind HTTPS). Page scripts never see it, and `EventSource` streams and images carry it. The token gets to a browser one of two ways:

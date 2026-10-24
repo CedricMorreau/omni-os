@@ -208,9 +208,17 @@ export function playwrightMcpBin() {
   return playwrightMcp;
 }
 
-/** Per-thread MCP servers, layered on top of the user's normal Claude Code MCP config. */
+/** The server with ask_user_question (apps/mcp/ask.ts). Harnesses name its tool `mcp__omni-ask__ask_user_question`. */
+export const ASK_SERVER = 'omni-ask';
+/** How long a harness lets an ask_user_question call wait for the user: a day. */
+export const ASK_TIMEOUT_SEC = 86_400;
+
+/** Per-thread MCP servers, layered on top of the user's normal Claude Code MCP config. Hermes gets none: it runs elsewhere. */
 export function buildMcpConfig(input: McpInput) {
   const servers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+  const api = { OMNI_URL: input.omniUrl, OMNI_TOKEN_FILE: tokenPath(), OMNI_THREAD_ID: input.threadId, OMNI_USER: userName() };
+
+  servers[ASK_SERVER] = { command: paths.tsx, args: [paths.mcpAsk], env: api };
 
   if (config.browser) {
     const args = [playwrightMcpBin(), '--output-dir', browserOutDir(input.threadId)];
@@ -225,18 +233,13 @@ export function buildMcpConfig(input: McpInput) {
   }
 
   if (input.role?.mcp.includes('omni')) {
-    servers['omni'] = {
-      command: paths.tsx,
-      args: [paths.mcpOmni],
-      env: { OMNI_URL: input.omniUrl, OMNI_TOKEN_FILE: tokenPath(), OMNI_THREAD_ID: input.threadId, OMNI_USER: userName() },
-    };
+    servers['omni'] = { command: paths.tsx, args: [paths.mcpOmni], env: api };
   }
   return { mcpServers: servers };
 }
 
-export function writeMcpConfig(input: McpInput): string | null {
+export function writeMcpConfig(input: McpInput): string {
   const cfg = buildMcpConfig(input);
-  if (!Object.keys(cfg.mcpServers).length) return null;
   mkdirSync(threadDir(input.threadId), { recursive: true });
   const file = join(threadDir(input.threadId), 'mcp.json');
   writeFileSync(file, JSON.stringify(cfg, null, 2));

@@ -416,11 +416,23 @@ async function scenario() {
   const scheduled = keep('limit-scheduled.json', await call('POST', `/threads/${capped.id}/limit/schedule`, {})) as { thread: { limit_state: string } };
   expect(scheduled.thread.limit_state).toBe('scheduled');
 
-  // Needs you now holds every kind: done, failed and stopped results, failed Setup, parked requests and a limit stop.
+  // An agent's question that waits for Ben (apps/mcp/ask.ts), asked after its call ended.
+  const digestQuestion = {
+    question: 'Which store should the digest cover first?',
+    header: 'Digest',
+    options: [
+      { label: 'Acme EU', description: 'The store with the cart changes.' },
+      { label: 'Acme US', description: 'The store launching next month.' },
+    ],
+    multiSelect: false,
+  };
+  await call('POST', `/threads/${run.id}/questions`, { questions: [digestQuestion] });
+
+  // Needs you now holds every kind: done, failed and stopped results, a question, failed Setup, parked requests and a limit stop.
   type Item = { thread: Thread; result: { uid: string; status: string } | null; blockers: { kind: string }[] };
   const inbox = keep('needs-you.json', await get('/needs-you')) as { items: Item[] };
   expect(new Set(inbox.items.flatMap((i) => (i.result ? [i.result.status] : [])))).toEqual(new Set(['done', 'failed', 'stopped']));
-  expect(new Set(inbox.items.flatMap((i) => i.blockers.map((b) => b.kind)))).toEqual(new Set(['setup', 'recovered', 'limited']));
+  expect(new Set(inbox.items.flatMap((i) => i.blockers.map((b) => b.kind)))).toEqual(new Set(['question', 'setup', 'recovered', 'limited']));
   // Ben reads the stopped parent's result: its held crew report still needs him. The uid is this run's.
   const stopped = inbox.items.find((i) => i.thread.id === boss.id)!;
   const readBody = request('needs-you-read-request.json', { uid: stopped.result!.uid }) as { uid: string };

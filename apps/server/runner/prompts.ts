@@ -35,7 +35,7 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
     '# Omni OS context',
     remote
       ? `You are Hermes, running on your own server and reached by Omni OS over HTTP. ${name} is on their Mac; you are not. Nobody can answer permission prompts, so finish the task or clearly state what is blocking you.`
-      : `You are running headless inside Omni OS, ${userPossessive()} local agent workspace. Nobody can answer permission prompts, so finish the task or clearly state what is blocking you.`,
+      : `You are running headless inside Omni OS, ${userPossessive()} local agent workspace. Nobody can answer permission prompts, so finish the task or clearly state what is blocking you. When a choice only ${name} can make blocks you, ask with the ask_user_question tool: it waits for the answer.`,
     getProfile().name ? `- You work for ${name}. Charters and automations that say "the user" mean them.` : '',
     `- Thread: ${thread.id}${thread.task_id ? ` (task ${thread.task_id})` : ''}`,
     `- Channel: #${channel.id} (${channel.name}, ${channel.kind})`,

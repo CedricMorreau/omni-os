@@ -19,6 +19,7 @@ import { setupApi } from './setup-api.ts';
 import { syncApi } from './sync-api.ts';
 import { terminalApi } from './terminal-api.ts';
 import { threadActionsApi, threadRoutesApi } from './thread-routes-api.ts';
+import { questionsApi } from './questions-api.ts';
 import { threadsApi } from './threads-api.ts';
 import { requestGuard } from './request-guard.ts';
 
@@ -47,6 +48,7 @@ api.route('/threads', threadsApi);
 api.route('/threads', terminalApi);
 api.route('/threads', changesApi);
 api.route('/threads', threadActionsApi);
+api.route('/threads', questionsApi);
 api.route('/', feedApi);
 api.route('/artifacts', artifactsApi);
 api.route('/', githubApi);

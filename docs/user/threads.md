@@ -22,6 +22,15 @@ Files can ride along with a message (paperclip, drag-and-drop or paste). They la
 
 To continue a thread in a terminal or Claude Desktop: `cd <cwd> && claude --resume <session id>` (the thread's Details panel has a copy button). Check there that the session is no longer warm first, so two processes do not write the same session.
 
+## When the agent asks you
+
+An agent can stop and ask you one to four multiple-choice questions with Omni's `ask_user_question` tool. Every Claude Code, Codex and Cursor thread has it (the `omni-ask` MCP server); Hermes threads have no MCP servers, so not there. Claude Code's own AskUserQuestion is turned off in Omni, because nothing can answer it in a headless run.
+
+- The questions show as a card in the thread, where the agent asked, and the thread shows in Needs you until you act, even while it runs. Pick an option (several on a multi select question) or type your own under Other. Skip leaves a question to the agent's judgement.
+- The turn waits on the call until you answer, for up to a day on Claude Code and Codex. Your answers go back as the call's result and the turn carries on.
+- If the call is gone by the time you answer (Omni restarted, you pressed Stop, or the harness gave up on it), your answers go to the thread as a message and it runs on them.
+- Sending a message instead (steer or interrupt) closes the card as not answered, and the agent reads your message. A message queued for after the turn leaves the card open.
+
 ## What a thread gets
 
 - **Worktree**: in a repo channel, its own git worktree on branch `omni/<id>`. It is removed once nothing in it can be lost ([Known limits](limits.md)).
