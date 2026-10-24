@@ -33,7 +33,7 @@ export function planSwitch(t: RunState, to: Run, from: RunName, lastEventId: num
   if (!t.has_run && !t.handover) return { kind: 'settings', ...same, session_id: t.id };
 
   const sessions = { ...t.sessions };
-  // A session that never started (a fresh handover still pending) has nothing to come back to. One resumed for a
+  // A session that never started (a fresh handover still pending, even one that ran a command) has nothing to come back to. One resumed for a
   // handover still pending has seen only what it saw before.
   if (!t.handover) sessions[t.harness] = { id: t.session_id, seen: lastEventId };
   else if (t.handover.since > 0) sessions[t.harness] = { id: t.session_id, seen: t.handover.since };

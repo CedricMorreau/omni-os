@@ -183,6 +183,7 @@ export function onRecord(live: Live, rec: StreamRecord) {
       if (i < 0) return;
       const [m] = live.inflight.splice(i, 1);
       live.replayed = true;
+      if (live.handover?.uuid === m.uuid) handedOver(live);
       // The harness read it: the transcript records it here, where it did.
       const row = addEvent(id, m.event.kind, eventPayload(m));
       track(m, 'delivered', row.id);
@@ -201,7 +202,7 @@ export function onRecord(live: Live, rec: StreamRecord) {
       if (live.initSeen) return;
       live.initSeen = true;
       addEvent(id, 'init', rec.payload);
-      return handedOver(live);
+      return;
     case 'result':
       return onResult(live, rec.payload);
     case 'task':

@@ -80,6 +80,31 @@ describe('switching the run between turns', () => {
     expect(H.db.threads.sessionState(t.id).handover).toBeNull();
   });
 
+  it('runs a command first and hands over with the next plain message', async () => {
+    const t = await H.start('remember the word GUAVA', codex);
+    await H.untilResults(t.id, 1);
+    expect((await switchTo(t.id, claude)).status).toBe(200);
+
+    await H.runner.postMessage(t.id, '/tdd fix the parser');
+    await H.untilResults(t.id, 2);
+    expect(H.claudeTexts(t.id).at(-1)).toBe('/tdd fix the parser');
+    expect(kinds(t.id)).not.toContain('handover');
+    expect(H.db.threads.sessionState(t.id).handover).toMatchObject({ since: 0, started: true });
+    const session = H.thread(t.id).session_id;
+
+    await H.runner.postMessage(t.id, 'what word?');
+    await H.untilResults(t.id, 3);
+    const text = H.claudeTexts(t.id).at(-1)!;
+    expect(text.startsWith('<omni-handover>')).toBe(true);
+    expect(text).toContain('[the user] remember the word GUAVA');
+    expect(text).toContain('[the user] /tdd fix the parser');
+    expect(text.endsWith('what word?')).toBe(true);
+    expect(H.thread(t.id).session_id).toBe(session);
+    expect(H.byKind(t.id, 'handover')[0].p).toMatchObject({ session: 'fresh', to: { harness: 'claude-code' } });
+    expect(H.texts(t.id, 'user').at(-1)).toBe('what word?');
+    expect(H.db.threads.sessionState(t.id).handover).toBeNull();
+  });
+
   it('refuses while a turn runs', async () => {
     const t = await H.start('TOOL:3000 a long one', claude);
     await H.untilTool(t.id);

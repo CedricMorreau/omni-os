@@ -87,6 +87,8 @@ export interface PendingHandover {
   from: RunName;
   /** 0: a fresh session reads the whole thread. Above 0: the harness's earlier session resumes and reads the events after it. */
   since: number;
+  /** The fresh session already ran a command (the first message was one), so the next spawn resumes it. */
+  started?: boolean;
 }
 /** How a thread's sessions stand across harness switches (apps/server/runner/switch-plan.ts). Synced, kept out of the API. */
 export interface SessionState {
@@ -98,7 +100,7 @@ export interface SessionState {
 // that has not reached this Mac yet reads as the thread's start: the handover then carries too much, never too little.
 export interface StoredSessionState {
   sessions: Partial<Record<string, { id: string; seen: string }>> | null;
-  handover: { from: RunName; since: string | null } | null;
+  handover: { from: RunName; since: string | null; started?: boolean } | null;
 }
 const uidOf = (id: number) => (db.prepare('SELECT uid FROM events WHERE id = ?').get(id) as { uid: string } | undefined)?.uid ?? '';
 const idOf = (uid: string) => (db.prepare('SELECT id FROM events WHERE uid = ?').get(uid) as { id: number } | undefined)?.id ?? 1;
@@ -109,10 +111,10 @@ function storedSessions(s: Sessions | null | undefined): StoredSessionState['ses
   return entries.length ? Object.fromEntries(entries.map(([h, p]) => [h, { id: p.id, seen: uidOf(p.seen) }])) : null;
 }
 const storedHandover = (h: PendingHandover | null | undefined): StoredSessionState['handover'] =>
-  h ? { from: h.from, since: h.since ? uidOf(h.since) : null } : null;
+  h ? { from: h.from, since: h.since ? uidOf(h.since) : null, ...(h.started && { started: true }) } : null;
 const readSessions = (s: StoredSessionState['sessions']): Sessions =>
   Object.fromEntries(Object.entries(s ?? {}).flatMap(([h, p]) => (p ? [[h, { id: p.id, seen: idOf(p.seen) }]] : [])));
-const readHandover = (h: StoredSessionState['handover']): PendingHandover | null => (h ? { from: h.from, since: h.since ? idOf(h.since) : 0 } : null);
+const readHandover = (h: StoredSessionState['handover']): PendingHandover | null => (h ? { from: h.from, since: h.since ? idOf(h.since) : 0, ...(h.started && { started: true }) } : null);
 const json = (v: object | null) => (v ? JSON.stringify(v) : null);
 
 /** The columns clients read, without sync's run_machine, the limit stop's id and owner, or the session state. */

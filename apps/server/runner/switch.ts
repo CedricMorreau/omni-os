@@ -11,7 +11,7 @@ import { turnBlocked } from '../sync/guard.ts';
 import { buildHandover } from './handover.ts';
 import { closeLive } from './session.ts';
 import { planSwitch } from './switch-plan.ts';
-import { adapterFor, addEvent, emitThread, hasBackground, lives, refusal, runsHere, waiting, waitingMsgs, type Live } from './state.ts';
+import { adapterFor, addEvent, emitThread, hasBackground, lives, refusal, runsHere, waiting, waitingMsgs, type Live, type Msg } from './state.ts';
 
 /** A run with the names the catalog gives it now, so its transcript row reads the same later. */
 export function runName(run: Run, cat: Catalog = getCatalog()): RunName {
@@ -93,19 +93,37 @@ export async function switchRun(threadId: string, to: Run): Promise<Thread> {
 }
 
 /**
- * At spawn: a pending handover goes ahead of the first message, and decides whether the harness resumes. A fresh
- * session gets its id here, so a process that dies before it starts leaves the handover pending for the next spawn.
+ * At spawn: a pending handover goes ahead of the first message that is not a command, and decides whether the harness
+ * resumes. A command keeps its place at the start of its message, so with only commands waiting the handover waits for
+ * the next message. A fresh session gets its id here, so a process that dies before the handover is read leaves it
+ * pending for the next spawn.
  */
 export function takeHandover(live: Live, thread: Thread): { thread: Thread; resume: boolean } {
   const { handover } = threads.sessionState(thread.id);
-  const first = live.inflight[0];
-  if (!handover || !first) return { thread, resume: !!thread.has_run };
-  const session = handover.since ? 'resumed' : 'fresh';
-  if (session === 'fresh') {
+  if (!handover || !live.inflight.length) return { thread, resume: !!thread.has_run };
+  const fresh = !handover.since && !handover.started;
+  if (fresh) {
     thread = { ...thread, session_id: adapterFor(thread.harness).freshSessionId(thread) };
     threads.update(thread.id, { session_id: thread.session_id });
     live.sessionId = thread.session_id;
   }
+  const target = live.inflight.find((m) => !leadsWithCommand(m));
+  if (target) handOverWith(live, target, thread, handover);
+  else {
+    live.handoverDue = true;
+    if (fresh) threads.update(thread.id, { handover: { ...handover, started: true } });
+  }
+  return { thread, resume: !fresh };
+}
+
+const leadsWithCommand = (m: Msg) => !!m.commands?.some((c) => c.start === m.text.length - m.text.trimStart().length);
+
+/** Puts the pending handover ahead of `m`, unless `m` starts with a command, which then runs first. */
+export function handOverWith(live: Live, m: Msg, thread = threads.get(live.threadId)!, handover = threads.sessionState(live.threadId).handover) {
+  if (leadsWithCommand(m)) return;
+  live.handoverDue = false;
+  if (!handover) return;
+  const session = handover.since ? 'resumed' : 'fresh';
   const to = runName(runOf(thread));
   const h = buildHandover({
     from: handover.from,
@@ -117,15 +135,14 @@ export function takeHandover(live: Live, thread: Thread): { thread: Thread; resu
     // The messages about to go are not in the transcript yet: each lands there when the harness reads it.
     events: events.since(thread.id, handover.since),
   });
-  first.text = h.text + first.text;
-  first.commands = first.commands?.map((c) => ({ ...c, start: c.start + h.text.length, end: c.end + h.text.length }));
-  live.handover = { to, session, entries: h.entries, omitted: h.omitted, chars: h.chars };
-  return { thread, resume: session === 'resumed' };
+  m.text = h.text + m.text;
+  m.commands = m.commands?.map((c) => ({ ...c, start: c.start + h.text.length, end: c.end + h.text.length }));
+  live.handover = { uuid: m.uuid, done: { to, session, entries: h.entries, omitted: h.omitted, chars: h.chars } };
 }
 
-/** The new session started with the handover: the transcript says so and the thread no longer has one pending. */
+/** The harness read the handover: the transcript says so and the thread no longer has one pending. */
 export function handedOver(live: Live) {
-  const done = live.handover;
+  const done = live.handover?.done;
   if (!done) return;
   live.handover = undefined;
   threads.update(live.threadId, { handover: null });
