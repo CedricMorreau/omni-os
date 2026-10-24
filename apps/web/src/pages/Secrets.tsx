@@ -10,6 +10,8 @@ const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 /** Names Omni looks up itself. Values still go to the Keychain; this only fills the form. */
 const KNOWN_GLOBALS: { name: string; blurb: string }[] = [
   { name: 'HERMES_API_KEY', blurb: 'Hermes API bearer token. Global. Sent on HTTP requests, not in a shell environment.' },
+  { name: 'GROKBOT_WEBHOOK_URL', blurb: 'Grok Bot webhook URL from the Omni OS requests routine. Global. Send to Grok Bot posts here. Stays on the server.' },
+  { name: 'GROKBOT_WEBHOOK_AUTH', blurb: 'Authorization value for that webhook, pasted as Grok Bot shows it. Global. Stays on the server.' },
 ];
 
 function scopeLabel(scope: string, name: (id: string) => string | undefined) {
@@ -95,9 +97,9 @@ export function SecretsPage() {
             <Icon name="lock" size={15} />
           </span>
           <div>
-            Values live in the Keychain under the service <span className="font-mono text-[12px]">omni-os</span> and are injected as environment variables when a thread
-            runs. A channel secret overrides a global one with the same name. Omni never shows a value again after you save it; to change one, save it again with the same
-            name.
+            Values live in the Keychain under the service <span className="font-mono text-[12px]">omni-os</span>. A thread gets them as environment variables when it
+            runs. A channel secret overrides a global one with the same name. Sync credentials and the Grok Bot webhook stay on the server, so a thread never sees them.
+            Omni never shows a value again after you save it. To change one, save it again with the same name.
           </div>
         </div>
 

@@ -4,6 +4,12 @@ Local agent workspace. See README.md for what it does.
 
 ## Standing rules
 
+### Record tool failures
+
+- Every agent and harness follows the global tool-failure policy in `apps/server/tool-failure-policy.ts`, which Omni adds to every thread's system prompt. Pass the rule to child agents whose results Omni cannot observe.
+- Omni automatically captures reported tool failures in the machine-local `tool_failures` table in `data/omni.db`. Inspect groups through the Conductor's `tool_failures` tool or `GET /api/tool-failures`. Record status and safe fix, replacement or avoidance guidance with `triage_tool_failure` or `PATCH /api/tool-failures/:group`.
+- Report hidden failures through `POST /api/tool-failures` using the actual thread and call reference. Never include arguments, raw output, credentials or private payloads. Do not recursively log logger failures. One failure never disables a tool.
+
 ### Every surface, every time
 
 - A feature or fix takes effect on all three surfaces unless the task says otherwise: the Web UI on desktop, the Web UI's phone layout (`apps/web/src/mobile/`) and the Mac app (`apps/mac/`).

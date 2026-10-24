@@ -93,9 +93,10 @@ export function normalizeItem(item: CodexItem, savedImage?: string | null): Stre
       const command = asCommand((item as { command?: string | string[] }).command ?? '');
       const out = String((item as { aggregatedOutput?: unknown; output?: unknown }).aggregatedOutput ?? (item as { output?: unknown }).output ?? '');
       const { exitCode, status } = item as { exitCode?: number | null; status?: string };
+      const failed = (exitCode ?? 0) !== 0 || status === 'failed' || status === 'declined';
       return [
         { kind: 'tool_use', payload: { id: item.id, name: 'Bash', input: { command }, parent: null } },
-        result(item.id, out, (exitCode ?? 0) !== 0 || status === 'failed' || status === 'declined'),
+        result(item.id, failed && exitCode ? `Exit code ${exitCode}\n${out}` : out, failed),
       ];
     }
 
@@ -112,7 +113,7 @@ export function normalizeItem(item: CodexItem, savedImage?: string | null): Stre
         { kind: 'tool_use', payload: { id: item.id, name: `mcp__${server}__${tool}`, input: args, parent: null } },
         error
           ? result(item.id, String(error.message ?? JSON.stringify(error)), true)
-          : result(item.id, res ? mcpText(res) : '', status === 'failed'),
+          : result(item.id, res ? mcpText(res) : '', status === 'failed' || !!res?.isError),
       ];
     }
 
@@ -140,11 +141,22 @@ export function normalizeItem(item: CodexItem, savedImage?: string | null): Stre
       ];
     }
 
-    default:
+    case 'dynamicToolCall': {
+      const tool = typeof item.tool === 'string' && item.tool ? item.tool : 'dynamicToolCall';
+      return [
+        { kind: 'tool_use', payload: { id: item.id, name: tool, input: item.arguments ?? {}, parent: null } },
+        result(item.id, item.success === false || item.status === 'failed' ? 'Tool reported failure.' : '', item.success === false || item.status === 'failed'),
+      ];
+    }
+
+    default: {
       // Anything Omni doesn't recognise still shows, under its own name, with its raw input.
+      const failed = item.status === 'failed' || item.status === 'declined' || item.success === false;
       return [
         { kind: 'tool_use', payload: { id: item.id, name: String(item.type), input: rawInput(item), parent: null } },
+        ...(failed ? [result(item.id, 'Tool reported failure.', true)] : []),
       ];
+    }
   }
 }
 
@@ -168,6 +180,7 @@ export function normalizeStarted(item: CodexItem): StreamRecord[] {
 
 /** An MCP tool result: its text blocks, or its JSON when it has none. */
 interface McpResult {
+  isError?: boolean;
   content?: { type?: string; text?: string }[];
   structuredContent?: unknown;
 }

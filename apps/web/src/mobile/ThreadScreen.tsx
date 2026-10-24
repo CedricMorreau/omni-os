@@ -13,6 +13,7 @@ import { duration, plural } from '../format.ts';
 import { ArtifactThumb } from '../pages/Artifacts.tsx';
 import { canMarkDone, reasonOf } from '../needs-you.ts';
 import { isOmnis, parkedLabel } from '../requests.ts';
+import { sendThreadToGrokBot } from '../grokbot.ts';
 import { href } from '../router.ts';
 import { useApp, useNow } from '../store.tsx';
 import { needsCard } from './activity.ts';
@@ -249,6 +250,9 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
   // Set while the sheet lists the Macs the thread can go to.
   const [handingOff, setHandingOff] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
+  const [grokBusy, setGrokBusy] = useState(false);
+  const [grokError, setGrokError] = useState('');
+  const grokLock = useRef(false);
   const go = (to: string) => {
     onClose();
     shell.open(to);
@@ -270,6 +274,21 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
     } catch (e) {
       shell.toast(errorText(e));
     }
+  };
+  const sendGrok = async () => {
+    if (grokLock.current) return;
+    grokLock.current = true;
+    setGrokBusy(true);
+    setGrokError('');
+    const result = await sendThreadToGrokBot(thread.id);
+    grokLock.current = false;
+    setGrokBusy(false);
+    if (result.ok) {
+      onClose();
+      shell.toast('Sent to Grok Bot');
+      return;
+    }
+    setGrokError(result.error);
   };
   const archive = async () => {
     onClose();
@@ -338,8 +357,17 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
           {(thread.done_at || canMarkDone(thread.status)) && (
             <MoListRow icon="check" label={thread.done_at ? 'Mark as not done' : 'Mark as done'} chevron={false} onClick={() => void done()} />
           )}
+          <MoListRow
+            icon={grokBusy ? <Loader size={18} /> : 'external'}
+            label="Send to Grok Bot"
+            sub={grokBusy ? 'Sending' : "This thread's text"}
+            chevron={false}
+            disabled={grokBusy}
+            onClick={() => void sendGrok()}
+          />
           <MoListRow icon="archive" label={thread.archived ? 'Restore thread' : 'Archive thread'} chevron={false} onClick={() => void archive()} last />
         </MoGroup>
+        {grokError && <ErrorNote>{grokError}</ErrorNote>}
       </div>
     </MoSheet>
   );

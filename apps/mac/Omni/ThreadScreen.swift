@@ -99,6 +99,9 @@ private struct ThreadHeader: View {
   let store: ThreadStore
   let thread: OmniThread
   @State private var restoring = false
+  @State private var sendingGrok = false
+  @State private var grokNote = ""
+  @State private var showingGrokNote = false
 
   var body: some View {
     let channel = store.channel?.name ?? thread.channelID
@@ -195,6 +198,23 @@ private struct ThreadHeader: View {
         .disabled(restoring)
         .help("Archived. Restore it to its channel's thread list.")
       }
+      Button {
+        guard !sendingGrok else { return }
+        sendingGrok = true
+        Task {
+          grokNote = await grokBotResult(model, thread.id)
+          sendingGrok = false
+          showingGrokNote = true
+        }
+      } label: {
+        HStack(spacing: z(6)) {
+          if sendingGrok { Loader(size: 12) } else { OmniIcon(name: "external", size: 14) }
+          Text("Send to Grok Bot")
+        }
+      }
+      .buttonStyle(.pill(.ghost, height: 28))
+      .disabled(sendingGrok)
+      .help("Send this thread's text to Grok Bot")
       if store.transcript.hasPendingQuestion {
         StatusPill(glyph: .needs, label: QuestionState.pending.label)
       } else {
@@ -204,6 +224,11 @@ private struct ThreadHeader: View {
     .padding(.horizontal, z(24))
     .padding(.top, z(12))
     .padding(.bottom, z(8))
+    .alert("Grok Bot", isPresented: $showingGrokNote) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(grokNote)
+    }
   }
 }
 

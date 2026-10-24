@@ -79,7 +79,17 @@ export function normalizeCursor(evt: any): CursorParsed {
       break;
     }
     case 'tool_call':
-      if (evt.subtype === 'completed') out.records.push(...toolCall(evt));
+      if (evt.subtype === 'completed' || evt.subtype === 'failed') {
+        out.records.push(...toolCall(evt));
+        const result = evt.result;
+        const failed = evt.subtype === 'failed' || !!evt.error || result?.isError === true || result?.is_error === true ||
+          !!result?.error || result?.success === false || result?.status === 'failed' || result?.result?.isError === true;
+        if (failed) {
+          const existing = out.records.find((r) => r.kind === 'tool_result');
+          if (existing?.kind === 'tool_result') existing.payload.is_error = true;
+          else out.records.push(toolResult(String(evt.toolCallId ?? evt.callId ?? ''), 'Tool reported failure.', true));
+        }
+      }
       break;
     case 'result':
       out.sessionId = evt.session_id ?? out.sessionId;
@@ -105,7 +115,8 @@ function toolCall(evt: any): StreamRecord[] {
   switch (tool) {
     case 'shell': {
       const output = String(result.output ?? result.stdout ?? '');
-      return [toolUse(id, 'Bash', { command: String(input.command ?? '') }), toolResult(id, output, (result.exitCode ?? 0) !== 0)];
+      const failed = (result.exitCode ?? 0) !== 0;
+      return [toolUse(id, 'Bash', { command: String(input.command ?? '') }), toolResult(id, failed ? `Exit code ${result.exitCode}\n${output}` : output, failed)];
     }
     case 'read':
       return [toolUse(id, 'Read', { file_path: String(input.path ?? input.file_path ?? '') })];
@@ -136,7 +147,7 @@ function toolCall(evt: any): StreamRecord[] {
     case 'mcp': {
       const name = `mcp__${String(input.server ?? '')}__${String(input.tool ?? input.name ?? '')}`;
       const recs: StreamRecord[] = [toolUse(id, name, input.arguments ?? input.args ?? {})];
-      const err = result.error;
+      const err = result.error || undefined;
       const res = result.result ?? result.output;
       if (err != null || res != null) {
         const text = typeof (err ?? res) === 'string' ? String(err ?? res) : JSON.stringify(err ?? res);

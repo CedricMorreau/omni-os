@@ -4,6 +4,7 @@ import { events, messageRequests, outbox, threads, type ThreadStatus } from '../
 import { publishFeed, publishThread } from '../bus.ts';
 import { onToolResult } from '../published.ts';
 import { turnFinished } from '../sync/files.ts';
+import { observeToolResult } from '../tool-failures.ts';
 import { type ModUi, type Record as StreamRecord, type TaskUpdate } from '../stream.ts';
 import { armIdle, clearInterrupt, endTurn, requeueHeld, teardown } from './session.ts';
 import { finishTurnSnapshot, startTurnSnapshot } from './snapshots.ts';
@@ -230,7 +231,19 @@ export function onRecord(live: Live, rec: StreamRecord) {
       if (opens) openTurn(live);
       const row = addEvent(id, rec.kind, rec.payload);
       if (opens) live.turnFrom = row.id - 1;
-      if (rec.kind === 'tool_result') onToolResult(id, rec.payload);
+      if (rec.kind === 'tool_result') {
+        // Separate from transcript publishing: capture failure must not prevent result delivery.
+        if (rec.payload.is_error) {
+          try {
+            observeToolResult({ thread_id: id, channel_id: live.channelId,
+              harness: threads.get(id)?.harness ?? 'unknown', session_id: live.sessionId, event_id: row.id },
+            rec.payload, events.toolUse(id, rec.payload.tool_use_id));
+          } catch {
+            console.error('[tool-failures] capture failed; tool result delivery continues');
+          }
+        }
+        onToolResult(id, rec.payload);
+      }
     }
   }
 }

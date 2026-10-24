@@ -13,7 +13,7 @@ import type { Catalog, Resolved } from '../harness/catalog.ts';
 import { profileTask, routeTask } from '../harness/auto.ts';
 import { usageByHarness } from '../usage.ts';
 import { freshCatalog, getCatalog } from '../harness/catalog-service.ts';
-import { resolveRun } from '../harness/resolve.ts';
+import { resolveRun, setsRun } from '../harness/resolve.ts';
 import type { CommandUse } from '../harness/adapter.ts';
 import { assembling, deliver, settleTeam } from './queue.ts';
 import { fallbackTitle, generateTitle } from './aux.ts';
@@ -102,10 +102,13 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
   // Resolve harness/model/effort: the thread's own choice, then the role's default, then the channel's, then Auto.
   // On a miss, probe the harnesses that are down and try again: Ben may have just logged in.
   const channelDefaults = { harness: channel.default_harness ?? undefined, model: channel.default_model ?? undefined, effort: channel.default_effort ?? undefined };
+  // The Conductor role is automatic in its own channel. A saved channel run overrides its charter, including
+  // after a retired channel default is dropped below, when the fallback must be Auto rather than the charter.
+  const roleDefaults = role?.id === 'conductor' && channel.id === 'conductor' && setsRun(channelDefaults) ? undefined : role;
   const resolve = (cat: Catalog, withChannel = true) =>
     resolveRun(
       { harness: input.harness, model: input.model, effort: input.effort },
-      role ? { harness: role.harness, model: role.model, effort: role.effort } : undefined,
+      roleDefaults,
       cat,
       withChannel ? channelDefaults : undefined,
     );

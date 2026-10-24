@@ -126,6 +126,10 @@ describe('Hermes adapter', () => {
     await waitFor(() => resultOf(s.records).length === 1, 'resumed result');
     expect(s.session()).toBeNull();
     expect((posts()[0].body as { instructions?: string }).instructions).toBeUndefined();
+    expect((posts()[0].body as { input: string }).input).toContain('Omni records tool failures reported by your harness automatically.');
+    s.user('again', 'm10');
+    await waitFor(() => resultOf(s.records).length === 2, 'second resumed result');
+    expect((posts()[1].body as { input: string }).input).toBe('again');
   });
 
   it('describes attachments and does not send the Mac path', async () => {

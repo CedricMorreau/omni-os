@@ -1,6 +1,18 @@
 import { db } from './connection.ts';
 
 const SCHEMA = `
+-- Machine-local diagnostics. No raw arguments or error bodies; not part of the sync relay.
+CREATE TABLE IF NOT EXISTS tool_failures (
+  id TEXT PRIMARY KEY, group_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL, channel_id TEXT NOT NULL, harness TEXT NOT NULL,
+  session_id TEXT NOT NULL, call_id TEXT NOT NULL, tool TEXT NOT NULL,
+  category TEXT NOT NULL, detail TEXT NOT NULL, event_id INTEGER, parent_call_id TEXT,
+  retry_of TEXT, recovery TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tool_failures_group ON tool_failures(group_id);
+CREATE TABLE IF NOT EXISTS tool_failure_triage (
+  group_id TEXT PRIMARY KEY, status TEXT NOT NULL, guidance TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

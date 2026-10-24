@@ -1,6 +1,17 @@
 import OmniKit
 import SwiftUI
 
+/// The sentence to show after Send to Grok Bot. Success, or the server's error.
+@MainActor
+func grokBotResult(_ model: AppModel, _ threadID: String) async -> String {
+  do throws(OmniAPIError) {
+    try await model.client.sendThreadToGrokBot(threadID: threadID)
+    return "Sent this thread to Grok Bot."
+  } catch {
+    return error.message
+  }
+}
+
 /// A thread in its own window: a `WindowGroup` keyed by the thread id. Windows share stores through
 /// `AppModel.threads`, so two windows on one thread (or one window and the main window) read one store and
 /// one stream. SwiftUI keeps one window per id and restores the ones that were open on relaunch.
@@ -129,6 +140,8 @@ private struct OpenInNewWindow: ViewModifier {
   @Environment(\.openWindow) private var openWindow
   @State private var renaming = false
   @State private var draft = ""
+  @State private var grokNote = ""
+  @State private var showingGrokNote = false
 
   func body(content: Content) -> some View {
     content
@@ -152,6 +165,12 @@ private struct OpenInNewWindow: ViewModifier {
           }
           if let stub { MoveToFolderMenu(model: model, thread: stub) }
           HandOffMenu(model: model, threadID: threadID)
+          Button("Send to Grok Bot") {
+            Task {
+              grokNote = await grokBotResult(model, threadID)
+              showingGrokNote = true
+            }
+          }
           Button(archived ? "Unarchive Thread" : "Archive Thread") { Task { await model.setThreadArchived(threadID, !archived) } }
         }
       }
@@ -161,6 +180,11 @@ private struct OpenInNewWindow: ViewModifier {
           if let model { Task { await model.renameThread(threadID, to: draft) } }
         }
         Button("Cancel", role: .cancel) {}
+      }
+      .alert("Grok Bot", isPresented: $showingGrokNote) {
+        Button("OK", role: .cancel) {}
+      } message: {
+        Text(grokNote)
       }
       .simultaneousGesture(
         TapGesture().modifiers(.option).onEnded { openWindow(id: ThreadWindow.id, value: threadID) }

@@ -134,7 +134,10 @@ public final class NewThreadComposerModel {
     let read = readFile
     do {
       let uploads = staged.isEmpty ? [] : try await Task.detached { try staged.map(read) }.value
-      var request = NewThreadRules.request(choice, prompt: prompt, harnesses: harnesses)
+      // Let the server resolve inherited defaults, including Auto when a channel's saved model has retired.
+      var request = preselected
+        ? NewThread(channel: choice.channel, prompt: prompt, role: choice.role.isEmpty ? nil : choice.role)
+        : NewThreadRules.request(choice, prompt: prompt, harnesses: harnesses)
       request.folder = folderChip?.id
       let thread = try await api.createThread(request, files: uploads)
       if text == raw { text = "" }

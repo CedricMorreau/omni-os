@@ -23,6 +23,7 @@ const render = (t: Thread) =>
       onDone: () => {},
       onRestore: () => {},
       restoring: false,
+      grok: { busy: false, run: () => {} },
       interrupt: { busy: false, run: () => {} },
       panelOpen: true,
       onPanel: () => {},
@@ -45,9 +46,9 @@ describe('the thread header keeps the title wide when it is narrow', () => {
     }
   });
 
-  it('folds pin, done and hand off, which the More menu offers', () => {
+  it('folds pin, done, hand off and Send to Grok Bot, which the More menu offers', () => {
     const all = buttons(render(thread({ status: 'done' })));
-    for (const name of ['Pin thread', 'Mark as done', 'Hand off to another Mac']) expect(all.find((b) => b.name === name)?.cls.split(' ')).toContain(FOLD);
+    for (const name of ['Pin thread', 'Mark as done', 'Hand off to another Mac', 'Send to Grok Bot']) expect(all.find((b) => b.name === name)?.cls.split(' ')).toContain(FOLD);
     expect(all.find((b) => b.name === 'Thread actions')?.cls.split(' ')).toContain(UNFOLD);
   });
 });

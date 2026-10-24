@@ -13,6 +13,7 @@ import { commandsApi } from './commands-api.ts';
 import { mentionsApi } from './mentions-api.ts';
 import { feedApi } from './feed-api.ts';
 import { githubApi } from './github-api.ts';
+import { grokbotApi } from './grokbot.ts';
 import { linksApi } from './links-api.ts';
 import { metaApi } from './meta-api.ts';
 import { setupApi } from './setup-api.ts';
@@ -22,6 +23,7 @@ import { threadActionsApi, threadRoutesApi } from './thread-routes-api.ts';
 import { questionsApi } from './questions-api.ts';
 import { threadsApi } from './threads-api.ts';
 import { requestGuard } from './request-guard.ts';
+import { toolFailuresApi } from './tool-failures-api.ts';
 
 // Every /api route, and the Web UI. apps/server/index.ts boots it.
 export const app = new Hono();
@@ -56,8 +58,10 @@ api.route('/', metaApi);
 api.route('/commands', commandsApi);
 api.route('/mentions', mentionsApi);
 api.route('/links', linksApi);
+api.route('/grokbot', grokbotApi);
 api.route('/sync', syncApi);
 api.route('/setup', setupApi);
+api.route('/tool-failures', toolFailuresApi);
 
 // Last, so only a request no route above takes lands here, and never on the Web UI's index.html.
 api.all('*', (c) => c.json({ error: 'Not found' }, 404));
