@@ -32,4 +32,17 @@ Stored in the macOS Keychain under service `omni-os` (account `<scope>/<NAME>`).
 
 - Scope `global` goes to every thread as an env var.
 - Scope `channel:<slug>` goes only to that channel's threads and overrides a global with the same name.
-- Billing and sync keys are kept out of a thread's terminal.
+- Billing keys stay out of a harness and the terminal. Sync keys stay out of the terminal, and a global one stays out of a harness. `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_AUTH` stay out of both, at any scope. See [Grok Bot](#grok-bot).
+
+## Grok Bot
+
+Send to Grok Bot posts a thread's title and messages to a webhook. The context is the channel id and the thread id.
+
+The button is in the thread header on the Web UI and on the Mac app. The same action is in the thread's right-click menu on both, and in Thread options on a phone. The Conductor calls `send_to_grok_bot`.
+
+The URL and the Authorization value come from the Omni OS requests routine, on Grok Bot's Routines tab. Paste each one in either place.
+
+1. Settings, Secrets, scope Global. On the Web UI, Known global secrets lists `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_AUTH`. The phone opens that same page. On the Mac app, Settings > Secrets shows Use GROKBOT_WEBHOOK_URL and Use GROKBOT_WEBHOOK_AUTH while the name field is empty.
+2. `.env`, as a fallback when the Keychain has no value for that name. Copy the empty lines from `.env.example` and fill them in. An empty value leaves Grok Bot off. `.env` stays untracked.
+
+When both are set, Omni uses the Keychain value. `GROKBOT_WEBHOOK_URL` is the routine's URL. `GROKBOT_WEBHOOK_AUTH` is the Authorization header, sent as stored. Omni leaves both values out of the log. A thread's harness and its terminal run without them.

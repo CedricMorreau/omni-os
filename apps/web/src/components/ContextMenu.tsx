@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { HandoffView } from '@omni/shared/handoff.ts';
 import { api, errorText, type Thread, type ThreadDetail } from '../api.ts';
+import { sendThreadToGrokBot } from '../grokbot.ts';
+import { useToast } from './Toaster.tsx';
 import { draftKey, useFolders } from '../folders.tsx';
 import { deviceRows } from '../handoff.ts';
 import { canMarkDone } from '../needs-you.ts';
@@ -82,6 +84,8 @@ function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
   // Set while the menu lists the Macs a running thread can be handed to.
   const [handingOff, setHandingOff] = useState(!!open.handoff);
   const [sending, setSending] = useState<string | null>(null);
+  const sendingGrok = useRef(false);
+  const toast = useToast();
   const [blocked, setBlocked] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<HandoffView | null>(null);
   const targets = useHandoffTargets(row, blocked, handoff);
@@ -198,6 +202,20 @@ function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
     onClose();
   };
 
+  const sendGrok = async () => {
+    if (target.kind !== 'thread' || sendingGrok.current) return;
+    sendingGrok.current = true;
+    setError('');
+    const result = await sendThreadToGrokBot(target.id);
+    sendingGrok.current = false;
+    if (result.ok) {
+      toast({ title: 'Sent to Grok Bot', icon: 'external' });
+      onClose();
+      return;
+    }
+    setError(result.error);
+  };
+
   const sendTo = async (to: string) => {
     if (!row) return;
     setSending(to);
@@ -223,6 +241,7 @@ function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
           { label: 'Rename thread', icon: 'pencil', run: () => setDraft(current ?? '') },
           ...(row && !row.parent_id ? [{ label: 'Move to folder', icon: 'folder' as const, run: () => setMoving(true) }] : []),
           ...(targets.state === 'ready' ? [{ label: 'Hand off to…', icon: 'share' as const, run: () => setHandingOff(true) }] : []),
+          { label: 'Send to Grok Bot', icon: 'external', run: () => void sendGrok() },
           { label: archived ? 'Unarchive thread' : 'Archive thread', icon: 'archive', run: toggleArchive },
         ]
       : target.kind === 'folder'
@@ -318,7 +337,7 @@ function Menu({ open, onClose }: { open: Open; onClose: () => void }) {
           {it.label}
         </button>
       )))}
-      {error && <div className="px-2.5 py-1.5 text-[12px] text-fg-3">{error}</div>}
+      {error && <div className="px-2.5 py-1.5 text-[12px] leading-snug break-words text-pretty text-fg-3">{error}</div>}
     </div>
   );
 }

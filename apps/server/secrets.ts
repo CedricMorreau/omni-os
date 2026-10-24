@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db } from './db.ts';
+import { SERVER_ONLY_VARS } from './harness/env-guard.ts';
 
 // Secret values live only in the macOS Keychain (service "omni-os").
 // The DB keeps names and scopes so the UI can list them without reading values.
@@ -10,6 +11,14 @@ const run = promisify(execFile);
 /** Omni's own sync credentials (apps/server/sync/worker.ts). Global, and never handed to an agent's environment. */
 export const SYNC_SECRETS = { url: 'SUPABASE_URL', anonKey: 'SUPABASE_ANON_KEY', refreshToken: 'SUPABASE_REFRESH_TOKEN' } as const;
 const PRIVATE = new Set<string>(Object.values(SYNC_SECRETS));
+const SERVER_ONLY = new Set<string>(SERVER_ONLY_VARS);
+
+/** False for Omni's sync credentials (global only) and for the Grok Bot webhook (any scope). */
+export function secretReachesThread(scope: string, name: string): boolean {
+  if (SERVER_ONLY.has(name)) return false;
+  if (scope === 'global' && PRIVATE.has(name)) return false;
+  return true;
+}
 
 export const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 export const SCOPE_RE = /^(global|channel:[a-z0-9-]+)$/;
@@ -60,14 +69,14 @@ export async function globalSecret(name: string): Promise<string | null> {
   return readSecret('global', name);
 }
 
-/** Global secrets, overridden by channel-scoped ones with the same name. Omni's sync credentials stay out. */
+/** Global secrets, overridden by channel-scoped ones with the same name. Sync credentials and the Grok Bot webhook stay out. */
 export async function secretsEnv(channelId: string): Promise<Record<string, string>> {
   const rows = db
     .prepare(`SELECT scope, name FROM secrets WHERE scope = 'global' OR scope = ? ORDER BY scope = 'global' DESC`)
     .all(`channel:${channelId}`) as { scope: string; name: string }[];
   const env: Record<string, string> = {};
   for (const r of rows) {
-    if (r.scope === 'global' && PRIVATE.has(r.name)) continue;
+    if (!secretReachesThread(r.scope, r.name)) continue;
     const v = await readSecret(r.scope, r.name);
     if (v != null) env[r.name] = v;
   }

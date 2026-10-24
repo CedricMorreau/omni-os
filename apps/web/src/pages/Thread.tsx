@@ -17,7 +17,9 @@ import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { Avatar, Button, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, StatusPill, Tabs } from '../components/ui.tsx';
 import { href } from '../router.ts';
+import { sendThreadToGrokBot } from '../grokbot.ts';
 import { blockedNote } from '../handoff.ts';
+import { useToast } from '../components/Toaster.tsx';
 import { canMarkDone, shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
@@ -99,6 +101,9 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
   });
   const [prBusy, setPrBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [grokBusy, setGrokBusy] = useState(false);
+  const grokLock = useRef(false);
+  const toast = useToast();
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootWidth, setRootWidth] = useState(0);
 
@@ -220,6 +225,18 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
     }
   };
 
+  const sendGrok = async () => {
+    if (grokLock.current) return;
+    grokLock.current = true;
+    setGrokBusy(true);
+    setActionError(null);
+    const result = await sendThreadToGrokBot(thread.id);
+    grokLock.current = false;
+    setGrokBusy(false);
+    if (result.ok) toast({ title: 'Sent to Grok Bot', icon: 'external' });
+    else setActionError(result.error);
+  };
+
   const togglePanel = () =>
     setPanelOpen((v) => {
       writePref('threadPanel', !v);
@@ -330,6 +347,9 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
                 Restore
               </Button>
             )}
+            <Button size="sm" variant="ghost" icon="external" busy={grokBusy} title="Send this thread's text to Grok Bot" onClick={() => void sendGrok()}>
+              Send to Grok Bot
+            </Button>
             <StatusPill status={thread.status} />
             {handoffTargets.state === 'ready' && (
               <IconButton

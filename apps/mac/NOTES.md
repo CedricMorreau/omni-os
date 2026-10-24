@@ -22,6 +22,7 @@ Notes from the tracer, #62 (parts A to D), for whoever builds the next screens. 
 | `StreamMessage.swift` | `ThreadStreamMessage` and `FeedEvent`: one SSE `data:` message each |
 | `Client.swift` | `OmniClient`, `HTTPTransport`, `OmniAPIError`, `NewThread`. `send` is internal so extensions in other files can use it |
 | `Client+Secrets.swift` | `secrets()`, `setSecret(scope:name:value:)`, `deleteSecret(scope:name:)` on `OmniClient` |
+| `Client+GrokBot.swift` | `sendThreadToGrokBot(threadID:)` on `OmniClient`. Posts the thread id. The server sends the text |
 | `Secrets.swift` | `SecretScope`, `SecretRow`, `SecretName` (the Web UI's name rules), `SecretGroup`, `SecretScopeOption`, `SecretsModel` (the Secrets tab) |
 | `RelTime.swift` | `RelTime.label`: `relTime` in `apps/web/src/format.ts` |
 | `Appearance.swift` | `Appearance`, `AppearanceSettings` (in UserDefaults, `-appearance` for a run) |

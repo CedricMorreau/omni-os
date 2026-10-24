@@ -187,6 +187,15 @@ func bodyJSON(_ request: URLRequest) throws -> JSONValue {
     }
   }
 
+  @Test func sendsAThreadToGrokBot() async throws {
+    let t = StubTransport(body: #"{"ok":true}"#)
+    try await OmniClient(port: 4799, transport: t).sendThreadToGrokBot(threadID: "t 1")
+    let req = try #require(t.requests.first)
+    #expect(req.httpMethod == "POST")
+    #expect(req.url?.path() == "/api/grokbot")
+    #expect(try bodyJSON(req) == .object(["thread_id": .string("t 1")]))
+  }
+
   @Test func buildsStreamURLs() {
     let client = OmniClient(port: 4799)
     #expect(client.threadStreamURL("a b", after: 12).absoluteString == "http://127.0.0.1:4799/api/threads/a%20b/stream?after=12")

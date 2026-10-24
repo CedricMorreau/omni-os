@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { harnessEnv, STRIPPED_VARS } from '../harness/env-guard.ts';
+import { GROKBOT_WEBHOOK_AUTH, GROKBOT_WEBHOOK_URL, harnessEnv, STRIPPED_VARS } from '../harness/env-guard.ts';
+import { HARNESS_IDS } from '../harness/types.ts';
 
 describe('harness env guard', () => {
   const base = { PATH: '/usr/bin', HOME: '/home/ben' } as NodeJS.ProcessEnv;
@@ -50,5 +51,15 @@ describe('harness env guard', () => {
     const env = harnessEnv('codex', { OMNI_THREAD_ID: 't1', OPENAI_API_KEY: 'x' }, { OMNI_THREAD_ID: 'old' }, base);
     expect(env.OMNI_THREAD_ID).toBe('t1');
     expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it('keeps the Grok Bot webhook out of every harness', () => {
+    const dirty = { ...base, [GROKBOT_WEBHOOK_URL]: 'https://hook.example', [GROKBOT_WEBHOOK_AUTH]: 'from-env' } as NodeJS.ProcessEnv;
+    for (const harness of HARNESS_IDS) {
+      const env = harnessEnv(harness, { [GROKBOT_WEBHOOK_URL]: 'from-extra' }, { [GROKBOT_WEBHOOK_AUTH]: 'from-secret', [GROKBOT_WEBHOOK_URL]: 'from-secret' }, dirty);
+      expect(env[GROKBOT_WEBHOOK_URL]).toBeUndefined();
+      expect(env[GROKBOT_WEBHOOK_AUTH]).toBeUndefined();
+      expect(env.PATH).toBe('/usr/bin');
+    }
   });
 });

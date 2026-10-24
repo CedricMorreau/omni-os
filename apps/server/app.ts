@@ -13,6 +13,7 @@ import { commandsApi } from './commands-api.ts';
 import { mentionsApi } from './mentions-api.ts';
 import { feedApi } from './feed-api.ts';
 import { githubApi } from './github-api.ts';
+import { grokbotApi } from './grokbot.ts';
 import { linksApi } from './links-api.ts';
 import { metaApi } from './meta-api.ts';
 import { setupApi } from './setup-api.ts';
@@ -54,6 +55,7 @@ api.route('/', metaApi);
 api.route('/commands', commandsApi);
 api.route('/mentions', mentionsApi);
 api.route('/links', linksApi);
+api.route('/grokbot', grokbotApi);
 api.route('/sync', syncApi);
 api.route('/setup', setupApi);
 
