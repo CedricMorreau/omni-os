@@ -8,6 +8,7 @@ import { type ModUi, type Record as StreamRecord, type TaskUpdate } from '../str
 import { armIdle, clearInterrupt, endTurn, teardown } from './session.ts';
 import { finishTurnSnapshot, startTurnSnapshot } from './snapshots.ts';
 import { pump, reportToParent } from './queue.ts';
+import { handedOver } from './switch.ts';
 import {
   activeTasks,
   addEvent,
@@ -182,6 +183,7 @@ export function onRecord(live: Live, rec: StreamRecord) {
       if (i < 0) return;
       const [m] = live.inflight.splice(i, 1);
       live.replayed = true;
+      if (live.handover?.uuid === m.uuid) handedOver(live);
       // The harness read it: the transcript records it here, where it did.
       const row = addEvent(id, m.event.kind, eventPayload(m));
       track(m, 'delivered', row.id);

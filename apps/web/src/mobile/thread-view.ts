@@ -2,7 +2,7 @@
 // top of the transcript fold (transcript/fold.ts), so it reads the same events the desktop transcript does.
 import type { Artifact, Thread } from '../api.ts';
 import { toDate } from '../format.ts';
-import { buildItems, toolLabel, toolSummary, type Item, type ReportP, type ResultP, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
+import { buildItems, toolLabel, toolSummary, type Item, type ReportP, type ResultP, type SwitchItem, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
 
 export type TurnStatus = 'running' | 'queued' | 'done' | 'failed' | 'stopped';
 
@@ -28,6 +28,10 @@ export interface TurnView {
   status: TurnStatus;
   /** The turn's rows, for the Steps screen. */
   items: Item[];
+  /** Run switches Ben made after the turn ended, shown under it. */
+  switches: SwitchItem[];
+  /** The harness the turn ran on, which a switch can change from one turn to the next. */
+  harness: string;
 }
 
 export interface PlanView {
@@ -96,14 +100,16 @@ export function threadView({
   children,
 }: {
   events: TranscriptEvent[];
-  thread: Pick<Thread, 'status' | 'cwd'>;
+  thread: Pick<Thread, 'status' | 'cwd' | 'harness'>;
   artifacts: Artifact[];
   children: Thread[];
 }): ThreadView {
   const { items, plan } = buildItems(events);
   const turns: TurnView[] = [];
+  // Until the first switch, the thread ran where that switch moved it from.
+  let harness = items.find((it): it is SwitchItem => it.type === 'switch')?.p.from.harness ?? thread.harness;
   const start = (key: number, at: string): TurnView => {
-    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, reports: [], artifacts: [], children: [], result: null, error: null, status: 'done', items: [] };
+    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, reports: [], artifacts: [], children: [], result: null, error: null, status: 'done', items: [], switches: [], harness };
     turns.push(t);
     return t;
   };
@@ -128,6 +134,11 @@ export function threadView({
     } else if (it.type === 'error') {
       cur ??= start(it.key, '');
       cur.error = it.p.text;
+    } else if (it.type === 'switch') {
+      // A thread always starts with a message, so a switch has a turn before it.
+      cur?.switches.push(it);
+      harness = it.p.to.harness;
+      continue;
     }
     cur?.items.push(it);
   }

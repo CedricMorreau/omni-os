@@ -19,6 +19,7 @@ import { onExit, onRecord } from './records.ts';
 import { abortStart } from './session.ts';
 import { adapterFor, addEvent, browserHolder, cliLabel, crash, emitThread, lives, omniUrl, track, userLine, writeLine, type Live, type Msg } from './state.ts';
 import { failSetup } from './setup.ts';
+import { takeHandover } from './switch.ts';
 import { startTurnSnapshot } from './snapshots.ts';
 
 export function launch(threadId: string, first: Msg): Live | undefined {
@@ -136,6 +137,8 @@ async function spawnLive(live: Live, thread: Thread) {
   // Interrupted or shut down while secrets or files were read, or the checkout saved.
   if (lives.get(thread.id) !== live) return;
 
+  const run = takeHandover(live, thread);
+  thread = run.thread;
   const ctx: AdapterContext = {
     thread,
     channel,
@@ -146,7 +149,7 @@ async function spawnLive(live: Live, thread: Thread) {
     browserBusy,
     cdpEndpoint,
     omniUrl: omniUrl(),
-    resume: !!thread.has_run,
+    resume: run.resume,
   };
   const session = adapterFor(thread.harness).spawn(ctx, {
     record: (rec) => onRecord(live, rec),

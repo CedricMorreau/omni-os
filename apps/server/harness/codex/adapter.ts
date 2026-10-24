@@ -92,6 +92,8 @@ export function threadConfig(mcpServers: Record<string, unknown>) {
 export const codexAdapter: HarnessAdapter = {
   id: 'codex',
   capabilities: CAPABILITIES.codex,
+  // The thread id means no session yet: the adapter starts one and reports its id.
+  freshSessionId: (thread) => thread.id,
 
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const thread = ctx.thread;

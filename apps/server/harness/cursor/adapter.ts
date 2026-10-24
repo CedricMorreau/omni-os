@@ -54,6 +54,8 @@ function createChat(bin: string, cwd: string, env: NodeJS.ProcessEnv): Promise<s
 export const cursorAdapter: HarnessAdapter = {
   id: 'cursor',
   capabilities: CAPABILITIES.cursor,
+  // The thread id means no session yet: the adapter starts one and reports its id.
+  freshSessionId: (thread) => thread.id,
 
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const thread = ctx.thread;

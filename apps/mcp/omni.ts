@@ -250,6 +250,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  'switch_thread_run',
+  {
+    description:
+      'Move an existing thread to another harness, model or effort between turns. Its next message runs on the new one. ' +
+      'Same harness: its session carries on with the new model or effort. Another harness: the next session reads the thread so far first. ' +
+      `Only when ${USER} asks. Refused while the thread runs or has messages waiting, and to or from Hermes. Ids come from list_harnesses.`,
+    inputSchema: {
+      thread_id: z.string(),
+      harness: z.string().describe('claude-code, codex or cursor.'),
+      model: z.string().optional().describe("A model id from list_harnesses. Omit for the harness's default."),
+      effort: z.string().optional().describe("One of the model's effort levels. Omit for its default."),
+    },
+  },
+  async ({ thread_id, harness, model, effort }) => {
+    const t = await call(`/threads/${thread_id}/run`, { method: 'POST', body: JSON.stringify({ harness, model: model ?? '', effort: effort ?? '' }) });
+    return text({ thread_id: t.id, harness: t.harness, model: t.model, effort: t.effort });
+  },
+);
+
+server.registerTool(
   'get_thread',
   { description: 'Status, last reply and artifacts of a thread.', inputSchema: { thread_id: z.string() } },
   async ({ thread_id }) => text(await call(`/threads/${thread_id}/summary`)),
