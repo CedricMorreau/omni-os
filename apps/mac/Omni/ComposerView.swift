@@ -152,6 +152,10 @@ private struct ReplyComposerView: View {
   @State private var over = false
   @State private var focusTick = 0
   @State private var picking = false
+  @State private var switching = false
+  @State private var switchError: String?
+  /// The harness list fetched when the model list opens, newer than the store's.
+  @State private var fetchedHarnesses: [HarnessInfo]?
 
   private var busyThread: Bool { thread.status.isActive }
   /// The server's guess at the next reply, shown in the empty box. Tab takes it.
@@ -170,7 +174,7 @@ private struct ReplyComposerView: View {
       // thread is on its way to or from another Mac: the server's block is then that card's own line.
       if let b = store.blocked, thread.setup == nil, store.handoff?.inFlight != true { ErrorNote(text: b) }
       if let e = store.actionError { ErrorNote(text: e.message) }
-      if let e = reply.sendError ?? omniError { ErrorNote(text: e) }
+      if let e = reply.sendError ?? omniError ?? switchError { ErrorNote(text: e) }
       shell
     }
     #if DEBUG
@@ -179,6 +183,10 @@ private struct ReplyComposerView: View {
         setText: {
           reply.text = $0
           focusTick += 1
+        },
+        run: { run throws(QAScriptError) in
+          guard !busyThread, !switching else { throw QAScriptError("switch after this turn") }
+          switchRun(run)
         },
         send: { mode throws(QAScriptError) in
           guard reply.canSend else { throw QAScriptError("the reply box has nothing to send") }
@@ -244,7 +252,7 @@ private struct ReplyComposerView: View {
     ComposerFooterLayout {
       AttachButton(disabled: reply.sending) { picking = true }
       DictateButton { focusTick += 1 }
-      ThreadRunPills(thread: thread, harnesses: model.store.harnesses)
+      runPickers
       if thread.branch != nil {
         ThreadPRSlot(model: model, thread: thread, busy: busyThread, opening: reply.openingPR) { Task { await openPR() } }
       }
@@ -262,6 +270,43 @@ private struct ReplyComposerView: View {
     .padding(.horizontal, z(8))
     .padding(.bottom, z(8))
     .padding(.top, z(6))
+  }
+
+  /// The model and effort the thread runs on. A pick switches its next turn, so not while a turn runs or waits.
+  private var runPickers: some View {
+    let harnesses = fetchedHarnesses ?? model.store.harnesses
+    let current = RunSwitch.current(thread)
+    let disabled = busyThread ? "Switch after this turn" : switching ? "Switching" : nil
+    return HStack(spacing: z(6)) {
+      ModelPickerButton(
+        harnesses: harnesses, harness: current.harness, model: RunSwitch.shownModel(current, harnesses: harnesses),
+        pick: { switchRun(RunSwitch.picking(harness: $0, model: $1, from: current, harnesses: harnesses)) },
+        refresh: refreshHarnesses, offersAuto: false, autoReason: thread.autoReason, disabledHelp: disabled)
+      EffortMenu(
+        options: EffortRules.options(for: EffortRules.model(harness: current.harness, model: current.model, in: harnesses)),
+        value: current.effort, disabledHelp: disabled) { switchRun(RunSwitch.picking(effort: $0, from: current)) }
+    }
+  }
+
+  private func refreshHarnesses() {
+    Task {
+      if let list = try? await model.client.harnesses() { fetchedHarnesses = list }
+    }
+  }
+
+  /// Nothing changes until the server answers: it refuses while a turn runs or messages wait, and checks the catalog.
+  private func switchRun(_ run: Run?) {
+    guard let run, !switching else { return }
+    switching = true
+    switchError = nil
+    Task {
+      defer { switching = false }
+      do {
+        store.merge(try await model.client.switchRun(thread.id, to: run))
+      } catch {
+        switchError = error.localizedDescription
+      }
+    }
   }
 
   private var callbacks: ComposerCallbacks {
@@ -317,7 +362,7 @@ private struct ReplyComposerView: View {
     }
   }
 
-  /// `/model`, `/effort` and `/fast` can't change a running thread: offer a new one that picks its model.
+  /// The hint under `/model`, `/effort` and `/fast` offers a new thread that picks its model.
   private func newThreadOnAnotherModel() {
     reply.text = ""
     model.openNewThread(.otherModel(thread))
@@ -350,41 +395,6 @@ private struct ReplyComposerView: View {
       return
     }
     reply.addFiles([StagedFile(url: url, size: data.count, modified: .now, isTemporary: true)])
-  }
-}
-
-/// The model and effort this thread is running on. Fixed, so they stay visible and are not pickers.
-private struct ThreadRunPills: View {
-  let thread: OmniThread
-  let harnesses: [HarnessInfo]
-
-  var body: some View {
-    let labels = ThreadRunLabels.make(
-      harness: thread.harness, model: thread.model, effort: thread.effort, autoReason: thread.autoReason, harnesses: harnesses)
-    HStack(spacing: z(6)) {
-      pill(
-        symbol: "bolt", text: labels.modelTitle, detail: labels.harnessName, help: labels.autoReason,
-        label: "Model: \(labels.modelTitle) on \(labels.harnessName)")
-      pill(symbol: "slider.horizontal.3", text: labels.effort, detail: nil, label: "Effort: \(labels.effort)")
-    }
-  }
-
-  /// `help` is Auto's reason, else the pills say they are fixed.
-  private func pill(symbol: String, text: String, detail: String?, help: String? = nil, label: String) -> some View {
-    HStack(spacing: z(6)) {
-      Image(systemName: symbol).font(.omni(size: 11.5)).foregroundStyle(Tok.fg3)
-      Text(text).font(.omni(size: 12.5, weight: .medium)).lineLimit(1)
-      if let detail { Text("· \(detail)").font(.omni(size: 12.5)).foregroundStyle(Tok.fg4).lineLimit(1) }
-    }
-    .padding(.horizontal, z(10))
-    .frame(height: z(28))
-    .frame(maxWidth: z(220))
-    .foregroundStyle(Tok.fg)
-    .background(Tok.surface2, in: Capsule())
-    .help(help ?? "Fixed for this thread")
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(label)
-    .fixedSize()
   }
 }
 
@@ -558,6 +568,7 @@ private struct Thumb: View {
 enum QAComposerProbe {
   struct Hooks {
     let setText: (String) -> Void
+    let run: (Run) throws(QAScriptError) -> Void
     let send: (SendMode?) async throws(QAScriptError) -> Void
   }
 

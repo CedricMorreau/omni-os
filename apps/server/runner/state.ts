@@ -1,12 +1,14 @@
 // Live processes, the queue's waiting maps, and the helpers the lifecycle modules share.
 import { readFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
+import type { HandoverP } from '@omni/shared/run-switch.ts';
 import type { DeliveryPhase } from '../delivery.ts';
 import { config } from '../config.ts';
 import { events, messageRequests, threads, type DeliveryState, type MessageRequest } from '../db.ts';
 import { publishFeed, publishThread } from '../bus.ts';
 import { describeAttachments, inlinable, messageContent, type Attachment } from '../uploads.ts';
 import type { CommandList } from '../commands.ts';
+import { handOverWith } from './switch.ts';
 import { CAPABILITIES, type HarnessId } from '../harness/types.ts';
 import type { CommandUse, HarnessAdapter } from '../harness/adapter.ts';
 import { claudeAdapter } from '../harness/claude/adapter.ts';
@@ -136,6 +138,10 @@ export interface Live {
   /** Set while the checkout is saved before a turn: messages wait in `gated` until it is, so the harness edits nothing first. */
   gate?: Promise<void> | null;
   gated?: Msg[];
+  /** The message carrying the handover, and the event recorded once the harness reads it (runner/switch.ts). */
+  handover?: { uuid: string; done: HandoverP };
+  /** A handover still waits for a message that is not a command: the next one sent carries it. */
+  handoverDue?: boolean;
   /** Set while the thread is handed to another Mac (session.ts releaseForHandoff): what the process never read goes here, not dropped. */
   released?: Msg[];
 }
@@ -250,9 +256,10 @@ export function refreshContext(threadId: string): boolean {
   return !!l?.child && !l.closing && !!l.requestContext?.();
 }
 
-/** The commands a thread's running process listed itself, MCP prompts included. Null while none has. */
+/** The current process's commands, MCP prompts included. A closing process may belong to the previous harness. */
 export function threadCommands(threadId: string): CommandList | null {
-  return lives.get(threadId)?.commands ?? null;
+  const live = lives.get(threadId);
+  return live && !live.closing ? live.commands : null;
 }
 
 type ShownPayload = { text?: string; source?: string; task_id?: string | null; role?: string | null; thread_id?: string | null };
@@ -383,6 +390,7 @@ export const crash = (live: Live) => live.child && alive(live.child) && live.chi
 
 /** Write a message to the harness. Before the process exists it waits in inflight, and spawn writes it. */
 export function send(live: Live, m: Msg) {
+  if (live.handoverDue) handOverWith(live, m);
   live.inflight.push(m);
   if (!live.child) return;
   // The checkout before this turn is still being saved: written once it is (runner/snapshots.ts).

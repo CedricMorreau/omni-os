@@ -115,13 +115,13 @@ describe('replySlash: what Send does', () => {
     expect(replySlash('/model', claude, 'claude-code')).toMatchObject({ action: { kind: 'fixed' }, armed: false });
   });
 
-  it('says the model, effort and fast mode are fixed per thread, and sends nothing', () => {
+  it('points at the model and effort pills, and sends nothing', () => {
     for (const text of ['/model', '/effort high', '/Fast']) {
       expect(replySlash(text, READY, 'claude-code')).toEqual({
         action: { kind: 'fixed' },
         armed: false,
         label: null,
-        hint: 'The model, effort and fast mode are fixed per thread.',
+        hint: 'Switch the model and effort with the pills below. The next turn uses them.',
       });
     }
   });

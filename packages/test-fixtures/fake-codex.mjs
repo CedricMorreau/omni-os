@@ -33,6 +33,10 @@
 //   FAKE_CODEX_LOG=<file>     append one JSON line per request (method, params, cwd, api vars seen)
 //   FAKE_CODEX_ACCOUNT=none   logged out; =apiKey logged in with an API key instead of ChatGPT
 //   FAKE_CODEX_SKILLS_FAIL=1  skills/list answers with an error
+//   FAKE_CODEX_START_FAIL=1   thread/start rejects before creating a session
+//   FAKE_CODEX_TURN_FAIL=1    turn/start rejects before accepting input
+//   FAKE_CODEX_STEER_FAIL=1   turn/steer rejects before accepting input
+//   FAKE_CODEX_STEER_COMPLETE=1  complete immediately after accepting a steer
 //   CODEX_HOME=<dir>          personal skills are read from <dir>/skills, as Codex does
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -271,6 +275,7 @@ async function runTurn(turn, input) {
 }
 
 function openThread(id, method, params) {
+  if (method === 'thread/start' && process.env.FAKE_CODEX_START_FAIL === '1') return fail(id, 'fake-codex: session startup rejected');
   if (params.sandbox != null && !SANDBOX_MODES.includes(params.sandbox)) {
     return fail(id, `Invalid request: unknown variant ${JSON.stringify(params.sandbox)}, expected one of ${SANDBOX_MODES.join(', ')}`);
   }
@@ -301,6 +306,7 @@ function openThread(id, method, params) {
 }
 
 function startTurn(id, params) {
+  if (process.env.FAKE_CODEX_TURN_FAIL === '1') return fail(id, 'fake-codex: turn input rejected');
   if (!threadId || params.threadId !== threadId) return fail(id, `thread not found: ${params.threadId}`);
   if (!Array.isArray(params.input)) return fail(id, 'Invalid request: missing field `input`');
   if (activeTurn) return fail(id, `turn ${activeTurn.id} is still running`);
@@ -311,15 +317,22 @@ function startTurn(id, params) {
 }
 
 function steer(id, params) {
+  if (process.env.FAKE_CODEX_STEER_FAIL === '1') return fail(id, 'fake-codex: steer input rejected');
   const turn = activeTurn;
   if (!turn || params.threadId !== threadId) return fail(id, 'no active turn to steer');
   if (params.expectedTurnId !== turn.id) return fail(id, `expected turn ${params.expectedTurnId}, but turn ${turn.id} is running`);
   if (turn.kind) return fail(id, `ActiveTurnNotSteerable: a ${turn.kind} turn cannot be steered`);
   if (!Array.isArray(params.input)) return fail(id, 'Invalid request: missing field `input`');
+  const complete = process.env.FAKE_CODEX_STEER_COMPLETE === '1';
+  if (complete) process.stdout.cork();
   respond(id, { turnId: turn.id });
   // The steer joins the running turn (no new turn/started), and the model answers it.
   item(turn, { type: 'userMessage', id: nextItemId(), clientId: null, content: params.input }, 'completed');
   item(turn, message(`steered: ${textOf(params.input)}`), 'completed');
+  if (complete) {
+    end(turn, 'completed');
+    process.stdout.uncork();
+  }
 }
 
 /** What a review looks at, in Codex's words: its status hint and the review turn's user message. */
