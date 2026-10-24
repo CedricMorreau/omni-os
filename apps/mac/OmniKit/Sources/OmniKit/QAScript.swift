@@ -107,6 +107,8 @@ public enum QAStep: Hashable, Sendable {
   case type(String)
   /// Sends the reply box: nil is a plain reply, else the mode of the split button.
   case send(SendMode?)
+  /// Changes the next run through the same callback as the reply box pickers.
+  case run(Run)
   /// Opens or closes the thread inspector, or picks its tab.
   case inspector(QAInspector)
   /// Waits until the inspector's web view has this document title, so a page can report what it could reach.
@@ -285,6 +287,10 @@ public struct QAScript: Hashable, Sendable {
     case "type":
       guard let text = value as? String else { throw QAScriptError("type takes the text for the reply box") }
       return .type(text)
+    case "run":
+      guard let d = value as? [String: Any], let harness = d["harness"] as? String, !harness.isEmpty,
+        let model = d["model"] as? String else { throw QAScriptError("run takes harness, model and optional effort") }
+      return .run(Run(harness: HarnessID(rawValue: harness), model: model, effort: d["effort"] as? String ?? ""))
     case "send":
       guard let name = value as? String, ["reply", "steer", "queue", "interrupt"].contains(name) else {
         throw QAScriptError("send takes reply, steer, queue or interrupt")

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, errorText, useApi, type Artifact, type BranchChanges, type PendingMsg, type Thread } from '../api.ts';
 import { harnessLabel, OmniMark } from '../components/brand.tsx';
 import { Markdown } from '../components/Markdown.tsx';
+import { SwitchLine } from '../components/Transcript.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { handOff, HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx';
 import { deviceRows } from '../handoff.ts';
@@ -456,7 +457,7 @@ export function ThreadScreen() {
             Conductor
           </div>
         ) : (
-          (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={thread.harness} />
+          (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={t.harness} />
         )}
         {t.error && <Clamped text={t.error} />}
         {t.prose && <MoProse text={t.prose} />}
@@ -498,6 +499,9 @@ export function ThreadScreen() {
                 <Report key={k} role={r.role} taskId={r.task_id} text={r.text} />
               ))}
               {turnBody(t, last)}
+              {t.switches.map((it) => (
+                <SwitchLine key={it.key} it={it} running={thread.status === 'running'} />
+              ))}
             </div>
           );
         })}
@@ -523,6 +527,7 @@ export function ThreadScreen() {
         chips={chips}
         placeholder={conductor ? 'Reply to the Conductor' : slotBusy ? `Steer ${theirs}` : 'Follow up'}
         onSent={(t) => applyThread(t, true)}
+        onSwitched={(t) => applyThread(t)}
       />
       {menu && <MenuSheet thread={thread} prLabel={pr?.pr ? `PR #${pr.pr.number} · ${plural(changes?.files.length ?? 0, 'file')}` : null} onClose={() => setMenu(false)} />}
     </>

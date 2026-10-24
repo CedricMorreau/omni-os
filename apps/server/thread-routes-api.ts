@@ -33,6 +33,7 @@ import {
   scheduleLimitResume,
   runsHere,
   steerRequests,
+  switchRun,
 } from './runner.ts';
 import { cancelHandoff, handOff } from './handoff.ts';
 import { handoffView } from './handoff/records.ts';
@@ -364,6 +365,21 @@ threadActionsApi.get('/:id/uploads/:name', async (c) => {
   c.header('Cache-Control', 'private, max-age=31536000, immutable');
   if (!mime || c.req.query('download')) c.header('Content-Disposition', `attachment; filename="${name}"`);
   return c.body(readFileSync(file));
+});
+
+const runSchema = z.object({
+  harness: z.string().min(1),
+  model: z.string().nullish().transform((v) => v ?? ''),
+  effort: z.string().nullish().transform((v) => v ?? ''),
+});
+
+/**
+ * Move the thread to another harness, model or effort between turns (runner/switch.ts). A 409 while a turn runs or
+ * messages wait, a 400 for a run the catalog does not offer. The same run again changes nothing.
+ */
+threadActionsApi.post('/:id/run', async (c) => {
+  const body = runSchema.parse(await c.req.json().catch(() => ({})));
+  return c.json(await switchRun(c.req.param('id'), body));
 });
 
 const interrupt = (c: Context) => {

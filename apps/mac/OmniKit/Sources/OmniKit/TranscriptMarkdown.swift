@@ -17,6 +17,7 @@ public enum TranscriptMarkdown {
     case .error(_, let s): s
     case .report(_, _, let r): r.text
     case .mod(_, let lines): lines.map { "\($0.plugin): \($0.text)" }.joined(separator: "\n")
+    case .runSwitch(let r): ([r.text] + (r.note.map { [$0] } ?? [])).joined(separator: "\n")
     }
   }
 
@@ -36,6 +37,8 @@ public enum TranscriptMarkdown {
       return "**Plan** \(p.done)/\(p.todos.count)\n\n" + checklist(p)
     case .result(_, let r):
       return "*\(r.line)*"
+    case .runSwitch(let r):
+      return ([r.text] + (r.note.map { [$0] } ?? [])).map { "*\($0)*" }.joined(separator: "\n")
     case .error(_, let s):
       return "**Error**\n\n" + fenced(s)
     case .report(_, _, let r):

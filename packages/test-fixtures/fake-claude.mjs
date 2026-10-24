@@ -48,7 +48,8 @@
 //   FAKE_CLAUDE_SIGINT_EXIT_MS=<ms>  on SIGINT, go quiet and exit only after that long, like the real CLI running its
 //                                 shutdown hooks and closing its MCP servers
 //   FAKE_CLAUDE_INIT_FAIL=1       exit 1 on an initialize control request instead of answering it
-//   FAKE_CLAUDE_STDIN_LOG=<file>  stream mode: append one JSON line per stdin line read (pid, thread, type, control subtype)
+//   FAKE_CLAUDE_STDIN_LOG=<file>  stream mode: append one JSON line per stdin line read (pid, thread, type, control subtype,
+//                                 a message's text)
 //   FAKE_CLAUDE_MCP_MS=<ms>       how long after startup the user's MCP servers connect (default 30)
 //   FAKE_CLAUDE_TITLE_ORPHAN=1    text mode (Omni's title call): leave a child behind, as ORPHAN does. Not a directive:
 //                                 the title call's prompt is the thread's first message, and the thread's CLI gets it too
@@ -620,6 +621,7 @@ function onLine(line) {
   }
   if (process.env.FAKE_CLAUDE_STDIN_LOG) {
     const line = { pid: process.pid, thread_id: process.env.OMNI_THREAD_ID ?? null, type: msg.type, subtype: msg.request?.subtype };
+    if (msg.type === 'user') line.text = textOf(msg.message?.content ?? '');
     appendFileSync(process.env.FAKE_CLAUDE_STDIN_LOG, JSON.stringify(line) + '\n');
   }
   if (msg.type === 'user') {

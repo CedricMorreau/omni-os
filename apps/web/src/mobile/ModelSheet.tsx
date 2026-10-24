@@ -11,7 +11,7 @@ export function runLabel(harnesses: HarnessWithRunning[] | undefined, choice: Mo
 }
 
 /**
- * The new-thread model and effort, as a sheet: the desktop ModelPicker's list (each harness's models, a missing
+ * A new thread's model and effort, or a thread's run to switch, as a sheet: the desktop ModelPicker's list (each harness's models, a missing
  * harness with the command that fixes it) and the EffortPicker's levels. Picking a model resets effort to its default,
  * as on the desktop.
  */

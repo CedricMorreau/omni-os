@@ -1,3 +1,4 @@
+import type { RunName } from '@omni/shared/run-switch.ts';
 import { db, now, tx } from '../connection.ts';
 import { outbox, record } from '../sync.ts';
 
@@ -74,7 +75,49 @@ export interface LimitStop {
   limit_machine: string | null;
 }
 
-/** The columns clients read, without sync's run_machine or the limit stop's id and owner. */
+/** A harness session this thread had before it switched away, and the last event it had in its context. */
+export interface PastSession {
+  id: string;
+  seen: number;
+}
+/** The thread's earlier sessions, one per harness. The current one stays in session_id. */
+export type Sessions = Partial<Record<string, PastSession>>;
+/** What the next turn's session reads before Ben's message, until that session starts (apps/server/runner/handover.ts). */
+export interface PendingHandover {
+  from: RunName;
+  /** 0: a fresh session reads the whole thread. Above 0: the harness's earlier session resumes and reads the events after it. */
+  since: number;
+  /** The fresh native session exists, so the next spawn resumes it while its history still waits. */
+  started?: boolean;
+}
+/** How a thread's sessions stand across harness switches (apps/server/runner/switch-plan.ts). Synced, kept out of the API. */
+export interface SessionState {
+  sessions: Sessions;
+  handover: PendingHandover | null;
+}
+
+// Stored with event uids, not this Mac's row ids, so the other Mac reads the same place in the transcript. An event
+// that has not reached this Mac yet reads as the thread's start: the handover then carries too much, never too little.
+export interface StoredSessionState {
+  sessions: Partial<Record<string, { id: string; seen: string }>> | null;
+  handover: { from: RunName; since: string | null; started?: boolean } | null;
+}
+const uidOf = (id: number) => (db.prepare('SELECT uid FROM events WHERE id = ?').get(id) as { uid: string } | undefined)?.uid ?? '';
+const idOf = (uid: string) => (db.prepare('SELECT id FROM events WHERE uid = ?').get(uid) as { id: number } | undefined)?.id ?? 1;
+const parsed = <T>(json: string | null): T | null => (json ? (JSON.parse(json) as T) : null);
+
+function storedSessions(s: Sessions | null | undefined): StoredSessionState['sessions'] {
+  const entries = Object.entries(s ?? {}).filter((e): e is [string, PastSession] => !!e[1]);
+  return entries.length ? Object.fromEntries(entries.map(([h, p]) => [h, { id: p.id, seen: uidOf(p.seen) }])) : null;
+}
+const storedHandover = (h: PendingHandover | null | undefined): StoredSessionState['handover'] =>
+  h ? { from: h.from, since: h.since ? uidOf(h.since) : null, ...(h.started && { started: true }) } : null;
+const readSessions = (s: StoredSessionState['sessions']): Sessions =>
+  Object.fromEntries(Object.entries(s ?? {}).flatMap(([h, p]) => (p ? [[h, { id: p.id, seen: idOf(p.seen) }]] : [])));
+const readHandover = (h: StoredSessionState['handover']): PendingHandover | null => (h ? { from: h.from, since: h.since ? idOf(h.since) : 0, ...(h.started && { started: true }) } : null);
+const json = (v: object | null) => (v ? JSON.stringify(v) : null);
+
+/** The columns clients read, without sync's run_machine, the limit stop's id and owner, or the session state. */
 export const THREAD_COLUMNS =
   'id, channel_id, title, status, role, model, harness, effort, auto_reason, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, limit_state, limit_resets_at, limit_elsewhere, created_at, updated_at';
 
@@ -158,11 +201,23 @@ export const threads = {
       return threads.get(t.id)!;
     });
   },
-  update(id: string, patch: Partial<Thread>) {
-    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'updated_at'] as const;
+  /** Its earlier sessions and pending handover. */
+  sessionState(id: string): SessionState {
+    const row = threads.storedSessionState(id);
+    return { sessions: readSessions(row.sessions), handover: readHandover(row.handover) };
+  },
+  /** The same as stored, event uids and all, for sync. */
+  storedSessionState(id: string): StoredSessionState {
+    const row = db.prepare('SELECT sessions, handover FROM threads WHERE id = ?').get(id) as { sessions: string | null; handover: string | null } | undefined;
+    return { sessions: parsed(row?.sessions ?? null), handover: parsed(row?.handover ?? null) };
+  },
+  update(id: string, patch: Partial<Thread> & Partial<SessionState>) {
+    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'auto_reason', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'updated_at'] as const;
     const keys = allowed.filter((k) => k in patch);
     const sets = keys.map((k) => `${k} = ?`);
     const vals = keys.map((k) => (patch[k] ?? null) as string | number | null);
+    if ('sessions' in patch) (sets.push('sessions = ?'), vals.push(json(storedSessions(patch.sessions))));
+    if ('handover' in patch) (sets.push('handover = ?'), vals.push(json(storedHandover(patch.handover))));
     if (!('updated_at' in patch)) (sets.push('updated_at = ?'), vals.push(now()));
     // Every status write says who runs the thread, so the row itself tells the other Mac (apps/server/sync/guard.ts).
     if (patch.status) (sets.push('run_machine = ?'), vals.push(runMachine(patch.status)));

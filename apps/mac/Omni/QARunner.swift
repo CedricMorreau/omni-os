@@ -214,6 +214,10 @@ final class QARunner {
           guard let composer = QAComposerProbe.current else { throw QAScriptError("no reply box is showing") }
           composer.setText(text)
           try? await Task.sleep(for: .milliseconds(300))
+        case .run(let run):
+          guard let composer = QAComposerProbe.current else { throw QAScriptError("no reply box is showing") }
+          try composer.run(run)
+          try? await Task.sleep(for: .milliseconds(800))
         case .send(let mode):
           guard let composer = QAComposerProbe.current else { throw QAScriptError("no reply box is showing") }
           try await composer.send(mode)
@@ -458,6 +462,7 @@ final class QARunner {
     case .editPending(let text): "editPending \(text.prefix(40))"
     case .imageZoom(let scale): "imageZoom \(scale.map { "\($0)" } ?? "fit")"
     case .type(let text): "type \(text.prefix(40))"
+    case .run(let run): "run \(run.harness.rawValue) \(run.model) \(run.effort)"
     case .send(let mode): "send \(mode?.rawValue ?? "reply")"
     case .inspector(let command): "inspector \(command.rawValue)"
     case .webTitle(let title): "webTitle \(title)"

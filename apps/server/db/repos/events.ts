@@ -45,6 +45,14 @@ export const events = {
     db
       .prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE thread_id = ? AND id > ? ORDER BY id`)
       .all(threadId, afterId) as unknown as EventRow[],
+  /** Whether the thread has a message, reply or tool call after this event id: something a session there never saw. */
+  hasContentAfter: (threadId: string, afterId: number) =>
+    !!db
+      .prepare(
+        `SELECT 1 FROM events WHERE thread_id = ? AND id > ? AND kind IN ('user', 'crew_report', 'assistant_text', 'tool_use', 'tool_result')
+         AND json_extract(payload, '$.dropped') IS NOT 1 LIMIT 1`,
+      )
+      .get(threadId, afterId),
   uidOf: (id: number) => (db.prepare('SELECT uid FROM events WHERE id = ?').get(id) as { uid: string } | undefined)?.uid ?? null,
   lastAssistantText(threadId: string): string | null {
     const row = db

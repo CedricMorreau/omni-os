@@ -12,13 +12,13 @@ import { NextThreadCard } from '../components/thread/NextThreadCard.tsx';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
 import { LimitCard } from '../components/thread/LimitCard.tsx';
 import { HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx';
-import { openMenu } from '../components/ContextMenu.tsx';
 import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
-import { Avatar, Button, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, StatusPill, Tabs } from '../components/ui.tsx';
+import { HeaderActions } from '../components/thread/HeaderActions.tsx';
+import { Avatar, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, Tabs } from '../components/ui.tsx';
 import { href } from '../router.ts';
 import { blockedNote } from '../handoff.ts';
-import { canMarkDone, shownResult } from '../needs-you.ts';
+import { shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
@@ -267,8 +267,8 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
     <div ref={rootRef} className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <div className="flex shrink-0 items-center gap-3 px-3 pt-3 pb-2 md:px-6 md:pt-4">
-          <span className="hidden sm:block">
+        <div className="@container flex shrink-0 items-center gap-3 px-3 pt-3 pb-2 md:px-6 md:pt-4">
+          <span className="hidden sm:block @max-3xl:hidden">
             <Avatar name={channel?.name ?? thread.channel_id} channelIcon={channel?.icon} icon={thread.channel_id === 'conductor' ? 'target' : undefined} size={34} />
           </span>
           <div className="min-w-0 flex-1">
@@ -291,79 +291,30 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
             </h1>
             {modLines.length > 0 && <ModStatusLines lines={modLines} />}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {!live && ready && (
-              <span className="hidden items-center gap-1.5 font-num text-[11px] text-fg-3 sm:inline-flex" title="Reconnecting to the live stream">
-                <span className="pulse h-1.5 w-1.5 rounded-full bg-fg-4" /> Reconnecting
-              </span>
-            )}
-            <ContextMeter
-              thread={thread}
-              pushed={context}
-              onCompacted={(t) => {
-                applyThread(t, true);
-                pin();
-              }}
-            />
-            {!thread.archived && (
-              <IconButton
-                icon="pin"
-                label={thread.pinned_at ? 'Unpin thread' : 'Pin thread'}
-                title={thread.pinned_at ? 'Unpin from the sidebar' : 'Pin to the sidebar'}
-                active={!!thread.pinned_at}
-                aria-pressed={!!thread.pinned_at}
-                onClick={() => void togglePin()}
-              />
-            )}
-            {!thread.archived && (thread.done_at || canMarkDone(thread.status)) && (
-              <IconButton
-                icon="check"
-                label={thread.done_at ? 'Mark as not done' : 'Mark as done'}
-                title={thread.done_at ? 'Marked done. Click to bring it back to Needs you.' : 'Mark as done: out of Needs you until something new happens here'}
-                active={!!thread.done_at}
-                aria-pressed={!!thread.done_at}
-                onClick={() => void toggleDone()}
-              />
-            )}
-            {!!thread.archived && (
-              <Button size="sm" variant="secondary" icon="archive" onClick={() => void restore()} busy={restoring} title="Archived. Restore it to its channel's thread list.">
-                Restore
-              </Button>
-            )}
-            <StatusPill status={thread.status} />
-            {handoffTargets.state === 'ready' && (
-              <IconButton
-                icon="share"
-                label="Hand off to another Mac"
-                title="Hand off to another Mac: stop the turn here and keep it running there"
-                aria-haspopup="menu"
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  openMenu({ kind: 'thread', id: thread.id }, r.left, r.bottom + 6, true);
+          <HeaderActions
+            thread={thread}
+            meter={
+              <ContextMeter
+                thread={thread}
+                pushed={context}
+                onCompacted={(t) => {
+                  applyThread(t, true);
+                  pin();
                 }}
               />
-            )}
-            {/* Nothing runs while the worktree is prepared, so there is nothing to interrupt. */}
-            {slotBusy && !thread.setup && (
-              <Button
-                size="sm"
-                variant="secondary"
-                icon="stop"
-                onClick={() => void interrupt()}
-                busy={interrupting}
-                title="Interrupt the agent (Esc). Messages already sent still run."
-                aria-keyshortcuts="Escape"
-              >
-                {interrupting ? 'Interrupting' : 'Interrupt'}
-              </Button>
-            )}
-            <span className="relative">
-              <IconButton icon="panel" label="Artifacts, changes, browser, terminal, details" active={panelOpen} onClick={togglePanel} />
-              {artifactCount > 0 && (
-                <span className="pointer-events-none absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-fg px-1 font-num text-[9.5px] text-on-ink">{artifactCount}</span>
-              )}
-            </span>
-          </div>
+            }
+            reconnecting={!live && ready}
+            handoffReady={handoffTargets.state === 'ready'}
+            onPin={() => void togglePin()}
+            onDone={() => void toggleDone()}
+            onRestore={() => void restore()}
+            restoring={restoring}
+            // Nothing runs while the worktree is prepared, so there is nothing to interrupt.
+            interrupt={slotBusy && !thread.setup ? { busy: interrupting, run: () => void interrupt() } : null}
+            panelOpen={panelOpen}
+            onPanel={togglePanel}
+            artifactCount={artifactCount}
+          />
         </div>
 
         {/* transcript */}
@@ -440,7 +391,7 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
                 pin();
               }}
               // A rename keeps updated_at, so it has to win a tie.
-              onRenamed={(t) => applyThread(t)}
+              onChanged={(t) => applyThread(t)}
               extra={
                 thread.branch ? <ThreadPR thread={thread} slotBusy={slotBusy} busy={prBusy} onOpen={openPR} /> : undefined
               }

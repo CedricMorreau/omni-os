@@ -126,6 +126,8 @@ export async function startRunner(env: Record<string, string> = {}) {
     /** What a thread's claude processes read on stdin, in order: `user`, or `control_request:<subtype>`. */
     claudeStdin: (id: string) =>
       claudeStdin().filter((l) => l.thread_id === id).map((l) => (l.subtype ? `${l.type}:${l.subtype}` : l.type) as string),
+    /** The text of each message a thread's claude processes read, in order. */
+    claudeTexts: (id: string) => claudeStdin().filter((l) => l.thread_id === id && l.type === 'user').map((l) => l.text as string),
     codexRequests,
     /** Codex app-server processes spawned, oldest first (one per thread). */
     codexPids: () => [...new Set(codexRequests().map((r) => r.pid))],
