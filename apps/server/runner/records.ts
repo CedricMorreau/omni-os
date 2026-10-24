@@ -5,10 +5,10 @@ import { publishFeed, publishThread } from '../bus.ts';
 import { onToolResult } from '../published.ts';
 import { turnFinished } from '../sync/files.ts';
 import { type ModUi, type Record as StreamRecord, type TaskUpdate } from '../stream.ts';
-import { armIdle, clearInterrupt, endTurn, teardown } from './session.ts';
+import { armIdle, clearInterrupt, endTurn, requeueHeld, teardown } from './session.ts';
 import { finishTurnSnapshot, startTurnSnapshot } from './snapshots.ts';
 import { pump, reportToParent } from './queue.ts';
-import { handedOver } from './switch.ts';
+import { applyQueued, handedOver, queuedRun } from './switch.ts';
 import {
   activeTasks,
   addEvent,
@@ -89,7 +89,10 @@ export function onTask(live: Live, u: TaskUpdate) {
   live.taskSaved.delete(u.task_id);
   addEvent(id, 'task', u);
   publishTasks(true);
-  if (!live.turn && !hasBackground(live)) armIdle(live);
+  if (live.turn || hasBackground(live)) return;
+  // The last background task ended: a switch queued behind it applies, and closes the process.
+  applyQueued(id);
+  armIdle(live);
 }
 
 /** The process is gone: whatever it still ran ended with it. */
@@ -151,12 +154,18 @@ export function onResult(live: Live, p: ResultPayload) {
   // Steers the CLI has not replayed yet: it starts the next turn with them on its own.
   if (live.inflight.length) return emitThread(id);
   if (limit && !p.ok && !stopped) return limitStop(live, limit.resets_at);
+  const status = stopped ? 'stopped' : p.ok ? 'done' : 'failed';
+  // A switch Ben queued applies now: what he sent behind the turn waits for the process on the new run.
+  if (live.held.length && queuedRun(threads.get(id))) {
+    requeueHeld(live);
+    return endTurn(live, status, true);
+  }
   const next = live.held.shift();
   if (next) {
     send(live, next);
     return emitThread(id);
   }
-  endTurn(live, stopped ? 'stopped' : p.ok ? 'done' : 'failed');
+  endTurn(live, status);
 }
 
 /**
@@ -263,6 +272,8 @@ export function onExit(live: Live, code: number | null, signal: NodeJS.Signals |
   } else if (thread && live.resultSeen && !thread.has_run) {
     threads.update(id, { has_run: 1, updated_at: thread.updated_at });
   }
+  // The process is gone, so a switch queued during its turn applies.
+  applyQueued(id);
   // After the status write, so the turn's Result is there to link.
   finishTurnSnapshot(live);
   if (thread && (wasTurn || live.resultSeen)) void turnFinished(id);

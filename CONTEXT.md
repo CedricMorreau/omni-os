@@ -121,7 +121,7 @@ _Avoid_: Frontend, dashboard
 - A **Harness** offers many **Models**; the same model family can appear in several harnesses (Claude Opus runs in Claude Code and in Cursor Agent)
 - A Hermes **Thread** runs on the Hermes server, reached over Tailscale. The API listens on the server's tailnet address and is not public. The thread has no Omni worktree, browser profile or artifacts directory. Its **Session** id is `omni-<thread id>`. Artifacts come back as links or text
 - The user picks the **Harness** per thread, or leaves it to **Auto**; Omni never switches a thread's harness on its own
-- The user (or the **Conductor**, when asked) can switch a thread's **Harness**, **Model** or **Effort** between **Turns**, never during one, and never to or from Hermes. The same **Harness** keeps its **Session**; another one gets a **Handover**
+- The user (or the **Conductor**, when asked) can switch a thread's **Harness**, **Model** or **Effort** between **Turns**, never to or from Hermes. A switch picked during a **Turn** waits and applies once it ends, so a **Turn** never spans two runs; messages sent meanwhile run on the new one. The same **Harness** keeps its **Session**; another one gets a **Handover**
 - A **Crew role**, **Channel** or **Automation** can set a default **Harness**, **Model** and **Effort**, or **Auto**; a choice made on the thread wins, and **Auto** is the fallback
 - The **Conductor** delegates on the crew role's defaults, which for most roles is **Auto**, unless the user names a harness or model
 - A **Harness** offers many **Harness commands**; a thread's `/` menu lists its own **Harness**'s **Harness commands** plus the **Omni commands**

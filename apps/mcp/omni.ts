@@ -253,9 +253,10 @@ server.registerTool(
   'switch_thread_run',
   {
     description:
-      'Move an existing thread to another harness, model or effort between turns. Its next message runs on the new one. ' +
+      'Move an existing thread to another harness, model or effort. Its next message runs on the new one. ' +
       'Same harness: its session carries on with the new model or effort. Another harness: the next session reads the thread so far first. ' +
-      `Only when ${USER} asks. Refused while the thread runs or has messages waiting, and to or from Hermes. Ids come from list_harnesses.`,
+      'While a turn runs, the switch waits and applies once the turn ends (`queued_*` on the result); its current run picked again drops it. ' +
+      `Only when ${USER} asks. Refused to or from Hermes. Ids come from list_harnesses.`,
     inputSchema: {
       thread_id: z.string(),
       harness: z.string().describe('claude-code, codex or cursor.'),
@@ -265,7 +266,8 @@ server.registerTool(
   },
   async ({ thread_id, harness, model, effort }) => {
     const t = await call(`/threads/${thread_id}/run`, { method: 'POST', body: JSON.stringify({ harness, model: model ?? '', effort: effort ?? '' }) });
-    return text({ thread_id: t.id, harness: t.harness, model: t.model, effort: t.effort });
+    const queued = t.queued_harness ? { harness: t.queued_harness, model: t.queued_model, effort: t.queued_effort } : null;
+    return text({ thread_id: t.id, harness: t.harness, model: t.model, effort: t.effort, queued });
   },
 );
 

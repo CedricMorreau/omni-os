@@ -241,6 +241,10 @@ export function migrate() {
   // turn reads. JSON, null when there is none. Synced with the row, kept out of the API.
   ensureColumn('threads', 'sessions', 'TEXT');
   ensureColumn('threads', 'handover', 'TEXT');
+  // A switch picked while a turn ran, applied once the thread is quiet (runner/switch.ts). Synced with the row.
+  ensureColumn('threads', 'queued_harness', 'TEXT');
+  ensureColumn('threads', 'queued_model', 'TEXT');
+  ensureColumn('threads', 'queued_effort', 'TEXT');
   // Sync: the machine id of the Mac running or queueing the thread, null otherwise. Synced, kept out of the API.
   ensureColumn('threads', 'run_machine', 'TEXT');
   ensureColumn('threads', 'suggestion', 'TEXT');

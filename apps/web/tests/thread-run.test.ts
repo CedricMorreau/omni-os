@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickedRun, threadChoice, threadRunLabels, type RunCatalogHarness } from '../src/thread-run.ts';
+import { currentRun, pickedRun, shownRun, threadChoice, threadRunLabels, type RunCatalogHarness } from '../src/thread-run.ts';
 
 const catalog: RunCatalogHarness[] = [
   {
@@ -78,5 +78,22 @@ describe('pickedRun', () => {
     const byDefault = { harness: 'claude-code', model: null, effort: '' };
     expect(threadChoice(byDefault, both)).toEqual({ harness: 'claude-code', model: 'sonnet' });
     expect(pickedRun(byDefault, both, { harness: 'claude-code', model: 'sonnet' })).toBeNull();
+  });
+});
+
+describe('a switch queued behind a turn', () => {
+  const running = { harness: 'claude-code', model: 'sonnet', effort: 'high', auto_reason: 'Standard code task' };
+  const queued = { ...running, queued_harness: 'claude-code', queued_model: 'opus', queued_effort: '' };
+
+  it('shows the queued run, without the reason Auto gave the current one', () => {
+    expect(shownRun(running)).toBe(running);
+    expect(threadRunLabels(shownRun(queued), catalog)).toEqual({ model: 'Opus', harnessName: 'Claude Code', effort: 'Default (high)' });
+  });
+
+  it('picks from the queued run, and picking the current run again drops it', () => {
+    expect(pickedRun(shownRun(queued), catalog, { effort: 'low' })).toEqual({ harness: 'claude-code', model: 'opus', effort: 'low' });
+    expect(pickedRun(shownRun(queued), catalog, { harness: 'claude-code', model: 'opus' })).toBeNull();
+    expect(pickedRun(shownRun(queued), catalog, { harness: 'claude-code', model: 'sonnet' })).toEqual({ harness: 'claude-code', model: 'sonnet', effort: '' });
+    expect(currentRun(queued)).toEqual({ harness: 'claude-code', model: 'sonnet', effort: 'high' });
   });
 });

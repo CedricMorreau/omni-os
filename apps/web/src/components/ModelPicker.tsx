@@ -29,6 +29,7 @@ export function ModelPicker({
   offerAuto = true,
   label,
   disabled,
+  className = '',
 }: {
   harnesses: HarnessWithRunning[];
   value: ModelChoice;
@@ -43,6 +44,8 @@ export function ModelPicker({
   /** The pill's label in place of the picked model's name. */
   label?: string;
   disabled?: boolean;
+  /** On the wrapper, around the pill and its list. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [up, setUp] = useState(false);
@@ -91,7 +94,7 @@ export function ModelPicker({
   const buttonLabel = label ?? (auto ? 'Auto' : current.m ? current.m.label : placeholder);
 
   return (
-    <div ref={wrap} className="relative">
+    <div ref={wrap} className={`relative ${className}`}>
       <button
         ref={btn}
         type="button"
@@ -224,12 +227,14 @@ export function EffortPicker({
   value,
   onChange,
   disabled,
+  className,
 }: {
   harnesses: HarnessWithRunning[];
   choice: ModelChoice;
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const { model: m, efforts } = modelOf(harnesses, choice);
   if (!efforts.length) {
@@ -239,5 +244,5 @@ export function EffortPicker({
     { value: '', label: m?.defaultEffort ? `Default (${m.defaultEffort})` : 'Default', avatar: false, icon: 'sliders' },
     ...efforts.map((e) => ({ value: e, label: e, avatar: false as const, icon: 'sliders' as const })),
   ];
-  return <Picker label="Effort" value={value} options={options} onChange={onChange} disabled={disabled} />;
+  return <Picker label="Effort" value={value} options={options} onChange={onChange} disabled={disabled} className={className} />;
 }

@@ -1,5 +1,6 @@
 // Switching a thread's harness, model or effort between turns. switch-plan.ts decides what happens to its sessions,
-// this applies it; the next spawn hands the thread over when the harness changed (handover.ts).
+// this applies it; the next spawn hands the thread over when the harness changed (handover.ts). A switch picked during
+// a turn waits on the thread until the turn ends.
 import { sameRun, type Run, type RunName, type SwitchP } from '@omni/shared/run-switch.ts';
 import { artifacts, events, threads, type Thread } from '../db.ts';
 import { uploadsDir } from '../config.ts';
@@ -12,7 +13,8 @@ import { turnBlocked } from '../sync/guard.ts';
 import { buildHandover } from './handover.ts';
 import { closeLive } from './session.ts';
 import { planSwitch } from './switch-plan.ts';
-import { adapterFor, addEvent, emitThread, hasBackground, lives, refusal, runsHere, waiting, waitingMsgs, type Live, type Msg } from './state.ts';
+import { pump } from './queue.ts';
+import { adapterFor, addEvent, emitThread, hasBackground, lives, refusal, runsHere, waiting, type Live, type Msg } from './state.ts';
 
 /** A run with the names the catalog gives it now, so its transcript row reads the same later. */
 export function runName(run: Run, cat: Catalog = getCatalog()): RunName {
@@ -28,17 +30,14 @@ export function runName(run: Run, cat: Catalog = getCatalog()): RunName {
 
 const runOf = (t: Thread): Run => ({ harness: t.harness, model: t.model ?? '', effort: t.effort });
 
-/** Why the run cannot change right now, or null. A switch waits for a quiet thread so no turn spans two runs. */
-function busy(t: Thread): string | null {
-  const live = lives.get(t.id);
-  if (t.status === 'running' || t.status === 'queued' || live?.turn) return 'Switch after this turn.';
-  if (waiting.includes(t.id) || waitingMsgs.get(t.id)?.length || live?.held.length || live?.inflight.length) {
-    return 'Messages are still waiting to run. Switch once they have.';
-  }
-  if (live && hasBackground(live)) return 'Background tasks still run in this thread. Switch once they finish.';
-  if (t.setup === 'preparing') return "The thread's worktree is still being made.";
-  return turnBlocked(t, runsHere(t.id));
-}
+/** The run Ben picked while a turn ran, or null. */
+export const queuedRun = (t: Thread | undefined): Run | null =>
+  t?.queued_harness ? { harness: t.queued_harness, model: t.queued_model ?? '', effort: t.queued_effort ?? '' } : null;
+
+const NO_QUEUED = { queued_harness: null, queued_model: null, queued_effort: null } as const;
+
+/** A turn holds the process: running, with messages written or held for after it, or background tasks still going. */
+const holdsTurn = (live: Live | undefined) => !!live && (live.turn || !!live.inflight.length || !!live.held.length || hasBackground(live));
 
 /** The catalog's objection to a run, or null. */
 function invalid(cat: Catalog, to: Run & { harness: HarnessId }): string | null {
@@ -49,14 +48,25 @@ function invalid(cat: Catalog, to: Run & { harness: HarnessId }): string | null 
   return r.ok ? null : r.error;
 }
 
+const plan = (t: Thread, to: Run, cat: Catalog) =>
+  planSwitch({ ...runOf(t), id: t.id, has_run: t.has_run, session_id: t.session_id, ...threads.sessionState(t.id) }, to, runName(runOf(t), cat), events.lastId(t.id), (id) =>
+    events.hasContentAfter(t.id, id),
+  );
+
 /**
- * Move a thread to another run between turns. The same run again changes nothing. The transcript gets a `switch`
- * row, and a warm process from the old run closes so the next turn starts on the new one.
+ * Move a thread to another run. The same run again changes nothing, and drops a run queued since. While a turn runs
+ * the pick is queued instead (`queued_*` on the thread): a later pick replaces it, and it applies once the thread is
+ * quiet (`applyQueued`). A run the catalog does not offer, or a move to or from Hermes, is refused at once.
  */
 export async function switchRun(threadId: string, to: Run): Promise<Thread> {
   const t = threads.get(threadId);
   if (!t) throw refusal('thread not found', 404);
-  if (sameRun(runOf(t), to)) return t;
+  if (sameRun(runOf(t), to)) {
+    if (!queuedRun(t)) return t;
+    threads.update(threadId, NO_QUEUED);
+    emitThread(threadId);
+    return threads.get(threadId)!;
+  }
   if (!isHarnessId(to.harness)) throw refusal(`Unknown harness "${to.harness}".`, 400);
   const target = { ...to, harness: to.harness };
   // Ben may have just logged in to the harness: look again before refusing.
@@ -65,32 +75,75 @@ export async function switchRun(threadId: string, to: Run): Promise<Thread> {
     if (error) throw refusal(error, 400);
   }
   const now = threads.get(threadId)!;
-  const why = busy(now);
+  const why = turnBlocked(now, runsHere(threadId));
   if (why) throw refusal(why, 409);
+  const p = plan(now, to, getCatalog());
+  if (p.kind === 'reject') throw refusal(p.error, 400);
 
+  // A turn spans one run: the pick waits for it to end. A lead still waiting on its team counts as running.
+  if (now.status === 'running' || holdsTurn(lives.get(threadId))) {
+    const q = queuedRun(now);
+    if (q && sameRun(q, to)) return now;
+    threads.update(threadId, { queued_harness: to.harness, queued_model: to.model, queued_effort: to.effort });
+    emitThread(threadId);
+    return threads.get(threadId)!;
+  }
+  apply(now, to);
+  // Messages waiting for a slot go on the new run, whose harness may have one free.
+  if (waiting.includes(threadId)) pump();
+  return threads.get(threadId)!;
+}
+
+/**
+ * The switch itself: the thread's run, its sessions and a `switch` row, and a warm process from the old run closes so
+ * the next turn starts on the new one.
+ */
+function apply(t: Thread, to: Run) {
   const cat = getCatalog();
-  const from = runName(runOf(now), cat);
-  const plan = planSwitch({ ...runOf(now), id: now.id, has_run: now.has_run, session_id: now.session_id, ...threads.sessionState(threadId) }, to, from, events.lastId(threadId), (id) =>
-    events.hasContentAfter(threadId, id),
-  );
-  if (plan.kind === 'none') return now;
-  if (plan.kind === 'reject') throw refusal(plan.error, 400);
-  threads.update(threadId, {
+  const p = plan(t, to, cat);
+  if (p.kind === 'reject') throw refusal(p.error, 400);
+  if (p.kind === 'none') {
+    if (queuedRun(t)) threads.update(t.id, NO_QUEUED);
+    return;
+  }
+  threads.update(t.id, {
     harness: to.harness,
     model: to.model || null,
     effort: to.effort,
     auto_reason: null,
-    session_id: plan.session_id,
-    sessions: plan.sessions,
-    handover: plan.handover,
+    ...NO_QUEUED,
+    session_id: p.session_id,
+    sessions: p.sessions,
+    handover: p.handover,
   });
-  addEvent(threadId, 'switch', { from, to: runName(to, cat), mode: plan.kind } satisfies SwitchP);
+  addEvent(t.id, 'switch', { from: runName(runOf(t), cat), to: runName(to, cat), mode: p.kind } satisfies SwitchP);
   // The meter's reading is the old session's.
-  if (to.harness !== now.harness) forgetContext(threadId);
-  const live = lives.get(threadId);
+  if (to.harness !== t.harness) forgetContext(t.id);
+  const live = lives.get(t.id);
   if (live) closeLive(live);
-  emitThread(threadId);
-  return threads.get(threadId)!;
+  emitThread(t.id);
+}
+
+/**
+ * The thread is quiet, or about to start a turn: switch to the run Ben queued. Not while a turn or background task
+ * holds the process. A run the catalog no longer offers is dropped with an error row, and the thread stays as it was.
+ * True when nothing holds the thread's next turn back: no run waits, or it applied and no process is left to close.
+ */
+export function applyQueued(threadId: string): boolean {
+  const t = threads.get(threadId);
+  const to = queuedRun(t);
+  if (!t || !to) return true;
+  if (holdsTurn(lives.get(threadId))) return false;
+  const error = isHarnessId(to.harness) ? invalid(getCatalog(), { ...to, harness: to.harness }) : `Unknown harness "${to.harness}".`;
+  try {
+    if (error) throw new Error(error);
+    apply(t, to);
+  } catch (e) {
+    threads.update(threadId, NO_QUEUED);
+    addEvent(threadId, 'error', { text: `The switch to ${runName(to).modelLabel} did not apply: ${(e as Error).message}` });
+    emitThread(threadId);
+  }
+  return !lives.has(threadId);
 }
 
 /**

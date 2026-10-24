@@ -115,6 +115,21 @@ private func events(_ json: [String]) throws -> [EventRow] {
     #expect(RunSwitch.picking(effort: "high", from: byDefault) == Run(harness: .claudeCode, model: "", effort: "high"))
   }
 
+  @Test func pickersShowAndPickFromTheQueuedRun() throws {
+    let plain = try thread(model: "opus", effort: "high")
+    #expect(RunSwitch.queued(plain) == nil)
+    #expect(RunSwitch.shown(plain) == RunSwitch.current(plain))
+    let json = threadJSON(effort: "high").replacingOccurrences(
+      of: #""model":"sonnet""#, with: #""model":"opus","queued_harness":"codex","queued_model":"","queued_effort":"""#)
+    let queued = try OmniJSON.decoder().decode(OmniThread.self, from: Data(json.utf8))
+    #expect(RunSwitch.queued(queued) == Run(harness: .codex, model: "", effort: ""))
+    #expect(RunSwitch.shown(queued) == Run(harness: .codex, model: "", effort: ""))
+    #expect(RunSwitch.current(queued) == Run(harness: .claudeCode, model: "opus", effort: "high"))
+    // A pick starts from the queued run, so the queued run again changes nothing.
+    #expect(RunSwitch.picking(effort: "", from: RunSwitch.shown(queued)) == nil)
+    #expect(RunSwitch.describe(RunSwitch.current(queued), harnesses: harnesses()) == "Opus, high")
+  }
+
   @Test func postsTheRun() async throws {
     let t = StubTransport(body: threadJSON())
     let switched = try await OmniClient(port: 4799, transport: t).switchRun("t 1", to: Run(harness: .codex, model: "gpt-x", effort: ""))

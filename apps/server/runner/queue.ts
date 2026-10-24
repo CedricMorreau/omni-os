@@ -5,6 +5,7 @@ import { publishThread } from '../bus.ts';
 import { clearSuggestion } from './aux.ts';
 import { hardKill, requestInterrupt, stopStartup } from './session.ts';
 import { launch } from './spawn.ts';
+import { applyQueued, queuedRun } from './switch.ts';
 import { userName } from '../profile.ts';
 import { startTurnSnapshot } from './snapshots.ts';
 import {
@@ -42,6 +43,13 @@ export function deliver(threadId: string, m: Msg) {
     // message resumes the session (there is no mid-turn control to send). Startup interrupts were
     // already stopped above, so this pass is the running decision.
     const action = resolveDelivery(m.mode, caps, 'running');
+    // A switch waits for this turn to end, and a message sent now goes on the new run: it waits for the turn too.
+    if (queuedRun(threads.get(threadId)) && (action === 'steer' || action === 'interrupt')) {
+      live.held.push(m);
+      track(m, 'held');
+      if (action === 'interrupt') requestInterrupt(live);
+      return emitThread(threadId);
+    }
     switch (action) {
       case 'queue':
         live.held.push(m);
@@ -85,8 +93,8 @@ export function pump() {
   const running = runningByHarness();
   for (let i = 0; i < waiting.length; ) {
     const id = waiting[i];
-    // Its old process is still exiting; start fresh once it is gone.
-    if (lives.get(id)?.closing) {
+    // A switch Ben queued applies first. Its old process is still exiting, or the switch closed it: start fresh once it is gone.
+    if (!applyQueued(id) || lives.get(id)?.closing) {
       i++;
       continue;
     }

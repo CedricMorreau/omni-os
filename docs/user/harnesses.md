@@ -16,7 +16,10 @@ A harness is the agent CLI a thread runs on. Pick one per channel (its default) 
 
 ## Switching mid-thread
 
-Between turns, the model and effort pickers in a thread's reply box move it to another model, effort or harness. Not while a turn runs or messages wait, and not to or from Hermes, which has no worktree on this Mac.
+The model and effort pickers in a thread's reply box move it to another model, effort or harness. Not to or from Hermes, which has no worktree on this Mac.
+
+- Between turns the switch applies at once.
+- While a turn runs, it waits: the pills show the pick with "Next turn" until the turn ends, however it ends (done, failed or stopped), and then it applies. A later pick replaces it; picking the current model and effort again, or the pill's clear button, drops it. Anything you send meanwhile waits for the turn too and runs on the new pick, instead of steering the running turn.
 
 - Same harness: its session carries on with the new model or effort.
 - Another harness: your next message starts a session there with a handover ahead of it. Omni builds it from the thread's transcript: title, folder, artifacts, open todos, then the messages, replies and tool calls, the newest kept whole when it runs past 32K characters. The transcript shows "Handing over from ... to ...", then how much the new session read. A message that starts with a command, like `/review`, runs first, and the handover goes with your next message.
