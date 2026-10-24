@@ -10,6 +10,7 @@ import { detectRepo } from './github.ts';
 import { getCatalog } from './harness/catalog-service.ts';
 import { activeTasks } from './runner.ts';
 import { validateDefaults } from './harness/resolve.ts';
+import { publishFeed } from './bus.ts';
 
 export const channelsApi = new Hono();
 
@@ -170,7 +171,9 @@ channelsApi.patch('/:id', async (c) => {
   const runError = runDefaultsError(body, current);
   if (runError) return c.json({ error: runError }, 400);
   if (body.repo_path && !body.github_repo && !current.github_repo) body.github_repo = await detectRepo(body.repo_path);
-  return c.json(publicChannel(channels.update(id, body as any)!));
+  const updated = channels.update(id, body as any)!;
+  publishFeed({ type: 'channel', id });
+  return c.json(publicChannel(updated));
 });
 
 /** The channel's design system: a standalone HTML file. PUT replaces it, DELETE removes it, GET returns the file. */

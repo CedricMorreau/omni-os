@@ -215,7 +215,11 @@ private struct ThreadHeader: View {
       .buttonStyle(.pill(.ghost, height: 28))
       .disabled(sendingGrok)
       .help("Send this thread's text to Grok Bot")
-      StatusPill(status: thread.status)
+      if store.transcript.hasPendingQuestion {
+        StatusPill(glyph: .needs, label: QuestionState.pending.label)
+      } else {
+        StatusPill(status: thread.status)
+      }
     }
     .padding(.horizontal, z(24))
     .padding(.top, z(12))
@@ -580,6 +584,8 @@ private struct TranscriptRow: View {
       CloudAgentCard(state: state)
     case .runSwitch(let row):
       SwitchLineView(row: row, running: running)
+    case .question(let q):
+      QuestionCard(question: q, threadID: threadID, client: model.client, ui: ui)
     }
   }
 

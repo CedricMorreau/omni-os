@@ -26,7 +26,7 @@ private func withNewer(_ n: NeedsYou, _ title: String, uid: String) -> NeedsYou 
   @Test func readsEveryKindOfResultAndBlocker() throws {
     let n = try inbox()
     #expect(Set(n.items.compactMap { $0.result?.status }) == [.done, .failed, .stopped])
-    #expect(Set(n.items.flatMap { $0.blockers.map(\.kind) }) == [.setup, .recovered, .limited])
+    #expect(Set(n.items.flatMap { $0.blockers.map(\.kind) }) == [.question, .setup, .recovered, .limited])
     #expect(n.unread == n.items.filter { $0.result != nil }.count)
     #expect(n.blocked == n.items.filter { !$0.blockers.isEmpty }.count)
     #expect(NeedsYou(items: n.items) == n, "the counts the server sent are the ones the app works out")
@@ -43,6 +43,9 @@ private func withNewer(_ n: NeedsYou, _ title: String, uid: String) -> NeedsYou 
     #expect(widget.detail == (try item(n, "Fix the widget")).thread.setupError)
     #expect(try item(n, "Plan the launch").reason.label == "A message waits for Resume")
     #expect(try item(n, "Fix the cart total").reason.label == "Failed")
+    let digest = try item(n, "Daily digest · 5 Jan").reason
+    #expect(digest.label == "Waiting on your answer")
+    #expect(digest.detail == "Which store should the digest cover first?")
     #expect(try item(n, "Fix the cart total").reason.tone == .needs)
     #expect(try item(n, "Audit the checkout").reason.label == "Finished")
     #expect(try item(n, "Audit the checkout").reason.tone == .done)

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import type { HandoverP } from '@omni/shared/run-switch.ts';
 import type { DeliveryPhase } from '../delivery.ts';
+import { about } from '../about.ts';
 import { config } from '../config.ts';
 import { events, messageRequests, threads, type DeliveryState, type MessageRequest } from '../db.ts';
 import { publishFeed, publishThread } from '../bus.ts';
@@ -17,7 +18,8 @@ import { cursorAdapter } from '../harness/cursor/adapter.ts';
 import { hermesAdapter } from '../harness/hermes/adapter.ts';
 import { cursorCloudAdapter } from '../harness/cursor-cloud/adapter.ts';
 
-export const omniUrl = () => `http://127.0.0.1:${config.port}`;
+/** Where a thread's MCP servers reach this server: the port it bound, which differs from the configured one when that is 0. */
+export const omniUrl = () => `http://127.0.0.1:${about.port}`;
 
 const ADAPTERS: Record<string, HarnessAdapter> = {
   'claude-code': claudeAdapter,

@@ -108,7 +108,21 @@ describe('buildMcpConfig: browser', () => {
   it('adds no browser when OMNI_BROWSER is off', () => {
     config.browser = false;
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), browserBusy: false, omniUrl: OMNI_URL });
-    expect(cfg.mcpServers).toEqual({});
+    expect(Object.keys(cfg.mcpServers)).toEqual(['omni-ask']);
+  });
+});
+
+describe('buildMcpConfig: omni-ask', () => {
+  it('gives every thread ask_user_question, whatever its role, with the token file and never the token', () => {
+    for (const r of [undefined, role([]), role(['github']), role(['omni'])]) {
+      const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: r, browserBusy: false, omniUrl: OMNI_URL });
+      expect(cfg.mcpServers['omni-ask']).toEqual({
+        command: paths.tsx,
+        args: [paths.mcpAsk],
+        env: { OMNI_URL, OMNI_TOKEN_FILE: join(paths.data, 'api-token'), OMNI_THREAD_ID: THREAD, OMNI_USER: 'the user' },
+      });
+    }
+    expect(existsSync(paths.mcpAsk)).toBe(true);
   });
 });
 
@@ -121,7 +135,7 @@ describe('buildMcpConfig: omni conductor server', () => {
       // The token file's path, never the token: mcp.json and Cursor's plugin folder hold no secret value.
       env: { OMNI_URL, OMNI_TOKEN_FILE: join(paths.data, 'api-token'), OMNI_THREAD_ID: THREAD, OMNI_USER: 'the user' },
     });
-    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-browser']);
+    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-ask', 'omni-browser']);
   });
 
   it('is absent without a role or when the role lists other servers', () => {
@@ -159,7 +173,7 @@ describe('buildMcpConfig: omni conductor server', () => {
   it('still works with the browser off', () => {
     config.browser = false;
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: role(['omni']), browserBusy: true, omniUrl: OMNI_URL });
-    expect(Object.keys(cfg.mcpServers)).toEqual(['omni']);
+    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-ask']);
   });
 });
 

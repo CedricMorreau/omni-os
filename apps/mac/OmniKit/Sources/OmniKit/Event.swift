@@ -46,6 +46,8 @@ public enum EventPayload: Hashable, Sendable {
   case cloudAgent(CloudAgentState)
   case runSwitch(SwitchP)
   case handover(HandoverP)
+  case question(QuestionPayload)
+  case questionAnswer(QuestionAnswerPayload)
   case unknown(kind: String, payload: JSONValue)
 
   public init(kind: String, json: String) {
@@ -71,6 +73,8 @@ public enum EventPayload: Hashable, Sendable {
       case "cloud_agent": self = .cloudAgent(try d.decode(CloudAgentState.self, from: data))
       case "switch": self = .runSwitch(try d.decode(SwitchP.self, from: data))
       case "handover": self = .handover(try d.decode(HandoverP.self, from: data))
+      case "question": self = .question(try d.decode(QuestionPayload.self, from: data))
+      case "question_answer": self = .questionAnswer(try d.decode(QuestionAnswerPayload.self, from: data))
       default: self = .unknown(kind: kind, payload: JSONValue.parse(json))
       }
     } catch {

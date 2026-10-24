@@ -23,6 +23,8 @@ public enum TranscriptItem: Hashable, Sendable, Identifiable {
   case cloud(eventID: Int, CloudAgentState)
   /// Ben switched the thread's harness, model or effort.
   case runSwitch(SwitchRow)
+  /// A question the agent asked, as a card in place of its tool call, with what became of it.
+  case question(ThreadQuestion)
 
   public var id: TranscriptItemID {
     switch self {
@@ -30,6 +32,7 @@ public enum TranscriptItem: Hashable, Sendable, Identifiable {
       .event(id)
     case .tools(let g): .event(g.eventID)
     case .runSwitch(let r): .event(r.eventID)
+    case .question(let q): .event(q.eventID)
     case .plan: .plan
     }
   }
@@ -218,14 +221,25 @@ public struct Transcript: Sendable {
     guard running else { return false }
     switch last {
     case nil, .user, .report, .text: return true
+    case .question(let q): return q.state != .pending
     default: return false
     }
+  }
+
+  /// A question in the thread still waits on Ben.
+  public var hasPendingQuestion: Bool {
+    items.contains { if case .question(let q) = $0 { q.state == .pending } else { false } }
+  }
+
+  /// The agent's last word is a question Ben has not answered: the thread waits on him, not on its work.
+  public var waitsOnQuestion: Bool {
+    if case .question(let q)? = last { q.state == .pending } else { false }
   }
 
   private mutating func add(_ e: EventRow) {
     switch Self.content(of: e) {
     case .toolUse(let use):
-      if !Self.isSelfParent(use) { addCall(use, e) }
+      if !Self.isSelfParent(use) && !Question.isTool(use.name) { addCall(use, e) }
     case .toolResult(let r):
       guard !r.toolUseID.isEmpty else { return }
       results[r.toolUseID] = r
@@ -264,6 +278,12 @@ public struct Transcript: Sendable {
     case .handover(let h):
       if let id = pendingSwitch { withSwitch(id) { $0.done = h } }
       pendingSwitch = nil
+    case .question(let p):
+      if Self.questionIndex(p.id, in: items) == nil { close(.question(ThreadQuestion(id: p.id, eventID: e.id, questions: p.questions))) }
+    case .questionAnswer(let a):
+      guard let i = Self.questionIndex(a.id, in: items), case .question(var q) = items[i] else { return }
+      q.settle(a)
+      items[i] = .question(q)
     case .status, .sessionInit, .task: break
     case .unknown(let kind, _):
       if Self.breaking.contains(kind) { close(nil) }
@@ -274,6 +294,10 @@ public struct Transcript: Sendable {
     guard let i = items.lastIndex(where: { $0.id == .event(eventID) }), case .runSwitch(var r) = items[i] else { return }
     body(&r)
     items[i] = .runSwitch(r)
+  }
+
+  private static func questionIndex(_ id: String, in items: [TranscriptItem]) -> Int? {
+    items.lastIndex { if case .question(let q) = $0 { q.id == id } else { false } }
   }
 
   /// A `tool_use` whose payload does not decode still folds, the way the Web UI's parsePayload does:
@@ -413,10 +437,13 @@ extension Transcript {
     var plan: Plan?
     var cloudRows: [String: Int] = [:]
     var pendingSwitch: Int?
+    func questionRow(_ id: String) -> Int? {
+      rows.lastIndex { if case .item(.question(let q)) = $0 { q.id == id } else { false } }
+    }
     for e in events {
       switch Self.content(of: e) {
       case .toolUse(let use):
-        if Self.isSelfParent(use) { break }
+        if Self.isSelfParent(use) || Question.isTool(use.name) { break }
         if group == nil {
           let g = Group(e.id, use.id)
           rows.append(.group(g))
@@ -476,6 +503,14 @@ extension Transcript {
           rows[i] = .item(.runSwitch(r))
         }
         pendingSwitch = nil
+      case .question(let p):
+        guard questionRow(p.id) == nil else { break }
+        group = nil
+        rows.append(.item(.question(ThreadQuestion(id: p.id, eventID: e.id, questions: p.questions))))
+      case .questionAnswer(let a):
+        guard let i = questionRow(a.id), case .item(.question(var q)) = rows[i] else { break }
+        q.settle(a)
+        rows[i] = .item(.question(q))
       case .unknown(let kind, _):
         if breaking.contains(kind) { group = nil }
       }

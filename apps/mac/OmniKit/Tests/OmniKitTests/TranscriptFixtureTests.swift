@@ -137,6 +137,8 @@ private func project(_ transcript: Transcript) -> (items: [FoldItem], plan: Fold
         repo: s.repo.isEmpty ? nil : s.repo, ref: s.ref, branch: s.branch, prUrl: s.prURL))
     case .runSwitch(let r):
       items.append(FoldItem(type: "switch", key: r.eventID, p: r.p, done: r.done, superseded: r.superseded))
+    case .question(let q):
+      items.append(FoldItem(type: "question", key: q.eventID))
     }
   }
   return (items, plan)

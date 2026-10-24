@@ -13,12 +13,13 @@ import type { Catalog, Resolved } from '../harness/catalog.ts';
 import { profileTask, routeTask } from '../harness/auto.ts';
 import { usageByHarness } from '../usage.ts';
 import { channelCatalog, freshCatalog, getCatalog } from '../harness/catalog-service.ts';
-import { resolveRun } from '../harness/resolve.ts';
+import { resolveRun, setsRun } from '../harness/resolve.ts';
 import type { CommandUse } from '../harness/adapter.ts';
 import { assembling, deliver, settleTeam } from './queue.ts';
 import { fallbackTitle, generateTitle } from './aux.ts';
 import { addEvent, emitThread, isShuttingDown, refusal, requestMsg, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
 import { bindResume, retrySetup, saveStart, setUpThread, START_REQUEST } from './setup.ts';
+import { dismissQuestions } from './questions.ts';
 
 // ---------- slash commands ----------
 
@@ -101,11 +102,14 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
   // Resolve harness/model/effort: the thread's own choice, then the role's default, then the channel's, then Auto.
   // On a miss, probe the harnesses that are down and try again: Ben may have just logged in.
   const channelDefaults = { harness: channel.default_harness ?? undefined, model: channel.default_model ?? undefined, effort: channel.default_effort ?? undefined };
+  // The Conductor role is automatic in its own channel. A saved channel run overrides its charter, including
+  // after a retired channel default is dropped below, when the fallback must be Auto rather than the charter.
   // Cursor Cloud is per channel: it needs the channel's GitHub repo, and can run on the channel's own key.
+  const roleDefaults = role?.id === 'conductor' && channel.id === 'conductor' && setsRun(channelDefaults) ? undefined : role;
   const resolve = (cat: Catalog, withChannel = true) =>
     resolveRun(
       { harness: input.harness, model: input.model, effort: input.effort },
-      role ? { harness: role.harness, model: role.model, effort: role.effort } : undefined,
+      roleDefaults,
       channelCatalog(cat, channel.id),
       withChannel ? channelDefaults : undefined,
     );
@@ -383,6 +387,8 @@ export async function postMessage(
   if (blocked) throw refusal(blocked, 409);
   // Ben (or the conductor) wrote in it again, so it is not done: what comes of it shows in Needs you.
   threads.setDone(threadId, false);
+  // Ben wrote instead of answering the agent's questions: a call waiting on them returns, so this message is read now.
+  if (source === 'ben' && mode !== 'queue') dismissQuestions(threadId);
   const { row, fresh } = messageRequests.accept({
     thread_id: threadId,
     request_id: opts.requestId ?? randomUUID(),

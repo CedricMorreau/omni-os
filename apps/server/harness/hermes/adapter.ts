@@ -6,6 +6,7 @@
 // same remote conversation, which keeps its own context.
 import { randomUUID } from 'node:crypto';
 import { config } from '../../config.ts';
+import { TOOL_FAILURE_POLICY } from '../../tool-failure-policy.ts';
 import type { Attachment } from '../../uploads.ts';
 import type { Record as StreamRecord } from '../../stream.ts';
 import { HERMES_FIX } from '../catalog.ts';
@@ -80,6 +81,7 @@ export const hermesAdapter: HarnessAdapter = {
     let initSent = false;
     // A resumed session already has Omni's prompt. Sending it again would pin it to the next user message.
     let sendInstructions = !ctx.resume;
+    let sendPolicy = ctx.resume;
     let client: HermesClient | null = null;
     const seenSeq = new Set<number>();
     // Survives the turn's finally. A holder exit can land after that finally cleared `runId`.
@@ -187,6 +189,7 @@ export const hermesAdapter: HarnessAdapter = {
         try {
           if (holderDead) return;
           let input = composeInput(m);
+          if (sendPolicy) input = `${TOOL_FAILURE_POLICY}\n\n---\n\n${input}`;
           const key = m.uuid || randomUUID();
           let created;
           if (sendInstructions && ctx.systemPrompt) {
@@ -204,6 +207,7 @@ export const hermesAdapter: HarnessAdapter = {
           } else {
             created = await client!.createRun({ input, session_id: sessionId }, key, ac.signal);
           }
+          sendPolicy = false;
           runId = created.run_id;
           activeRunId = created.run_id;
           settled = false;

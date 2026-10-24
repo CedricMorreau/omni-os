@@ -2,6 +2,8 @@
 
 One Node server (`apps/server/`, Hono on `node:sqlite`) owns every thread, harness process, secret and automation. The Web UI and the Mac app are two clients of its `/api`. Words like channel, thread, turn and request are defined in [CONTEXT.md](../../CONTEXT.md). Decisions and their reasons are in the [ADRs](../adr/).
 
+Tool-failure diagnostics reuse the runner's normalized `tool_result` records and SQLite connection. Only `is_error` results enter the local failure ledger. The ledger stores allowlisted error categories and summaries, never arguments or raw error bodies. Existing transcripts retain their existing payload behavior. A thread, harness, session and call reference deduplicate repeated reports; missing call references fall back to event IDs. Groups combine harness, tool and category, so unrelated causes can share a group. Triage status and human-written guidance do not disable tools. A new occurrence reopens a fixed group while keeping its guidance. Retry links and recovery observations are explicit through `PATCH /api/tool-failures/occurrences/:id`; successful calls do not imply recovery. This diagnostic state deliberately stays out of sync, so one machine's tool installation and failures do not become another machine's guidance.
+
 ## How a thread runs
 
 Each Claude Code thread gets one long-lived `claude -p --input-format stream-json --output-format stream-json` process. Messages go in on stdin, the process runs many turns and stays warm for `OMNI_KEEPALIVE_SECONDS` (default 10 minutes) after the last one, so a follow-up starts instantly. While background agents of that thread are still running, it stays up to `OMNI_TASK_KEEPALIVE_SECONDS` (default 4 hours). It is launched with:
@@ -11,7 +13,7 @@ Each Claude Code thread gets one long-lived `claude -p --input-format stream-jso
 | cwd | worktree `data/worktrees/<thread>` on branch `omni/<id>` (repo channels), else the channel base dir, else your workspace folder |
 | context | your workspace folder added with `--add-dir`, its CLAUDE.md loaded, all your user skills and MCP servers |
 | system prompt | channel facts (store, Portal slug, repo, notes), artifacts and browser rules, the channel's design system file, the crew role charter |
-| MCP | `omni-browser` (`@playwright/mcp` at the exact version in `apps/server/package.json`, run by `node` from Omni's install, never `npx`; attached over CDP to the channel's Chrome that Omni runs, profile in `data/browsers/<channel>`); conductor also gets `omni` |
+| MCP | `omni-browser` (`@playwright/mcp` at the exact version in `apps/server/package.json`, run by `node` from Omni's install, never `npx`; attached over CDP to the channel's Chrome that Omni runs, profile in `data/browsers/<channel>`); `omni-ask` (`apps/mcp/ask.ts`, the `ask_user_question` tool), which Claude Code, Codex and Cursor threads all get; conductor also gets `omni` |
 | env | `OMNI_THREAD_ID`, `OMNI_ARTIFACTS_DIR`, `OMNI_URL`, `OMNI_TOKEN` (the API token), plus global and channel secrets |
 | session | `--session-id` on the first run, `--resume` after, so every follow-up keeps full context. A switch to another harness and back resumes it with a handover of what it missed (`apps/server/runner/switch.ts`) |
 
@@ -46,7 +48,7 @@ An npm workspaces monorepo run with Turborepo (`turbo.json`). Each app and packa
 apps/server/                @omni/server: Hono API (*-api.ts), runner/, harness/ (claude, codex, cursor,
                             hermes adapters), db/, sync/, sandbox, secrets, terminal, browser, artifacts,
                             GitHub, scheduler; scripts/ for history import and sync backfill
-apps/mcp/                   @omni/mcp: omni.ts, the conductor tools
+apps/mcp/                   @omni/mcp: omni.ts, the conductor tools; ask.ts, ask_user_question for every thread
 apps/web/                   @omni/web: Web UI (React, Vite)
 apps/mac/                   @omni/mac: SwiftUI app (Omni/), OmniKit package, slash engine entry and bundler
 packages/shared/            @omni/shared: pure TypeScript both clients use (slash grammar, menu, pills)

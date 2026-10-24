@@ -3,6 +3,7 @@ import type { Thread } from '../../api.ts';
 import { canMarkDone } from '../../needs-you.ts';
 import { openMenu } from '../ContextMenu.tsx';
 import { Button, IconButton, StatusPill } from '../ui.tsx';
+import { ASKING_LABEL } from './QuestionCard.tsx';
 
 // Below this header width (the side panel open, a small window) pin, done, hand off and Send to Grok Bot fold into one More button and
 // Interrupt drops its label, so the title keeps its room. The header is the @container; 3xl is 48rem.
@@ -23,6 +24,7 @@ export function HeaderActions({
   panelOpen,
   onPanel,
   artifactCount,
+  asking = false,
 }: {
   thread: Thread;
   meter: ReactNode;
@@ -38,6 +40,8 @@ export function HeaderActions({
   panelOpen: boolean;
   onPanel: () => void;
   artifactCount: number;
+  /** The agent waits on a question card. */
+  asking?: boolean;
 }) {
   const archived = !!thread.archived;
   const doneable = !archived && (!!thread.done_at || canMarkDone(thread.status));
@@ -83,7 +87,7 @@ export function HeaderActions({
       <Button size="sm" variant="ghost" icon="external" busy={grok.busy} title="Send this thread's text to Grok Bot" className={FOLD} onClick={grok.run}>
         Send to Grok Bot
       </Button>
-      <StatusPill status={thread.status} />
+      <StatusPill status={asking ? 'needs' : thread.status} label={asking ? ASKING_LABEL : undefined} />
       {handoffReady && (
         <IconButton
           icon="share"

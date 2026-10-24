@@ -102,6 +102,8 @@ export const paths = {
   },
   webDist: env.OMNI_WEB_DIST ? resolve(ROOT, env.OMNI_WEB_DIST) : join(ROOT, 'apps', 'web', 'dist'),
   mcpOmni: join(ROOT, 'apps', 'mcp', 'omni.ts'),
+  /** ask_user_question, which every local thread gets. */
+  mcpAsk: join(ROOT, 'apps', 'mcp', 'ask.ts'),
   /** Claude Code mods (plugins of function hooks) Omni loads when config.mods is on. */
   mods: join(ROOT, 'mods'),
   modProgress: join(ROOT, 'mods', 'omni-progress'),

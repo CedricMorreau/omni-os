@@ -77,3 +77,53 @@ describe('Auto', () => {
     expect(H.thread(picked.id)).toMatchObject({ model: 'opus', auto_reason: null });
   });
 });
+
+describe('Conductor channel defaults', () => {
+  const save = async (model: string | null) => {
+    const { bus } = await import('../bus.ts');
+    const feed: unknown[] = [];
+    const changed = (event: unknown) => feed.push(event);
+    bus.on('feed', changed);
+    const res = await app.request('/api/channels/conductor', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ default_harness: null, default_model: model, default_effort: null }),
+    });
+    bus.off('feed', changed);
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).default_model).toBe(model);
+    expect(feed).toContainEqual({ type: 'channel', id: 'conductor' });
+  };
+  const start = (over = {}) => H.runner.createThread({ channel: 'conductor', role: 'conductor', prompt: 'Fix the typo in README.md', ...over });
+
+  it('uses saved settings instead of the automatically attached role, including after a change', async () => {
+    await save('claude-sonnet-5-5');
+    const pinned = await start();
+    expect(H.thread(pinned.id)).toMatchObject({ role: 'conductor', model: 'claude-sonnet-5-5', auto_reason: null });
+    await save('auto');
+    const auto = await start();
+    expect(H.thread(auto.id)).toMatchObject({ role: 'conductor', model: 'claude-sonnet-5-5', auto_reason: expect.any(String) });
+    const explicit = await start({ model: 'claude-haiku-4-5', effort: 'low' });
+    expect(H.thread(explicit.id)).toMatchObject({ model: 'claude-haiku-4-5', effort: 'low', auto_reason: null });
+  });
+
+  it('uses Auto for a retired saved default instead of falling back to the Opus charter', async () => {
+    H.db.channels.update('conductor', { default_model: 'claude-retired-1' });
+    // The exact JSON the untouched web/phone/Mac composers send: no inherited model promoted to a pick.
+    const response = await app.request('/api/threads', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ channel: 'conductor', role: 'conductor', prompt: 'Fix the typo in README.md' }),
+    });
+    expect(response.status).toBe(200);
+    const t = await response.json() as any;
+    expect(H.thread(t.id)).toMatchObject({ model: 'claude-sonnet-5-5', auto_reason: expect.any(String) });
+    await expect(start({ model: 'claude-retired-1' })).rejects.toThrow(/Unknown Claude Code model/);
+  });
+
+  it('keeps the charter default when unset or used in another channel', async () => {
+    await save(null);
+    const unset = await start();
+    expect(H.thread(unset.id)).toMatchObject({ model: 'claude-opus-5-5', auto_reason: null });
+    const other = await start({ channel: 'tuned' });
+    expect(H.thread(other.id)).toMatchObject({ model: 'claude-opus-5-5', auto_reason: null });
+  });
+});

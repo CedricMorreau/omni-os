@@ -1,3 +1,4 @@
+import { ANSWER_EVENT, QUESTION_EVENT, type QuestionPayload } from '@omni/shared/question.ts';
 import { db, now, tx } from '../connection.ts';
 import { outbox, record } from '../sync.ts';
 import { PARKED } from './requests.ts';
@@ -37,13 +38,15 @@ export interface NeedsYouResult {
 }
 
 /**
- * What holds a thread up until Ben acts: `setup` (its worktree could not be prepared, `detail` says why),
- * `recovered` (messages a restart kept for Resume), `uncertain` (a message a harness may have read before a
- * restart, sent again only when Ben says so) or `limited` (its harness stopped the turn at the plan's usage limit,
- * apps/server/runner/limits.ts). `count` is how many messages, for the two request kinds.
+ * What holds a thread up until Ben acts: `question` (its agent asked him with ask_user_question and waits, even while
+ * it runs: `detail` is the newest card's first question, `count` how many questions wait across its cards),
+ * `setup` (its worktree could not be prepared, `detail` says why), `recovered` (messages a restart kept for Resume),
+ * `uncertain` (a message a harness may have read before a restart, sent again only when Ben says so) or `limited`
+ * (its harness stopped the turn at the plan's usage limit, apps/server/runner/limits.ts). `count` is how many
+ * messages, for the two request kinds.
  */
 export interface NeedsYouBlocker {
-  kind: 'setup' | 'recovered' | 'uncertain' | 'limited';
+  kind: 'question' | 'setup' | 'recovered' | 'uncertain' | 'limited';
   detail: string | null;
   count: number;
   /** limited: when the harness said the limit resets. Null when it did not say, so only a manual Resume works. */
@@ -170,6 +173,18 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
     .prepare(`SELECT ${prefixed} FROM threads t WHERE ${LISTED} ${scope} AND t.limit_state IS NOT NULL`)
     .all(...args) as unknown as Thread[];
 
+  // Questions with no answer yet, whatever the thread's status: newest first, so the first row per thread is its newest.
+  const asked = db
+    .prepare(
+      `SELECT ${prefixed}, q.payload AS q_payload, q.created_at AS q_at
+       FROM events q JOIN threads t ON t.id = q.thread_id
+       WHERE ${LISTED} ${scope} AND q.kind = '${QUESTION_EVENT}'
+         AND NOT EXISTS (SELECT 1 FROM events a WHERE a.thread_id = q.thread_id AND a.kind = '${ANSWER_EVENT}'
+           AND json_extract(a.payload, '$.id') = json_extract(q.payload, '$.id'))
+       ORDER BY q.id DESC`,
+    )
+    .all(...args) as unknown as (Thread & { q_payload: string; q_at: string })[];
+
   const items = new Map<string, NeedsYouItem>();
   const item = (t: Thread, at: string) => {
     const thread = pick(t);
@@ -185,6 +200,13 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
   for (const r of results) {
     item(r, r.r_at!).result = { uid: r.r_uid!, status: r.r_status!, event_uid: r.r_event_uid, at: r.r_at! };
   }
+  for (const q of asked) {
+    const { questions } = JSON.parse(q.q_payload) as QuestionPayload;
+    const it = item(q, q.q_at);
+    const had = it.blockers.find((b) => b.kind === 'question');
+    if (had) had.count += questions.length;
+    else it.blockers.push({ kind: 'question', detail: questions[0].question, count: questions.length });
+  }
   for (const t of setup) item(t, t.updated_at).blockers.unshift({ kind: 'setup', detail: t.setup_error, count: 0 });
   for (const p of parked) item(p, p.p_at).blockers.push({ kind: p.p_state, detail: null, count: Number(p.p_count) });
   for (const t of limited) {
@@ -198,7 +220,7 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
   return { items: list, unread: list.filter((i) => i.result).length, blocked: list.filter((i) => i.blockers.length).length };
 }
 
-const BLOCKER_ORDER: NeedsYouBlocker['kind'][] = ['setup', 'uncertain', 'limited', 'recovered'];
+const BLOCKER_ORDER: NeedsYouBlocker['kind'][] = ['question', 'setup', 'uncertain', 'limited', 'recovered'];
 
 /** Just the thread's own columns, without what the queries joined to it. */
 function pick(row: Thread): Thread {

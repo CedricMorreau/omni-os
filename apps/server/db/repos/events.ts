@@ -71,8 +71,15 @@ export const events = {
       .all(threadId, threadId, after) as { payload: string }[];
     return rows.map((r) => JSON.parse(r.payload).text as string).join('\n\n');
   },
+  /** A thread's question and question_answer events (packages/shared/question.ts), oldest first; with `id`, one question's. */
+  questions(threadId: string, id?: string): EventRow[] {
+    const one = id ? `AND json_extract(payload, '$.id') = ?` : '';
+    return db
+      .prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE thread_id = ? AND kind IN ('question', 'question_answer') ${one} ORDER BY id`)
+      .all(threadId, ...(id ? [id] : [])) as unknown as EventRow[];
+  },
   /** The payload of a thread's tool_use event, by the tool call's id. */
-  toolUse(threadId: string, toolUseId: string): { id: string; name: string; input: unknown } | null {
+  toolUse(threadId: string, toolUseId: string): { id: string; name: string; input: unknown; parent?: string | null } | null {
     const row = db
       .prepare(`SELECT payload FROM events WHERE thread_id = ? AND kind = 'tool_use' AND json_extract(payload, '$.id') = ? ORDER BY id DESC LIMIT 1`)
       .get(threadId, toolUseId) as { payload: string } | undefined;

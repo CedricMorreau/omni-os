@@ -1,6 +1,6 @@
 {
   "thread": {
-    "id": "00000000-0000-4000-8000-000000000017",
+    "id": "00000000-0000-4000-8000-000000000019",
     "channel_id": "acme",
     "title": "Tidy the copy",
     "status": "running",
@@ -12,7 +12,7 @@
     "queued_harness": null,
     "queued_model": null,
     "queued_effort": null,
-    "session_id": "00000000-0000-4000-8000-000000000017",
+    "session_id": "00000000-0000-4000-8000-000000000019",
     "has_run": 1,
     "cwd": "/tmp/omni-fixtures/acme",
     "branch": null,

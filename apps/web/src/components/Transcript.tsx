@@ -6,6 +6,7 @@ import { useApp, useNow } from '../store.tsx';
 import { BranchFace, DelegationCard, RailItem, ROW_CARD } from './Delegation.tsx';
 import { PublishedCard } from './Published.tsx';
 import { CloudAgentCard } from './thread/CloudAgentCard.tsx';
+import { QuestionCard } from './thread/QuestionCard.tsx';
 import { Markdown } from './Markdown.tsx';
 import { Button, CheckItem, copyText, Icon, IconButton, Loader, Modal, StatusDot, StatusPill, Ticks } from './ui.tsx';
 import { isOmnis, isParked, parkedHeading, parkedLabel, parkedOf, requestIdFor } from '../requests.ts';
@@ -1076,6 +1077,8 @@ export const Transcript = memo(function Transcript({
   const lastIdx = items.findLastIndex((it) => it.type !== 'mod');
   const last = items[lastIdx];
   const showWorking = running && (!last || last.type === 'user' || last.type === 'report' || last.type === 'text');
+  // The turn is waiting on Ben's answer, not working: the card under it says so.
+  const asking = last?.type === 'question' && last.q.state === 'pending';
 
   return (
     <TaskCtx.Provider value={tasks}>
@@ -1126,11 +1129,13 @@ export const Transcript = memo(function Transcript({
               return <CloudAgentCard key={it.key} p={it.p} />;
             case 'switch':
               return <SwitchLine key={it.key} it={it} running={running} />;
+            case 'question':
+              return <QuestionCard key={it.key} threadId={threadId} q={it.q} />;
             default:
               return null;
           }
         })}
-        {(showWorking || latestStatus) && (
+        {(showWorking || latestStatus) && !asking && (
           <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
             {running && <Loader size={13} />}
             <span className="truncate">{latestStatus ?? 'Working'}</span>

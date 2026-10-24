@@ -1,9 +1,10 @@
 // The phone's thread screen, folded per turn: what Ben asked, what came back, what it cost and what it made. Pure, on
 // top of the transcript fold (transcript/fold.ts), so it reads the same events the desktop transcript does.
+import type { ThreadQuestion } from '@omni/shared/question.ts';
 import type { Artifact, Thread } from '../api.ts';
 import { toDate } from '../format.ts';
 import { cloudStatus } from '../cloud-agent.ts';
-import { buildItems, toolLabel, toolSummary, type CloudAgentP, type Item, type ReportP, type ResultP, type SwitchItem, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
+import { buildItems, isAsking, toolLabel, toolSummary, type CloudAgentP, type Item, type ReportP, type ResultP, type SwitchItem, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
 
 export type TurnStatus = 'running' | 'queued' | 'done' | 'failed' | 'stopped';
 
@@ -20,6 +21,8 @@ export interface TurnView {
   /** The turn's answer: its last text. */
   prose: string | null;
   reports: ReportP[];
+  /** Questions the agent asked Ben during the turn, each shown as its card. */
+  questions: ThreadQuestion[];
   /** Files the turn wrote last, so each file shows once, with the turn that made its current version. */
   artifacts: Artifact[];
   /** Threads delegated during the turn. */
@@ -52,7 +55,10 @@ export interface ThreadView {
   turns: TurnView[];
   /** The latest TodoWrite of the latest turn, while it runs. */
   plan: PlanView | null;
+  /** Null while it waits on Ben's answer to a question: it is not doing anything. */
   now: NowDoing | null;
+  /** A question waits on Ben's answer. */
+  asking: boolean;
 }
 
 const VERB: Record<string, string> = {
@@ -112,7 +118,7 @@ export function threadView({
   // Until the first switch, the thread ran where that switch moved it from.
   let harness = items.find((it): it is SwitchItem => it.type === 'switch')?.p.from.harness ?? thread.harness;
   const start = (key: number, at: string): TurnView => {
-    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, reports: [], artifacts: [], children: [], result: null, error: null, cloud: null, status: 'done', items: [], switches: [], harness };
+    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, reports: [], questions: [], artifacts: [], children: [], result: null, error: null, cloud: null, status: 'done', items: [], switches: [], harness };
     turns.push(t);
     return t;
   };
@@ -132,6 +138,9 @@ export function threadView({
       walk(it.calls, (c) => {
         if (c.result?.is_error) turn.failed++;
       });
+    } else if (it.type === 'question') {
+      cur ??= start(it.key, it.at);
+      cur.questions.push(it.q);
     } else if (it.type === 'result') {
       if (cur) cur.result = it.p;
     } else if (it.type === 'error') {
@@ -168,9 +177,10 @@ export function threadView({
     t.status = endOf(t) ?? (last ? (LIVE[thread.status] ?? 'done') : 'stopped');
   });
 
+  const asking = isAsking(events);
   const latest = turns[turns.length - 1];
   const running = thread.status === 'running' && !!latest && latest.status === 'running';
-  if (!running) return { turns, plan: null, now: null };
+  if (!running) return { turns, plan: null, now: null, asking };
   // The newest call still waiting on its result is what it is doing; with none, it is between calls.
   let open: ToolCall | undefined;
   for (const it of latest.items) {
@@ -184,6 +194,7 @@ export function threadView({
     turns,
     plan: planned && { todos: planned, done: planned.filter((x) => x.status === 'completed').length },
     // A cloud agent works on Cursor's machines: its run's status is all there is to say.
-    now: open ? nowDoing(open, thread.cwd) : latest.cloud ? { verb: `Cursor cloud agent: ${cloudStatus(latest.cloud.status).label.toLowerCase()}`, target: '' } : { verb: 'Thinking', target: '' },
+    now: asking ? null : open ? nowDoing(open, thread.cwd) : latest.cloud ? { verb: `Cursor cloud agent: ${cloudStatus(latest.cloud.status).label.toLowerCase()}`, target: '' } : { verb: 'Thinking', target: '' },
+    asking,
   };
 }
