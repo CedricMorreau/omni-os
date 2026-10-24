@@ -170,6 +170,7 @@ async function boot(): Promise<number> {
       OMNI_CLAUDE_BIN: FAKE_CLAUDE,
       OMNI_CODEX_BIN: join(tmp, 'no-codex'),
       OMNI_CURSOR_BIN: join(tmp, 'no-cursor-agent'),
+      OMNI_CURSOR_API_URL: 'http://127.0.0.1:9',
       OMNI_BROWSER: '0',
       OMNI_BRAIN_DIR: join(tmp, 'brain'),
       OMNI_DEFAULT_MODEL: 'sonnet',
