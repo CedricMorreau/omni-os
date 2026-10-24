@@ -68,6 +68,28 @@ export function threadChoice(thread: { harness: string; model: string | null }, 
   return { harness: thread.harness, model: runModel(thread, harnesses).model?.id ?? thread.model ?? '' };
 }
 
+type QueuedFields = { queued_harness?: string | null; queued_model?: string | null; queued_effort?: string | null };
+
+/** The run Ben picked while a turn ran, which the thread switches to once the turn ends (apps/server/runner/switch.ts). */
+export const queuedRun = (thread: QueuedFields): Run | null =>
+  thread.queued_harness ? { harness: thread.queued_harness, model: thread.queued_model ?? '', effort: thread.queued_effort ?? '' } : null;
+
+/**
+ * The run a thread's pills show and pick from: the one queued for after this turn, else the one it runs on. Auto's
+ * reason belongs to the run Auto picked, so a queued one has none.
+ */
+export function shownRun<T extends { harness: string; model: string | null; effort: string; auto_reason?: string | null } & QueuedFields>(thread: T) {
+  const q = queuedRun(thread);
+  return q ? { harness: q.harness, model: q.model || null, effort: q.effort, auto_reason: null } : thread;
+}
+
+/** The thread's current run as the switch request sends it: posted while a switch is queued, it drops that switch. */
+export const currentRun = (thread: { harness: string; model: string | null; effort: string }): Run => ({
+  harness: thread.harness,
+  model: thread.model ?? '',
+  effort: thread.effort,
+});
+
 /** A pick in a thread's model pill or effort pill. */
 export type RunPick = { harness: string; model: string } | { effort: string };
 

@@ -525,7 +525,7 @@ export function ThreadScreen() {
       <MoComposer
         thread={thread}
         chips={chips}
-        placeholder={conductor ? 'Reply to the Conductor' : slotBusy ? `Steer ${theirs}` : 'Follow up'}
+        placeholder={conductor ? 'Reply to the Conductor' : !slotBusy ? 'Follow up' : thread.queued_harness ? 'Queue for after this turn' : `Steer ${theirs}`}
         onSent={(t) => applyThread(t, true)}
         onSwitched={(t) => applyThread(t)}
       />
