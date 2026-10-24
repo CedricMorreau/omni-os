@@ -184,13 +184,14 @@ describe('readTranscript', () => {
     expect(largest.map((r) => r.label)).toEqual(['/f11', '/f10', '/f9']);
   });
 
-  it('labels a call by its first useful input', () => {
-    expect(ctx.toolLabel({ url: 'https://x.dev' })).toBe('https://x.dev');
-    expect(ctx.toolLabel({ other: 'first string' })).toBe('first string');
-    expect(ctx.toolLabel(null)).toBe('');
-    expect(ctx.toolLabel({ command: 'a'.repeat(200) })).toHaveLength(140);
-    expect(ctx.toolLabel({ file_path: `/${'d'.repeat(200)}/main.liquid` })).toHaveLength(213);
-    expect(ctx.toolLabel({ file_path: `/${'d'.repeat(2000)}/main.liquid` })).toMatch(/^…d{987}\/main\.liquid$/);
+  it('labels a call by its first useful input', async () => {
+    const { toolLabel } = await import('../tool-label.ts');
+    expect(toolLabel({ url: 'https://x.dev' })).toBe('https://x.dev');
+    expect(toolLabel({ other: 'first string' })).toBe('first string');
+    expect(toolLabel(null)).toBe('');
+    expect(toolLabel({ command: 'a'.repeat(200) })).toHaveLength(140);
+    expect(toolLabel({ file_path: `/${'d'.repeat(200)}/main.liquid` })).toHaveLength(213);
+    expect(toolLabel({ file_path: `/${'d'.repeat(2000)}/main.liquid` })).toMatch(/^…d{987}\/main\.liquid$/);
   });
 });
 

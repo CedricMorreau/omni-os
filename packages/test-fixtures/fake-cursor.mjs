@@ -20,6 +20,9 @@
 // Env:
 //   FAKE_CURSOR_LOG=<file>   append one JSON line per invocation, and per ACP request
 //   FAKE_CURSOR_ACP_FAIL=1   session/new fails, as it does when Cursor Agent is logged out
+//   FAKE_CURSOR_START_FAIL=1 create-chat fails before creating a session
+//   FAKE_CURSOR_TURN_FAIL=1  a turn exits before accepting its prompt
+//   FAKE_CURSOR_INPUT_FAIL=1 a turn exits after init, before echoing its input
 //   FAKE_CURSOR_CREATE_CHAT_ORPHAN=1  create-chat leaves a child behind, as ORPHAN does in a turn
 //   CURSOR_CONFIG_DIR=<dir>  where session/new keeps its session, as the real CLI does. Unset,
 //                            the fake keeps nothing, so a test never writes to ~/.cursor.
@@ -76,10 +79,18 @@ async function runTurn() {
   const prompt = argv[argv.length - 1] ?? '';
   const sessionId = resume || `chat_${randomUUID().slice(0, 8)}`;
   log('turn', { model, resume: resume ?? null, prompt, plugin_dir: flagVal('--plugin-dir') ?? null });
+  if (process.env.FAKE_CURSOR_TURN_FAIL === '1') {
+    process.stderr.write('fake-cursor: turn input rejected\n');
+    process.exit(1);
+  }
   if (prompt.includes('ORPHAN')) leaveOrphan();
 
   write({ type: 'system', subtype: 'init', session_id: sessionId, model, cwd: process.cwd(), apiKeySource: 'login' });
   await delay(3);
+  if (process.env.FAKE_CURSOR_INPUT_FAIL === '1') {
+    process.stderr.write('fake-cursor: input rejected after session init\n');
+    process.exit(1);
+  }
   if (prompt.includes('CRASH')) {
     process.stderr.write('fake-cursor: crashing on purpose\n');
     process.exit(1);
@@ -199,6 +210,10 @@ async function main() {
   }
   if (argv[0] === 'create-chat') {
     log('create-chat', {});
+    if (process.env.FAKE_CURSOR_START_FAIL === '1') {
+      process.stderr.write('fake-cursor: session startup rejected\n');
+      process.exit(1);
+    }
     if (process.env.FAKE_CURSOR_CREATE_CHAT_ORPHAN === '1') leaveOrphan();
     process.stdout.write(`chat_${randomUUID().slice(0, 8)}\n`);
     return;

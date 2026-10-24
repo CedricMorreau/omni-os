@@ -58,9 +58,12 @@ private struct FoldItem: Decodable, Equatable {
   var turns: Int? = nil
   var taskId: String? = nil
   var lines: [FoldModLine]? = nil
+  var p: SwitchP? = nil
+  var done: HandoverP? = nil
+  var superseded: Bool? = nil
 
   enum CodingKeys: String, CodingKey {
-    case type, key, text, total, calls, ok, subtype, turns, lines
+    case type, key, text, total, calls, ok, subtype, turns, lines, p, done, superseded
     case taskId = "task_id"
   }
 }
@@ -114,6 +117,8 @@ private func project(_ transcript: Transcript) -> (items: [FoldItem], plan: Fold
       items.append(FoldItem(type: "report", key: id, text: report.text, taskId: report.taskID))
     case .mod(let id, let lines):
       items.append(FoldItem(type: "mod", key: id, lines: lines.map { FoldModLine(key: $0.id, plugin: $0.plugin, text: $0.text) }))
+    case .runSwitch(let r):
+      items.append(FoldItem(type: "switch", key: r.eventID, p: r.p, done: r.done, superseded: r.superseded))
     }
   }
   return (items, plan)
@@ -125,8 +130,8 @@ private func project(_ transcript: Transcript) -> (items: [FoldItem], plan: Fold
     let corpus = try OmniJSON.decoder().decode(Corpus.self, from: Data(contentsOf: url))
     let names = Set(corpus.cases.map(\.name))
     #expect(names == Set([
-      "first-string-field", "grouping", "mod-logs", "plan-placement", "result-before-call", "self-parent", "undecodable-tool-use",
-      "zero-turn-success",
+      "first-string-field", "grouping", "mod-logs", "plan-placement", "result-before-call", "run-switch", "self-parent",
+      "undecodable-tool-use", "zero-turn-success",
     ]))
     for c in corpus.cases {
       let got = project(Transcript(c.events))

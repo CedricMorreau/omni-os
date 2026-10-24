@@ -54,6 +54,8 @@ function createChat(bin: string, cwd: string, env: NodeJS.ProcessEnv): Promise<s
 export const cursorAdapter: HarnessAdapter = {
   id: 'cursor',
   capabilities: CAPABILITIES.cursor,
+  // The thread id means no session yet: the adapter starts one and reports its id.
+  freshSessionId: (thread) => thread.id,
 
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const thread = ctx.thread;
@@ -90,9 +92,9 @@ export const cursorAdapter: HarnessAdapter = {
     }
 
     function runTurn(m: Outgoing) {
-      // Omni's context goes in front of the first message of a new session only.
-      const addContext = firstTurn && !resume;
-      firstTurn = false;
+      // A native chat may exist even if its first prompt was rejected. Include context
+      // while the switched session still needs its handover, as well as on a new chat.
+      const addContext = firstTurn && (!resume || ctx.handoverPending);
       let prompt = m.text;
       if (m.attachments.length) prompt += `\n\n${describeAttachments(m.attachments)}`;
       if (addContext) prompt = `${ctx.systemPrompt}\n\n---\n\n${prompt}`;
@@ -106,10 +108,9 @@ export const cursorAdapter: HarnessAdapter = {
       closePipesAfterExit(proc);
       currentProc = proc;
       let resultSeen = false;
+      let accepted = false;
       let stderr = '';
       const calls = new CursorCallCounter();
-      // The runner records the user message when it sees this replay.
-      cb.record({ kind: 'replay', payload: { uuid: m.uuid, text: m.text } });
 
       const splitter = new LineSplitter();
       const handle = (line: string) => {
@@ -118,6 +119,17 @@ export const cursorAdapter: HarnessAdapter = {
           evt = JSON.parse(line);
         } catch {
           return;
+        }
+        if (!evt || typeof evt !== 'object') return;
+        // Starting a process or opening its session does not mean it accepted the
+        // prompt. Cursor echoes the input once read; model output is also evidence.
+        const event = evt as { type?: string; subtype?: string; is_error?: boolean };
+        const read = event.type === 'user' || event.type === 'assistant' || event.type === 'tool_call'
+          || (event.type === 'result' && event.subtype === 'success' && !event.is_error);
+        if (!accepted && read) {
+          accepted = true;
+          firstTurn = false;
+          cb.record({ kind: 'replay', payload: { uuid: m.uuid, text: m.text } });
         }
         const parsed = normalizeCursor(evt);
         calls.note(parsed);
@@ -128,7 +140,7 @@ export const cursorAdapter: HarnessAdapter = {
           if (chatId !== thread.session_id) cb.session(chatId);
         }
         for (const r of parsed.records) cb.record(r);
-        if (parsed.result) {
+        if (parsed.result && accepted) {
           resultSeen = true;
           if (parsed.usage) {
             // Cursor's window isn't reported: it is read off the model's name, so the meter marks it an estimate.
@@ -143,12 +155,20 @@ export const cursorAdapter: HarnessAdapter = {
       proc.stdout.on('data', (d: string) => splitter.push(d).forEach(handle));
       proc.stderr.setEncoding('utf8');
       proc.stderr.on('data', (d: string) => (stderr = (stderr + d).slice(-4000)));
+      proc.on('error', (e) => (stderr = e.message));
       proc.on('close', (code) => {
         splitter.flush().forEach(handle);
         if (currentProc !== proc) return;
         currentProc = null;
         // The runner is tearing the thread down (interrupt/close): it marks the turn stopped itself.
         if (stopping) return;
+        if (!accepted) {
+          // The runner keeps an unread message inflight until its process exits.
+          // Close the holder too so it fails this turn and retries with the pending handover.
+          cb.record({ kind: 'error', payload: { text: stderr.trim() || `cursor-agent exited before accepting the message with code ${code}` } });
+          holder.kill('SIGKILL');
+          return;
+        }
         if (!resultSeen) {
           // Exited without a result (crash): fail the turn with the CLI's error; next message resumes.
           cb.record({ kind: 'status', payload: { text: stderr.trim() ? stderr.trim().slice(-2000) : `cursor-agent exited with code ${code}` } });

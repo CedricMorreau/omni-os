@@ -10,6 +10,8 @@ export interface ModelChoice {
 }
 
 const AUTO_NOTE = 'Picks a model for each task';
+/** The open list's height: the search field and the 320px list. */
+const LIST_HEIGHT = 380;
 
 /**
  * One model pill whose list starts with Auto, then groups models under each harness, with a sticky header naming the
@@ -24,6 +26,10 @@ export function ModelPicker({
   onOpen,
   defaultOpen,
   placeholder = 'Model',
+  offerAuto = true,
+  label,
+  disabled,
+  className = '',
 }: {
   harnesses: HarnessWithRunning[];
   value: ModelChoice;
@@ -33,8 +39,16 @@ export function ModelPicker({
   defaultOpen?: boolean;
   /** The pill's label when no model is picked. */
   placeholder?: string;
+  /** List Auto first. A thread's own pill leaves it out: Auto picks the run as a thread starts. */
+  offerAuto?: boolean;
+  /** The pill's label in place of the picked model's name. */
+  label?: string;
+  disabled?: boolean;
+  /** On the wrapper, around the pill and its list. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(!!defaultOpen);
+  const [up, setUp] = useState(false);
   const [q, setQ] = useState('');
   const wrap = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -55,7 +69,7 @@ export function ModelPicker({
         : h.models,
     }));
   }, [harnesses, q]);
-  const showAuto = 'auto'.includes(q.trim().toLowerCase());
+  const showAuto = offerAuto && 'auto'.includes(q.trim().toLowerCase());
 
   useEffect(() => {
     if (defaultOpen) onOpen?.();
@@ -77,21 +91,27 @@ export function ModelPicker({
     btn.current?.focus();
   };
 
-  const buttonLabel = auto ? 'Auto' : current.m ? current.m.label : placeholder;
+  const buttonLabel = label ?? (auto ? 'Auto' : current.m ? current.m.label : placeholder);
 
   return (
-    <div ref={wrap} className="relative">
+    <div ref={wrap} className={`relative ${className}`}>
       <button
         ref={btn}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={auto ? 'Model: Auto' : `Model: ${current.m?.label ?? 'none'}${current.h ? ` on ${current.h.name}` : ''}`}
+        disabled={disabled}
+        aria-label={auto ? 'Model: Auto' : `Model: ${label ?? current.m?.label ?? 'none'}${current.h ? ` on ${current.h.name}` : ''}`}
         onClick={() => {
-          if (!open) onOpen?.();
+          if (!open) {
+            onOpen?.();
+            // Under a thread the pill sits at the bottom of the page, so the list opens upward when it has no room below.
+            const r = btn.current?.getBoundingClientRect();
+            setUp(!!r && window.innerHeight - r.bottom < LIST_HEIGHT && r.top > window.innerHeight - r.bottom);
+          }
           setOpen(!open);
         }}
-        className="press inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-surface-2 pr-2.5 pl-1 text-[12.5px] font-medium text-fg transition-colors hover:bg-surface-3"
+        className="press inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-surface-2 pr-2.5 pl-1 text-[12.5px] font-medium text-fg transition-colors hover:bg-surface-3 disabled:opacity-45"
       >
         {current.h ? (
           <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg text-fg">
@@ -107,7 +127,7 @@ export function ModelPicker({
         <Icon name="chevronDown" size={13} className="text-fg-4" />
       </button>
       {open && (
-        <div className="pik-card w-[min(340px,calc(100vw-32px))] top-[calc(100%+8px)] left-0">
+        <div className={`pik-card w-[min(340px,calc(100vw-32px))] left-0 ${up ? 'bottom-[calc(100%+8px)]' : 'top-[calc(100%+8px)]'}`} data-up={up || undefined}>
           <label className="mb-1 flex h-10 items-center gap-2 rounded-2xl bg-surface px-3 text-fg-4">
             <Icon name="search" size={14} />
             <input
@@ -201,7 +221,21 @@ export function modelOf(harnesses: HarnessWithRunning[], choice: ModelChoice) {
  * The effort pill for a model choice: "Default" plus the model's levels, or a disabled "Auto effort" when it has
  * none or Auto is picked. With no model picked, the levels are the harness default model's.
  */
-export function EffortPicker({ harnesses, choice, value, onChange }: { harnesses: HarnessWithRunning[]; choice: ModelChoice; value: string; onChange: (v: string) => void }) {
+export function EffortPicker({
+  harnesses,
+  choice,
+  value,
+  onChange,
+  disabled,
+  className,
+}: {
+  harnesses: HarnessWithRunning[];
+  choice: ModelChoice;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
   const { model: m, efforts } = modelOf(harnesses, choice);
   if (!efforts.length) {
     return <Picker label="Effort" value="" options={[{ value: '', label: 'Auto effort', avatar: false, icon: 'sliders' }]} onChange={() => {}} disabled />;
@@ -210,5 +244,5 @@ export function EffortPicker({ harnesses, choice, value, onChange }: { harnesses
     { value: '', label: m?.defaultEffort ? `Default (${m.defaultEffort})` : 'Default', avatar: false, icon: 'sliders' },
     ...efforts.map((e) => ({ value: e, label: e, avatar: false as const, icon: 'sliders' as const })),
   ];
-  return <Picker label="Effort" value={value} options={options} onChange={onChange} />;
+  return <Picker label="Effort" value={value} options={options} onChange={onChange} disabled={disabled} className={className} />;
 }

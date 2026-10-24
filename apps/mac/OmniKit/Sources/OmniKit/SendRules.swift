@@ -45,8 +45,9 @@ public enum SendRules {
   /// The main half of the button: "Steer" or, where steering isn't supported, "Queue".
   public static func buttonTitle(canSteer: Bool) -> String { canSteer ? "Steer" : "Queue" }
 
-  public static func placeholder(busy: Bool) -> String {
-    busy ? "Steer the agent. It reads this at its next step." : "Reply"
+  /// The reply box's placeholder, as Composer.tsx words it. A busy thread that can't be steered queues.
+  public static func placeholder(busy: Bool, canSteer: Bool = true) -> String {
+    !busy ? "Reply" : canSteer ? "Steer the agent. It reads this at its next step." : "Queue a message. It runs after this turn."
   }
 }
 

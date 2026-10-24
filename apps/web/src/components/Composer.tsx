@@ -4,9 +4,10 @@ import { bytes, CHANNEL_KIND } from '../format.ts';
 import { dropNewThreadPreset, navigate, openNewThread, peekNewThreadPreset, takeComposerFocus } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { ErrorNote, Icon, IconButton, Kbd, Loader, Picker, type IconName, type PickerOption } from './ui.tsx';
-import { CrewMark, HarnessLogo, harnessLabel, isCrewRole } from './brand.tsx';
+import { CrewMark, isCrewRole } from './brand.tsx';
 import { EffortPicker, ModelPicker, type ModelChoice } from './ModelPicker.tsx';
-import { threadRunLabels } from '../thread-run.ts';
+import { currentRun, pickedRun, shownRun, threadChoice, threadRunLabels, type RunPick } from '../thread-run.ts';
+import type { Run } from '@omni/shared/run-switch.ts';
 import { SlashMenu, optionId, useCommands } from './SlashMenu.tsx';
 import { FileMenu, useFileMenu } from './FileMenu.tsx';
 import { mentionSections, menuSections, pickCommand, rowKey, slashQuery } from '@omni/shared/slash-menu.ts';
@@ -735,29 +736,65 @@ function SteerButton({ disabled, busy, canSteer = true, onSend }: { disabled: bo
 
 const finePointer = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches;
 
-const pillCls = 'inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-surface-2 pr-2.5 pl-1 text-[12.5px] font-medium text-fg';
+/**
+ * The thread's model and effort. Picking either switches the run for the next turn: the server answers with the
+ * thread, or says why not. While a turn runs the pick waits for it (`queued_*`), so the pills show it with a "Next
+ * turn" chip whose x drops it.
+ */
+function ThreadRunPills({ thread, onSwitched, onError }: { thread: Thread; onSwitched: (t: Thread) => void; onError: (text: string | null) => void }) {
+  const { data: harnesses, reload } = useApi<HarnessWithRunning[]>('/harnesses');
+  const [switching, setSwitching] = useState(false);
+  const shown = shownRun(thread);
+  const queued = shown !== thread;
+  const labels = threadRunLabels(shown, harnesses);
+  const choice = threadChoice(shown, harnesses);
 
-/** The model and effort this thread is running on. Fixed, so they stay visible and are not pickers. */
-function ThreadRunPills({ thread }: { thread: Thread }) {
-  const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
-  const labels = threadRunLabels(thread, harnesses);
-  const harnessName = labels.harnessName || harnessLabel(thread.harness);
+  const post = async (run: Run | null) => {
+    if (!run || switching) return;
+    setSwitching(true);
+    onError(null);
+    try {
+      onSwitched(await api.post<Thread>(`/threads/${encodeURIComponent(thread.id)}/run`, run));
+    } catch (e) {
+      onError(errorText(e));
+    } finally {
+      setSwitching(false);
+    }
+  };
+  const pick = (p: RunPick) => void post(pickedRun(shown, harnesses, p));
+
+  if (!harnesses) return null;
+  const now = threadRunLabels(thread, harnesses);
+  const busy = thread.status === 'running' || thread.status === 'queued';
+  const ring = queued ? 'rounded-full ring-1 ring-live' : '';
   return (
-    <>
-      <span title={thread.auto_reason ?? 'Fixed for this thread'} aria-label={`Model: ${labels.model} on ${harnessName}`} className={pillCls}>
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg text-fg">
-          <HarnessLogo harness={thread.harness} size={13} />
-        </span>
-        <span className="min-w-0 truncate">{labels.model}</span>
-        <span className="hidden shrink-0 text-fg-4 sm:inline">· {harnessName}</span>
-      </span>
-      <span title="Fixed for this thread" aria-label={`Effort: ${labels.effort}`} className={pillCls}>
-        <span className="grid h-6 w-6 shrink-0 place-items-center text-fg-3">
-          <Icon name="sliders" size={14} />
-        </span>
-        <span className="min-w-0 truncate">{labels.effort}</span>
-      </span>
-    </>
+    <span title={busy && !queued ? 'A pick now applies when this turn ends' : (shown.auto_reason ?? undefined)} className="inline-flex max-w-full items-center gap-1.5">
+      {queued && (
+        <button
+          type="button"
+          disabled={switching}
+          onClick={() => void post(currentRun(thread))}
+          title={`Runs on ${now.model}, ${now.effort} until this turn ends. Click to keep it.`}
+          aria-label={`Next turn runs on ${labels.model}, ${labels.effort}. Keep ${now.model}, ${now.effort}`}
+          className="press inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-surface-2 pr-2 pl-2.5 text-[12px] font-semibold text-live-text transition-colors hover:bg-surface-3 disabled:opacity-45"
+        >
+          <Icon name="clock" size={13} />
+          Next turn
+          <Icon name="x" size={12} className="text-fg-4" />
+        </button>
+      )}
+      <ModelPicker
+        harnesses={harnesses}
+        onOpen={reload}
+        offerAuto={false}
+        label={labels.model}
+        value={choice}
+        disabled={switching}
+        className={ring}
+        onChange={(c) => pick(c)}
+      />
+      <EffortPicker harnesses={harnesses} choice={choice} value={shown.effort} disabled={switching} className={ring} onChange={(effort) => pick({ effort })} />
+    </span>
   );
 }
 
@@ -789,18 +826,20 @@ export function ReplyComposer({
   thread,
   canSteer = true,
   onSent,
-  onRenamed,
+  onChanged,
   extra,
 }: {
   thread: Thread;
   /** When false (e.g. Cursor), a busy thread offers only Queue and Interrupt; Cmd+Enter queues. */
   canSteer?: boolean;
   onSent?: (t: Thread, mode?: SendMode) => void;
-  /** The thread after `/rename`. */
-  onRenamed?: (t: Thread) => void;
+  /** The thread after `/rename` or a run switch. */
+  onChanged?: (t: Thread) => void;
   extra?: ReactNode;
 }) {
   const { id: threadId, status } = thread;
+  // A switch queued behind the turn: what Ben sends waits for it too (apps/server/runner/queue.ts), so nothing steers.
+  const steers = canSteer && !thread.queued_harness;
   const key = `reply:${threadId}`;
   const [text, setText] = useState(() => drafts.get(key) ?? '');
   const [busy, setBusy] = useState(false);
@@ -891,7 +930,7 @@ export function ReplyComposer({
       } else if (action.kind === 'rename') {
         const t = await api.patch<Thread>(`/threads/${encodeURIComponent(threadId)}`, { title: action.title });
         sent(raw);
-        onRenamed?.(t);
+        onChanged?.(t);
       }
     } catch (e) {
       setError(errorText(e));
@@ -926,17 +965,17 @@ export function ReplyComposer({
           const key = enterKey(e, text, update);
           if (!key) return;
           if (omni) return void runOmni();
-          const busyMode: SendMode = key === 'interrupt' ? 'interrupt' : canSteer ? 'steer' : 'queue';
+          const busyMode: SendMode = key === 'interrupt' ? 'interrupt' : steers ? 'steer' : 'queue';
           void submit(busyThread ? busyMode : undefined);
         }}
         rows={1}
-        placeholder={busyThread ? 'Steer the agent. It reads this at its next step.' : suggestion ?? 'Reply'}
+        placeholder={!busyThread ? (suggestion ?? 'Reply') : steers ? 'Steer the agent. It reads this at its next step.' : 'Queue a message. It runs after this turn.'}
         className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-4"
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         {extra}
         <AttachButton onPick={att.add} disabled={busy} />
-        <ThreadRunPills thread={thread} />
+        <ThreadRunPills thread={thread} onSwitched={(t) => onChanged?.(t)} onError={setError} />
         <div className="ml-auto flex items-center gap-2.5">
           <Hint tab={!!suggestion} />
           {omni ? (
@@ -944,7 +983,7 @@ export function ReplyComposer({
               {slash.label ?? 'Send'}
             </SendButton>
           ) : busyThread ? (
-            <SteerButton disabled={!text.trim()} busy={busy} canSteer={canSteer} onSend={sendVia} />
+            <SteerButton disabled={!text.trim()} busy={busy} canSteer={steers} onSend={sendVia} />
           ) : (
             <SendButton armed={!!text.trim()} busy={busy} onClick={() => void submit()}>
               Send

@@ -19,11 +19,14 @@ public enum TranscriptItem: Hashable, Sendable, Identifiable {
   case report(eventID: Int, at: Date, CrewReport)
   /// Mod log lines in a row, keyed by the first. They do not end a group of calls, so a busy hook does not split it.
   case mod(eventID: Int, [ModLine])
+  /// Ben switched the thread's harness, model or effort.
+  case runSwitch(SwitchRow)
 
   public var id: TranscriptItemID {
     switch self {
     case .user(let id, _, _), .text(let id, _, _), .result(let id, _), .error(let id, _), .report(let id, _, _), .mod(let id, _): .event(id)
     case .tools(let g): .event(g.eventID)
+    case .runSwitch(let r): .event(r.eventID)
     case .plan: .plan
     }
   }
@@ -175,6 +178,8 @@ public struct Transcript: Sendable {
   private var refs: [String: [(group: Int, path: [Int])]] = [:]
   private var open: (index: Int, paths: [String: [Int]])?
   private var planIndex: Int?
+  /// The handover switch row the next `handover` event completes.
+  private var pendingSwitch: Int?
 
   public init() {}
 
@@ -238,10 +243,23 @@ public struct Transcript: Sendable {
       } else {
         items.append(.mod(eventID: e.id, [line]))
       }
+    case .runSwitch(let p):
+      if p.mode != .settings, let id = pendingSwitch { withSwitch(id) { $0.superseded = true } }
+      close(.runSwitch(SwitchRow(eventID: e.id, at: e.createdAt, p: p)))
+      if p.mode != .settings { pendingSwitch = p.mode == .handover ? e.id : nil }
+    case .handover(let h):
+      if let id = pendingSwitch { withSwitch(id) { $0.done = h } }
+      pendingSwitch = nil
     case .status, .sessionInit, .task: break
     case .unknown(let kind, _):
       if Self.breaking.contains(kind) { close(nil) }
     }
+  }
+
+  private mutating func withSwitch(_ eventID: Int, _ body: (inout SwitchRow) -> Void) {
+    guard let i = items.lastIndex(where: { $0.id == .event(eventID) }), case .runSwitch(var r) = items[i] else { return }
+    body(&r)
+    items[i] = .runSwitch(r)
   }
 
   /// A `tool_use` whose payload does not decode still folds, the way the Web UI's parsePayload does:
@@ -297,7 +315,7 @@ public struct Transcript: Sendable {
   }
 
   /// Kinds that end a group of calls.
-  static let breaking: Set<String> = ["user", "assistant_text", "result", "error", "crew_report"]
+  static let breaking: Set<String> = ["user", "assistant_text", "result", "error", "crew_report", "switch"]
 
   private mutating func close(_ item: TranscriptItem?) {
     open = nil
@@ -379,6 +397,7 @@ extension Transcript {
     var rows: [Row] = []
     var group: Group?
     var plan: Plan?
+    var pendingSwitch: Int?
     for e in events {
       switch Self.content(of: e) {
       case .toolUse(let use):
@@ -420,6 +439,20 @@ extension Transcript {
         } else {
           rows.append(.item(.mod(eventID: e.id, [line])))
         }
+      case .runSwitch(let p):
+        group = nil
+        if let i = pendingSwitch, case .item(.runSwitch(var r)) = rows[i], p.mode != .settings {
+          r.superseded = true
+          rows[i] = .item(.runSwitch(r))
+        }
+        rows.append(.item(.runSwitch(SwitchRow(eventID: e.id, at: e.createdAt, p: p))))
+        if p.mode != .settings { pendingSwitch = p.mode == .handover ? rows.count - 1 : nil }
+      case .handover(let h):
+        if let i = pendingSwitch, case .item(.runSwitch(var r)) = rows[i] {
+          r.done = h
+          rows[i] = .item(.runSwitch(r))
+        }
+        pendingSwitch = nil
       case .unknown(let kind, _):
         if breaking.contains(kind) { group = nil }
       }

@@ -152,6 +152,10 @@ private struct ReplyComposerView: View {
   @State private var over = false
   @State private var focusTick = 0
   @State private var picking = false
+  @State private var switching = false
+  @State private var switchError: String?
+  /// The harness list fetched when the model list opens, newer than the store's.
+  @State private var fetchedHarnesses: [HarnessInfo]?
 
   private var busyThread: Bool { thread.status.isActive }
   /// The server's guess at the next reply, shown in the empty box. Tab takes it.
@@ -159,9 +163,10 @@ private struct ReplyComposerView: View {
     guard !busyThread, reply.text.isEmpty, let s = thread.suggestion, !s.isEmpty else { return nil }
     return s
   }
+  /// A switch queued behind the turn: what Ben sends waits for it too (apps/server/runner/queue.ts), so nothing steers.
   private var canSteer: Bool {
     let caps = model.store.harnesses.first { $0.id == thread.harness }?.capabilities
-    return SendRules.canSteer(harness: thread.harness, capabilities: caps)
+    return SendRules.canSteer(harness: thread.harness, capabilities: caps) && RunSwitch.queued(thread) == nil
   }
 
   var body: some View {
@@ -170,7 +175,7 @@ private struct ReplyComposerView: View {
       // thread is on its way to or from another Mac: the server's block is then that card's own line.
       if let b = store.blocked, thread.setup == nil, store.handoff?.inFlight != true { ErrorNote(text: b) }
       if let e = store.actionError { ErrorNote(text: e.message) }
-      if let e = reply.sendError ?? omniError { ErrorNote(text: e) }
+      if let e = reply.sendError ?? omniError ?? switchError { ErrorNote(text: e) }
       shell
     }
     #if DEBUG
@@ -179,6 +184,10 @@ private struct ReplyComposerView: View {
         setText: {
           reply.text = $0
           focusTick += 1
+        },
+        run: { run throws(QAScriptError) in
+          guard !busyThread, !switching else { throw QAScriptError("switch after this turn") }
+          switchRun(run)
         },
         send: { mode throws(QAScriptError) in
           guard reply.canSend else { throw QAScriptError("the reply box has nothing to send") }
@@ -212,7 +221,7 @@ private struct ReplyComposerView: View {
         AttachmentStrip(files: reply.files, remove: reply.removeFile)
       }
       ComposerTextView(
-        text: $reply.text, placeholder: suggestion ?? SendRules.placeholder(busy: busyThread), running: busyThread,
+        text: $reply.text, placeholder: suggestion ?? SendRules.placeholder(busy: busyThread, canSteer: canSteer), running: busyThread,
         interrupting: store.interrupting, focusTick: focusTick, callbacks: callbacks, caretRequest: caret,
         scale: UIZoom.settings.scale
       )
@@ -244,7 +253,7 @@ private struct ReplyComposerView: View {
     ComposerFooterLayout {
       AttachButton(disabled: reply.sending) { picking = true }
       DictateButton { focusTick += 1 }
-      ThreadRunPills(thread: thread, harnesses: model.store.harnesses)
+      runPickers
       if thread.branch != nil {
         ThreadPRSlot(model: model, thread: thread, busy: busyThread, opening: reply.openingPR) { Task { await openPR() } }
       }
@@ -262,6 +271,48 @@ private struct ReplyComposerView: View {
     .padding(.horizontal, z(8))
     .padding(.bottom, z(8))
     .padding(.top, z(6))
+  }
+
+  /// The model and effort the thread runs on. A pick switches its next turn. While a turn runs it waits for that turn:
+  /// the pickers show it, ringed, after a "Next turn" chip whose click keeps the current run. Separate views, so the
+  /// footer wraps between them in a narrow window.
+  @ViewBuilder private var runPickers: some View {
+    let harnesses = fetchedHarnesses ?? model.store.harnesses
+    let shown = RunSwitch.shown(thread)
+    let queued = RunSwitch.queued(thread) != nil
+    let disabled = switching ? "Switching" : nil
+    let ring = Capsule().strokeBorder(queued ? Tok.live : .clear, lineWidth: 1)
+    if queued { NextTurnChip(now: RunSwitch.describe(RunSwitch.current(thread), harnesses: harnesses)) { switchRun(RunSwitch.current(thread)) } }
+    ModelPickerButton(
+      harnesses: harnesses, harness: shown.harness, model: RunSwitch.shownModel(shown, harnesses: harnesses),
+      pick: { switchRun(RunSwitch.picking(harness: $0, model: $1, from: shown, harnesses: harnesses)) },
+      refresh: refreshHarnesses, offersAuto: false, autoReason: queued ? nil : thread.autoReason, disabledHelp: disabled)
+      .overlay(ring)
+    EffortMenu(
+      options: EffortRules.options(for: EffortRules.model(harness: shown.harness, model: shown.model, in: harnesses)),
+      value: shown.effort, disabledHelp: disabled) { switchRun(RunSwitch.picking(effort: $0, from: shown)) }
+      .overlay(ring)
+  }
+
+  private func refreshHarnesses() {
+    Task {
+      if let list = try? await model.client.harnesses() { fetchedHarnesses = list }
+    }
+  }
+
+  /// Nothing changes until the server answers: it checks the catalog, and queues the pick while a turn runs.
+  private func switchRun(_ run: Run?) {
+    guard let run, !switching else { return }
+    switching = true
+    switchError = nil
+    Task {
+      defer { switching = false }
+      do {
+        store.merge(try await model.client.switchRun(thread.id, to: run))
+      } catch {
+        switchError = error.localizedDescription
+      }
+    }
   }
 
   private var callbacks: ComposerCallbacks {
@@ -317,7 +368,7 @@ private struct ReplyComposerView: View {
     }
   }
 
-  /// `/model`, `/effort` and `/fast` can't change a running thread: offer a new one that picks its model.
+  /// The hint under `/model`, `/effort` and `/fast` offers a new thread that picks its model.
   private func newThreadOnAnotherModel() {
     reply.text = ""
     model.openNewThread(.otherModel(thread))
@@ -353,38 +404,32 @@ private struct ReplyComposerView: View {
   }
 }
 
-/// The model and effort this thread is running on. Fixed, so they stay visible and are not pickers.
-private struct ThreadRunPills: View {
-  let thread: OmniThread
-  let harnesses: [HarnessInfo]
+/// The chip ahead of the pickers while a switch waits for the turn to end. Clicking it keeps the run the thread is on.
+private struct NextTurnChip: View {
+  /// The run the thread is on, named.
+  let now: String
+  let keep: () -> Void
+  @State private var hover = false
 
   var body: some View {
-    let labels = ThreadRunLabels.make(
-      harness: thread.harness, model: thread.model, effort: thread.effort, autoReason: thread.autoReason, harnesses: harnesses)
-    HStack(spacing: z(6)) {
-      pill(
-        symbol: "bolt", text: labels.modelTitle, detail: labels.harnessName, help: labels.autoReason,
-        label: "Model: \(labels.modelTitle) on \(labels.harnessName)")
-      pill(symbol: "slider.horizontal.3", text: labels.effort, detail: nil, label: "Effort: \(labels.effort)")
+    Button(action: keep) {
+      HStack(spacing: z(6)) {
+        OmniIcon(name: "clock", size: 13)
+        Text("Next turn").font(.omni(size: 12, weight: .semibold))
+        OmniIcon(name: "x", size: 12).foregroundStyle(Tok.fg4)
+      }
+      .foregroundStyle(Tok.live)
+      .padding(.leading, z(10))
+      .padding(.trailing, z(8))
+      .frame(height: z(32))
+      .background(hover ? Tok.surface3 : Tok.surface2, in: Capsule())
+      .contentShape(Capsule())
+      .onHover { hover = $0 }
     }
-  }
-
-  /// `help` is Auto's reason, else the pills say they are fixed.
-  private func pill(symbol: String, text: String, detail: String?, help: String? = nil, label: String) -> some View {
-    HStack(spacing: z(6)) {
-      Image(systemName: symbol).font(.omni(size: 11.5)).foregroundStyle(Tok.fg3)
-      Text(text).font(.omni(size: 12.5, weight: .medium)).lineLimit(1)
-      if let detail { Text("· \(detail)").font(.omni(size: 12.5)).foregroundStyle(Tok.fg4).lineLimit(1) }
-    }
-    .padding(.horizontal, z(10))
-    .frame(height: z(28))
-    .frame(maxWidth: z(220))
-    .foregroundStyle(Tok.fg)
-    .background(Tok.surface2, in: Capsule())
-    .help(help ?? "Fixed for this thread")
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(label)
+    .buttonStyle(.plain)
     .fixedSize()
+    .help("Runs on \(now) until this turn ends. Click to keep it.")
+    .accessibilityLabel("Keep \(now) for the next turn")
   }
 }
 
@@ -558,6 +603,7 @@ private struct Thumb: View {
 enum QAComposerProbe {
   struct Hooks {
     let setText: (String) -> Void
+    let run: (Run) throws(QAScriptError) -> Void
     let send: (SendMode?) async throws(QAScriptError) -> Void
   }
 
