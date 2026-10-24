@@ -43,6 +43,8 @@ public enum EventPayload: Hashable, Sendable {
   case result(TurnResult)
   case task(TaskEvent)
   case mod(ModLog)
+  case runSwitch(SwitchP)
+  case handover(HandoverP)
   case unknown(kind: String, payload: JSONValue)
 
   public init(kind: String, json: String) {
@@ -65,6 +67,8 @@ public enum EventPayload: Hashable, Sendable {
       case "result": self = .result(try d.decode(TurnResult.self, from: data))
       case "task": self = .task(try d.decode(TaskEvent.self, from: data))
       case "mod": self = .mod(try d.decode(ModLog.self, from: data))
+      case "switch": self = .runSwitch(try d.decode(SwitchP.self, from: data))
+      case "handover": self = .handover(try d.decode(HandoverP.self, from: data))
       default: self = .unknown(kind: kind, payload: JSONValue.parse(json))
       }
     } catch {

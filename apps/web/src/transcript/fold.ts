@@ -1,3 +1,4 @@
+import type { HandoverP, SwitchP } from '@omni/shared/run-switch.ts';
 import type { SlashRecord } from '@omni/shared/slash.ts';
 import { parsePayload, shortPath } from '../format.ts';
 
@@ -115,7 +116,20 @@ export type Item =
   | { type: 'error'; key: number; p: TextP }
   | { type: 'report'; key: number; at: string; p: ReportP }
   /** Mod log lines in a row. They do not end a group of calls, so a busy hook does not split it. */
-  | { type: 'mod'; key: number; lines: ModLine[] };
+  | { type: 'mod'; key: number; lines: ModLine[] }
+  | SwitchItem;
+
+/**
+ * A run switch. A handover switch stays pending until its `handover` event fills `done`, or a later handover or back
+ * switch replaces it before any turn picked it up.
+ */
+export interface SwitchItem {
+  type: 'switch';
+  key: number;
+  p: SwitchP;
+  done: HandoverP | null;
+  superseded: boolean;
+}
 
 export interface Todo {
   content?: string;
@@ -165,6 +179,7 @@ export function buildItems(events: TranscriptEvent[]): { items: Item[]; plan: Fo
   const groupOf = new Map<string, Extract<Item, { type: 'tools' }>>();
   let group: Extract<Item, { type: 'tools' }> | null = null;
   let plan: FoldPlan | null = null;
+  let pending: SwitchItem | null = null;
 
   for (const e of events) {
     switch (e.kind) {
@@ -230,6 +245,21 @@ export function buildItems(events: TranscriptEvent[]): { items: Item[]; plan: Fo
       case 'crew_report':
         group = null;
         items.push({ type: 'report', key: e.id, at: e.created_at, p: parsePayload<ReportP>(e) });
+        break;
+      case 'switch': {
+        const p = parsePayload<SwitchP>(e);
+        const item: SwitchItem = { type: 'switch', key: e.id, p, done: null, superseded: false };
+        if (p.mode !== 'settings') {
+          if (pending) pending.superseded = true;
+          pending = p.mode === 'handover' ? item : null;
+        }
+        group = null;
+        items.push(item);
+        break;
+      }
+      case 'handover':
+        if (pending) pending.done = parsePayload<HandoverP>(e);
+        pending = null;
         break;
       case 'mod': {
         const p = parsePayload<{ plugin?: unknown; text?: unknown }>(e);

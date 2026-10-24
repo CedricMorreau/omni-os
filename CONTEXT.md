@@ -85,6 +85,10 @@ _Avoid_: Router, smart model
 The harness's own record of a thread's conversation, which Omni resumes on every follow-up.
 _Avoid_: Codex "thread", Cursor "chat" (their names for the same thing)
 
+**Handover**:
+What a thread's next **Session** reads ahead of the user's message after the thread moved to another **Harness**: the thread's facts and its transcript, built by Omni, since no harness reads another's session. A harness the thread never ran on gets the whole thread in a new **Session**; one it ran on before resumes its own **Session** and gets only what happened since. Pending until that session starts.
+_Avoid_: Context transfer, migration
+
 **Slash command**:
 Anything the user runs by typing `/` in the composer: a **Harness command** or an **Omni command**.
 _Avoid_: Prompt, macro, shortcut
@@ -113,11 +117,11 @@ _Avoid_: Frontend, dashboard
 
 - The **Mac app** and the **Web UI** are two clients of the same Omni server; neither holds thread state of its own
 - A **Channel** has many **Threads**
-- A **Thread** runs on one **Harness** and one **Model**, and has one **Session** in that harness
+- A **Thread** runs on one **Harness** and one **Model** at a time, and has one current **Session**; it keeps the **Session** it had on each harness it left
 - A **Harness** offers many **Models**; the same model family can appear in several harnesses (Claude Opus runs in Claude Code and in Cursor Agent)
 - A Hermes **Thread** runs on the Hermes server, reached over Tailscale. The API listens on the server's tailnet address and is not public. The thread has no Omni worktree, browser profile or artifacts directory. Its **Session** id is `omni-<thread id>`. Artifacts come back as links or text
-- The user picks the **Harness** per thread, or leaves it to **Auto**; Omni never switches a thread's harness once it is set
-- A thread's **Harness**, **Model** and **Effort** are fixed once it starts; carrying work to another harness means starting a new thread
+- The user picks the **Harness** per thread, or leaves it to **Auto**; Omni never switches a thread's harness on its own
+- The user (or the **Conductor**, when asked) can switch a thread's **Harness**, **Model** or **Effort** between **Turns**, never during one, and never to or from Hermes. The same **Harness** keeps its **Session**; another one gets a **Handover**
 - A **Crew role**, **Channel** or **Automation** can set a default **Harness**, **Model** and **Effort**, or **Auto**; a choice made on the thread wins, and **Auto** is the fallback
 - The **Conductor** delegates on the crew role's defaults, which for most roles is **Auto**, unless the user names a harness or model
 - A **Harness** offers many **Harness commands**; a thread's `/` menu lists its own **Harness**'s **Harness commands** plus the **Omni commands**

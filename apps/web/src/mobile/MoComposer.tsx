@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { errorText, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
+import { api, errorText, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
 import { HarnessLogo } from '../components/brand.tsx';
 import { AttachmentStrip, useAttachments, useReplySend } from '../components/Composer.tsx';
-import { modelOf } from '../components/ModelPicker.tsx';
 import { ErrorNote, Icon, type IconName } from '../components/ui.tsx';
 import { canSteer } from '../steer.ts';
+import { pickedRun, threadChoice, threadRunLabels } from '../thread-run.ts';
 import { useDictation, withPhrase } from './dictation.ts';
+import { ModelSheet } from './ModelSheet.tsx';
 import { MoDiff, MoGroup, MoListRow, MoRound, MoSheet } from './parts.tsx';
 
 export interface ComposerChip {
@@ -23,11 +24,23 @@ const PICK = { photo: 'image/*', camera: 'image/*', file: undefined } as const;
 type Pick = keyof typeof PICK;
 
 /**
- * What the + opens: a photo, the camera or a file for the next message, and the thread's model and effort, which
- * are set when the thread starts and shown here only.
+ * What the + opens: a photo, the camera or a file for the next message, and the thread's model and effort. Tapping
+ * those opens the model sheet, which switches the run for the next turn. `onRun` is unset while a turn runs or waits.
  */
-function PlusSheet({ thread, harnesses, onPick, onClose }: { thread: Thread; harnesses?: HarnessWithRunning[]; onPick: (p: Pick) => void; onClose: () => void }) {
-  const { harness, model } = harnesses ? modelOf(harnesses, { harness: thread.harness, model: thread.model ?? '' }) : { harness: undefined, model: undefined };
+function PlusSheet({
+  thread,
+  harnesses,
+  onPick,
+  onRun,
+  onClose,
+}: {
+  thread: Thread;
+  harnesses?: HarnessWithRunning[];
+  onPick: (p: Pick) => void;
+  onRun?: () => void;
+  onClose: () => void;
+}) {
+  const labels = threadRunLabels(thread, harnesses);
   const tiles: [Pick, IconName, string][] = [
     ['photo', 'image', 'Photo'],
     ['camera', 'maximize', 'Camera'],
@@ -45,16 +58,12 @@ function PlusSheet({ thread, harnesses, onPick, onClose }: { thread: Thread; har
       </div>
       <div className="px-3">
         <MoGroup>
-          <MoListRow
-            icon={<HarnessLogo harness={thread.harness} size={15} />}
-            label="Model"
-            sub={harness?.name}
-            right={model?.label ?? thread.model ?? 'Default'}
-            chevron={false}
-          />
-          <MoListRow icon="gauge" label="Effort" right={thread.effort || model?.defaultEffort || 'Default'} chevron={false} last />
+          <MoListRow icon={<HarnessLogo harness={thread.harness} size={15} />} label="Model" sub={labels.harnessName || undefined} right={labels.model} onClick={onRun} />
+          <MoListRow icon="gauge" label="Effort" right={labels.effort} onClick={onRun} last />
         </MoGroup>
-        <p className="m-0 px-2 pt-2.5 text-[12.5px] leading-[1.45] text-fg-3">A thread keeps the model it started on. Start a new thread to use another.</p>
+        <p className="m-0 px-2 pt-2.5 text-[12.5px] leading-[1.45] text-fg-3">
+          {onRun ? 'A new model or effort takes over from the next message.' : 'Switch after this turn.'}
+        </p>
       </div>
     </MoSheet>
   );
@@ -64,12 +73,27 @@ function PlusSheet({ thread, harnesses, onPick, onClose }: { thread: Thread; har
  * The thread's composer on a phone: action chips, one line that grows, + for files and mic or send. It sends the way
  * the desktop reply box does: a busy thread is steered, or queued where the harness cannot steer.
  */
-export function MoComposer({ thread, chips, placeholder, onSent }: { thread: Thread; chips: ComposerChip[]; placeholder: string; onSent: (t: Thread, mode?: SendMode) => void }) {
+export function MoComposer({
+  thread,
+  chips,
+  placeholder,
+  onSent,
+  onSwitched,
+}: {
+  thread: Thread;
+  chips: ComposerChip[];
+  placeholder: string;
+  onSent: (t: Thread, mode?: SendMode) => void;
+  /** The thread after its run switched. */
+  onSwitched: (t: Thread) => void;
+}) {
   const [text, setText] = useState(() => drafts.get(thread.id) ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plus, setPlus] = useState(false);
-  const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
+  const [runSheet, setRunSheet] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const { data: harnesses, reload } = useApi<HarnessWithRunning[]>('/harnesses');
   const att = useAttachments();
   const send = useReplySend(thread.id);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -106,6 +130,23 @@ export function MoComposer({ thread, chips, placeholder, onSent }: { thread: Thr
       setError(errorText(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const switchRun = async (choice: { harness: string; model: string }, effort: string) => {
+    const now = threadChoice(thread, harnesses);
+    const run = pickedRun(thread, harnesses, choice.harness === now.harness && choice.model === now.model ? { effort } : choice);
+    if (!run || switching) return;
+    setSwitching(true);
+    setError(null);
+    try {
+      onSwitched(await api.post<Thread>(`/threads/${encodeURIComponent(thread.id)}/run`, run));
+    } catch (e) {
+      setError(errorText(e));
+      // The error shows above the composer, which the sheet covers.
+      setRunSheet(false);
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -172,7 +213,32 @@ export function MoComposer({ thread, chips, placeholder, onSent }: { thread: Thr
           e.target.value = '';
         }}
       />
-      {plus && <PlusSheet thread={thread} harnesses={harnesses} onPick={pick} onClose={() => setPlus(false)} />}
+      {plus && (
+        <PlusSheet
+          thread={thread}
+          harnesses={harnesses}
+          onPick={pick}
+          onRun={
+            busyThread || !harnesses
+              ? undefined
+              : () => {
+                  setPlus(false);
+                  reload();
+                  setRunSheet(true);
+                }
+          }
+          onClose={() => setPlus(false)}
+        />
+      )}
+      {runSheet && harnesses && (
+        <ModelSheet
+          harnesses={harnesses}
+          choice={threadChoice(thread, harnesses)}
+          effort={thread.effort}
+          onChange={(c, e) => void switchRun(c, e)}
+          onClose={() => setRunSheet(false)}
+        />
+      )}
     </div>
   );
 }

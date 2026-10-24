@@ -12,7 +12,7 @@ const out = (tid: string, m: number, is_error = false) => ev('tool_result', { to
 const text = (t: string, m: number) => ev('assistant_text', { text: t }, m);
 const result = (m: number, extra = {}) => ev('result', { ok: true, subtype: 'success', duration_ms: 90_000, turns: 3, ...extra }, m);
 
-const thread = (status: string) => ({ status, cwd: '/w/volero' }) as Pick<Thread, 'status' | 'cwd'>;
+const thread = (status: string) => ({ status, cwd: '/w/volero', harness: 'codex' }) as Pick<Thread, 'status' | 'cwd' | 'harness'>;
 const art = (name: string, m: number) => ({ id: m, thread_id: 't', path: name, name, kind: 'html', size: 1, url: null, description: null, created_at: at(m), updated_at: at(m) }) as Artifact;
 const child = (cid: string, m: number, source = 'conductor') => ({ id: cid, created_at: at(m), source, status: 'running' }) as unknown as Thread;
 
@@ -93,5 +93,27 @@ describe('threadView', () => {
     expect(v.turns[1].prompts).toHaveLength(0);
     expect(v.turns[1].reports[0].role).toBe('researcher');
     expect(v.turns[1].children.map((c) => c.id)).toEqual(['late']);
+  });
+
+  it('shows a run switch under the turn it followed, not as a step', () => {
+    const claude = { harness: 'claude', model: '', effort: '', harnessName: 'Claude Code', modelLabel: 'Opus' };
+    const codex = { harness: 'codex', model: '', effort: '', harnessName: 'Codex', modelLabel: 'GPT-5.5' };
+    const events = [
+      user('Fix the cart', 0),
+      text('Fixed.', 1),
+      result(2),
+      ev('switch', { from: claude, to: codex, mode: 'handover' }, 3),
+      user('Now the tests', 4),
+      ev('handover', { to: codex, session: 'fresh', entries: 3, omitted: 0, chars: 300 }, 4),
+      text('Running them.', 5),
+    ];
+    const v = threadView({ events, thread: thread('running'), artifacts: [], children: [] });
+    expect(v.turns).toHaveLength(2);
+    expect(v.turns[0].switches.map((s) => [s.p.to.harness, s.done?.entries])).toEqual([['codex', 3]]);
+    expect(v.turns[0].items.map((it) => it.type)).toEqual(['user', 'text', 'result']);
+    expect(v.turns[1].switches).toEqual([]);
+    expect(v.turns[1].prompts.map((p) => p.text)).toEqual(['Now the tests']);
+    // Each turn names the harness it ran on, not the one the thread is on now.
+    expect(v.turns.map((t) => t.harness)).toEqual(['claude', 'codex']);
   });
 });

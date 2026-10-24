@@ -72,6 +72,12 @@ import OmniKit
     ])
   }
 
+  @Test func readsRunPickerStep() throws {
+    let script = try QAScript(json: Data(#"[{"run":{"harness":"codex","model":"gpt-6.1","effort":"high"}},{"run":{"harness":"claude-code","model":""}}]"#.utf8))
+    #expect(script.steps == [.run(Run(harness: .codex, model: "gpt-6.1", effort: "high")), .run(Run(harness: .claudeCode, model: "", effort: ""))])
+    #expect(throws: QAScriptError.self) { try QAScript(json: Data(#"[{"run":{"model":"x"}}]"#.utf8)) }
+  }
+
   @Test func sumsUpFrames() {
     let stats = QAFrameStats(gaps: [16, 17, 16, 50, 16, 34])
     #expect(stats.frames == 6)

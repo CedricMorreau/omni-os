@@ -1,3 +1,5 @@
+import type { Run } from '@omni/shared/run-switch.ts';
+
 /** The model that asks for Auto, which picks the harness, model and effort from the prompt (apps/server/harness/auto.ts). */
 export const AUTO = 'auto';
 
@@ -37,22 +39,50 @@ export interface ThreadRunLabels {
 }
 
 /**
- * What the reply composer shows for a thread. Model and effort are fixed once a thread starts,
- * so this only names them. An empty model is the harness default. An empty effort is that model's default.
+ * What the reply composer's pills show for a thread. An empty model is the harness default. An empty effort is that
+ * model's default.
  */
 export function threadRunLabels(
   thread: { harness: string; model: string | null; effort: string; auto_reason?: string | null },
   harnesses: RunCatalogHarness[] | null | undefined,
 ): ThreadRunLabels {
-  const harness = harnesses?.find((h) => h.id === thread.harness);
-  const picked = thread.model ? harness?.models.find((m) => m.id === thread.model) : undefined;
-  const model = picked ?? (thread.model ? undefined : harness?.models.find((m) => m.default) ?? harness?.models[0]);
+  const { harness, model } = runModel(thread, harnesses);
   const label = model?.label || thread.model || 'default';
   return {
     model: thread.auto_reason ? `Auto · ${label}` : label,
     harnessName: harness?.name ?? '',
     effort: effortLabel(thread.effort, model, !!harness),
   };
+}
+
+/** The catalog's entry for a thread's harness and model. An empty model is the harness default. */
+function runModel(thread: { harness: string; model: string | null }, harnesses: RunCatalogHarness[] | null | undefined) {
+  const harness = harnesses?.find((h) => h.id === thread.harness);
+  const picked = thread.model ? harness?.models.find((m) => m.id === thread.model) : undefined;
+  const model = picked ?? (thread.model ? undefined : harness?.models.find((m) => m.default) ?? harness?.models[0]);
+  return { harness, model };
+}
+
+/** The model a thread's model pill marks as picked: the stored one, or the harness default it runs when none is stored. */
+export function threadChoice(thread: { harness: string; model: string | null }, harnesses: RunCatalogHarness[] | null | undefined) {
+  return { harness: thread.harness, model: runModel(thread, harnesses).model?.id ?? thread.model ?? '' };
+}
+
+/** A pick in a thread's model pill or effort pill. */
+export type RunPick = { harness: string; model: string } | { effort: string };
+
+/**
+ * The run a pick in a thread's pills switches to (POST /api/threads/:id/run), or null when it changes nothing. A new
+ * model starts at its default effort, as in the new-thread composer. A new effort keeps the model.
+ */
+export function pickedRun(
+  thread: { harness: string; model: string | null; effort: string },
+  harnesses: RunCatalogHarness[] | null | undefined,
+  pick: RunPick,
+): Run | null {
+  if ('effort' in pick) return pick.effort === thread.effort ? null : { harness: thread.harness, model: thread.model ?? '', effort: pick.effort };
+  const now = threadChoice(thread, harnesses);
+  return pick.harness === now.harness && pick.model === now.model ? null : { harness: pick.harness, model: pick.model, effort: '' };
 }
 
 function effortLabel(effort: string, model: RunCatalogModel | undefined, catalogKnown: boolean): string {

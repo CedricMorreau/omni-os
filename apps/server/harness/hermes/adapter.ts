@@ -58,6 +58,7 @@ function failText(e: unknown, baseUrl: string, apiKey: string): string {
 export const hermesAdapter: HarnessAdapter = {
   id: 'hermes',
   capabilities: CAPABILITIES.hermes,
+  freshSessionId: () => `omni-${randomUUID()}`,
 
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const thread = ctx.thread;
