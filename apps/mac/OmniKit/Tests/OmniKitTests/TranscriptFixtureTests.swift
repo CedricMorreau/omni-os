@@ -119,6 +119,8 @@ private func project(_ transcript: Transcript) -> (items: [FoldItem], plan: Fold
       items.append(FoldItem(type: "mod", key: id, lines: lines.map { FoldModLine(key: $0.id, plugin: $0.plugin, text: $0.text) }))
     case .runSwitch(let r):
       items.append(FoldItem(type: "switch", key: r.eventID, p: r.p, done: r.done, superseded: r.superseded))
+    case .question(let q):
+      items.append(FoldItem(type: "question", key: q.eventID))
     }
   }
   return (items, plan)

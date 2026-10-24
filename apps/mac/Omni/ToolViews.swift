@@ -6,6 +6,8 @@ import SwiftUI
 @MainActor @Observable
 final class TranscriptUI {
   private(set) var open: Set<String> = []
+  /// What Ben has picked on each pending question card, by question id.
+  var drafts: [String: QuestionDraft] = [:]
 
   func isOpen(_ key: String) -> Bool { open.contains(key) }
 

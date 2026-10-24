@@ -85,7 +85,7 @@ public final class ThreadStore {
   /// The line under the transcript while the agent works: the latest status, else "Working" when nothing
   /// has come back since the last message. A queued thread is not working yet.
   public var workingLine: String? {
-    guard thread?.status == .running, transcript.showsWorking(running: true) || statusLabel != nil else { return nil }
+    guard thread?.status == .running, !transcript.waitsOnQuestion, transcript.showsWorking(running: true) || statusLabel != nil else { return nil }
     return statusLabel ?? "Working"
   }
   public var files: [Artifact] { artifacts.filter { $0.kind != "screenshot" } }
