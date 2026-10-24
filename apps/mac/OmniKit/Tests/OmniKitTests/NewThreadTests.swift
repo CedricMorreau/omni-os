@@ -294,7 +294,7 @@ private final class FakeNewThreadAPI: NewThreadAPI {
     m.selectRole("builder")
     let t = await m.send()
     #expect(t != nil)
-    #expect(api.sent.first?.0 == NewThread(channel: "acme", prompt: "Do the thing", role: "builder", model: "gpt-x", harness: .codex, effort: "high"))
+    #expect(api.sent.first?.0 == NewThread(channel: "acme", prompt: "Do the thing", role: "builder"))
     #expect(api.sent.first?.1 == ["a.txt"])
     #expect(m.text == "" && m.files.isEmpty)
     #expect(DraftStore(directory: dir.url).text(for: "new:*") == "")
@@ -352,6 +352,65 @@ private final class FakeNewThreadAPI: NewThreadAPI {
     m.text = "go"
     _ = await m.send()
     #expect(api.sent.last?.0 == NewThread(channel: "acme", prompt: "go", model: "auto"))
+  }
+
+  @Test func conductorFollowsSavedDefaultsButKeepsExplicitDraftChoices() async {
+    let dir = TempDir("drafts")
+    let api = FakeNewThreadAPI()
+    let m = NewThreadComposerModel(fixedChannel: "conductor", api: api, drafts: DraftStore(directory: dir.url))
+    let pinned = ["conductor": RunDefaults(model: "sonnet")]
+    let auto = ["conductor": RunDefaults(model: "auto")]
+    // Crew, channels and the catalog can arrive separately.
+    m.update(crew: [], channels: channels, harnesses: [], defaults: auto)
+    m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: auto)
+    #expect(m.choice.role == "conductor" && m.choice.isAuto)
+    m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: pinned)
+    #expect(m.choice.model == "sonnet")
+    m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: auto)
+    #expect(m.choice.isAuto)
+    m.text = "Keep this draft"
+    m.selectModel(harness: .codex, model: "gpt-x")
+    m.selectEffort("high")
+    m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: pinned)
+    #expect(m.choice.model == "gpt-x" && m.choice.effort == "high" && m.text == "Keep this draft")
+    m.apply(NewThreadPreset(channel: "conductor", role: "conductor", harness: .claudeCode, model: "haiku"))
+    m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: auto)
+    #expect(m.choice.model == "haiku")
+    // Only the text is restored in a new composer. A previous model pick is not a channel default.
+    let reopened = NewThreadComposerModel(fixedChannel: "conductor", api: api, drafts: DraftStore(directory: dir.url))
+    reopened.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: auto)
+    #expect(reopened.choice.isAuto && reopened.text == "Keep this draft")
+    _ = await reopened.send()
+    #expect(api.sent.last?.0 == NewThread(channel: "conductor", prompt: "Keep this draft", role: "conductor"))
+    let home = NewThreadComposerModel(fixedChannel: nil, api: api, drafts: DraftStore(directory: dir.url))
+    home.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: auto)
+    #expect(home.choice.isAuto)
+    home.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: [:])
+    #expect(home.choice.model == "opus")
+  }
+
+  @Test func serializesInheritedDefaultsWithoutPromotingThemToExplicitChoices() async throws {
+    let dir = TempDir("drafts")
+    let transport = StubTransport(body: try fixture("thread-created.json"))
+    let client = OmniClient(port: 4799, transport: transport)
+    let m = NewThreadComposerModel(fixedChannel: "conductor", api: client, drafts: DraftStore(directory: dir.url))
+    for model in ["auto", "sonnet", "claude-retired-1"] {
+      m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: ["conductor": RunDefaults(model: model)])
+      m.text = "Fix the typo"
+      #expect(await m.send() != nil)
+      #expect(try bodyJSON(try #require(transport.requests.last)) == .object([
+        "channel": .string("conductor"), "prompt": .string("Fix the typo"), "role": .string("conductor"),
+      ]))
+    }
+    m.selectModel(harness: .codex, model: "gpt-x")
+    m.selectEffort("high")
+    m.update(crew: crew(), channels: channels, harnesses: harnesses(), defaults: ["conductor": RunDefaults(model: "auto")])
+    m.text = "Use my choice"
+    #expect(await m.send() != nil)
+    #expect(try bodyJSON(try #require(transport.requests.last)) == .object([
+      "channel": .string("conductor"), "prompt": .string("Use my choice"), "role": .string("conductor"),
+      "harness": .string("codex"), "model": .string("gpt-x"), "effort": .string("high"),
+    ]))
   }
 
   @Test func sameSettingsFromAnAutoThreadStartsOnAuto() throws {

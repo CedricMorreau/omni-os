@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { newThreadBody, runPreselect, sameSettings } from '../src/new-thread-preset.ts';
-import type { Thread } from '../src/api.ts';
+import { draftRun, draftRunRequest, newThreadBody, runPreselect, sameSettings } from '../src/new-thread-preset.ts';
+import type { Channel, CrewRole, Thread } from '../src/api.ts';
 
 // What the web new-thread composer preselects: the role's run defaults, else the channel's, else Auto.
 
@@ -8,6 +8,48 @@ const harnesses = [
   { id: 'claude-code' as const, models: [{ id: 'claude-sonnet-5-5', label: 'Sonnet', efforts: [], defaultEffort: '', default: true }, { id: 'claude-opus-5-5', label: 'Opus', efforts: [], defaultEffort: '' }] },
   { id: 'codex' as const, models: [{ id: 'gpt-5.6-sol', label: 'Sol', efforts: [], defaultEffort: '', default: true }] },
 ];
+
+describe('new-thread draft defaults', () => {
+  const conductor = { id: 'conductor', model: 'claude-opus-5-5' } as CrewRole;
+  const channel = (over: Partial<Channel> = {}) => ({ id: 'conductor', default_model: 'auto', ...over }) as Channel;
+
+  it('uses the saved Conductor default even when the role or catalog arrives later', () => {
+    expect(draftRun(null, undefined, channel(), []).choice.model).toBe('auto');
+    expect(draftRun(null, conductor, channel(), harnesses).choice.model).toBe('auto');
+    expect(draftRun(null, conductor, channel({ default_model: 'claude-sonnet-5-5' }), harnesses).choice.model).toBe('claude-sonnet-5-5');
+    // With no saved run the charter still supplies its existing default.
+    expect(draftRun(null, conductor, channel({ default_model: null }), harnesses).choice.model).toBe('claude-opus-5-5');
+  });
+
+  it('follows settings changes until the current draft has an explicit model, effort or preset', () => {
+    const before = channel({ default_model: 'claude-opus-5-5' });
+    expect(draftRun(null, conductor, before, harnesses).choice.model).toBe('claude-opus-5-5');
+    expect(draftRun(null, conductor, channel(), harnesses)).toEqual({ choice: { harness: 'auto', model: 'auto' }, effort: '' });
+    const picked = { choice: { harness: 'codex', model: 'gpt-5.6-sol' }, effort: 'high' };
+    expect(draftRun(picked, conductor, before, harnesses)).toEqual(picked);
+    expect(draftRun(picked, conductor, channel(), harnesses)).toEqual(picked);
+    // A new draft does not inherit that pick.
+    expect(draftRun(null, conductor, channel(), harnesses).choice.model).toBe('auto');
+    const preset = { choice: { harness: 'codex', model: '' }, effort: 'low' };
+    expect(draftRun(preset, conductor, channel(), harnesses)).toEqual({ ...preset, choice: { harness: 'codex', model: 'gpt-5.6-sol' } });
+  });
+
+  it('preserves other channel defaults and explicit crew roles', () => {
+    const acme = channel({ id: 'acme', default_harness: 'codex', default_model: 'gpt-5.6-sol', default_effort: 'high' });
+    expect(draftRun(null, undefined, acme, harnesses)).toEqual({ choice: { harness: 'codex', model: 'gpt-5.6-sol' }, effort: 'high' });
+    expect(draftRun(null, conductor, acme, harnesses).choice.model).toBe('claude-opus-5-5');
+    expect(draftRun(null, { ...conductor, id: 'builder' }, channel(), harnesses).choice.model).toBe('claude-opus-5-5');
+  });
+
+  it('leaves inherited runs to the server and only serializes deliberate choices', () => {
+    const retired = channel({ default_model: 'claude-retired-1' });
+    expect(draftRun(null, conductor, retired, harnesses).choice.model).toBe('claude-retired-1');
+    expect(draftRunRequest(null)).toEqual({});
+    const explicit = { choice: { harness: 'claude-code', model: 'claude-opus-5-5' }, effort: 'high' };
+    expect(draftRunRequest(explicit)).toEqual({ harness: 'claude-code', model: 'claude-opus-5-5', effort: 'high' });
+    expect(draftRunRequest({ choice: { harness: 'auto', model: 'auto' }, effort: '' })).toEqual({ model: 'auto' });
+  });
+});
 
 describe('runPreselect', () => {
   it('uses Auto when nothing is set', () => {

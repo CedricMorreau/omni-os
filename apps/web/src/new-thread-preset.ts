@@ -1,6 +1,6 @@
 // What a composer opens with when it starts from a thread. Web UI only; the slash rules are in
 // packages/shared/composer-slash.ts.
-import type { Channel, HarnessInfo, Thread } from './api.ts';
+import type { Channel, CrewRole, HarnessInfo, Thread } from './api.ts';
 import { AUTO, AUTO_CHOICE, asksAuto } from './thread-run.ts';
 
 /** The body that starts a thread with this one's channel, harness, model, effort and role. A thread Auto picked for starts on Auto. */
@@ -49,6 +49,35 @@ export const setsRun = (d: RunDefaults | undefined | null) => !!(d?.harness || d
 /** A channel's run defaults, from its row. */
 export const channelRun = (c: Channel | undefined): RunDefaults | undefined =>
   c ? { harness: c.default_harness, model: c.default_model, effort: c.default_effort } : undefined;
+
+/** The Conductor is attached automatically in its channel. Its charter must not hide a saved channel run. */
+export const roleRun = (role: CrewRole | undefined, channel: Channel | undefined): RunDefaults | undefined =>
+  role?.id === 'conductor' && channel?.id === 'conductor' && setsRun(channelRun(channel)) ? undefined : role;
+
+export interface DraftRun {
+  choice: { harness: string; model: string };
+  effort: string;
+}
+
+/** Only deliberate draft choices go in the request. The server resolves inherited defaults and retired-model fallbacks. */
+export function draftRunRequest(picked: DraftRun | null) {
+  if (!picked) return {};
+  if (asksAuto(picked.choice)) return { model: AUTO };
+  return { harness: picked.choice.harness, model: picked.choice.model || undefined, effort: picked.effort || undefined };
+}
+
+/** Follow current defaults until this draft has an explicit pick or a preset. Never remember a previous draft's pick. */
+export function draftRun(
+  picked: DraftRun | null,
+  role: CrewRole | undefined,
+  channel: Channel | undefined,
+  harnesses: Pick<HarnessInfo, 'id' | 'models'>[],
+): DraftRun {
+  if (!picked) return runPreselect(roleRun(role, channel), channelRun(channel), harnesses);
+  const h = harnesses.find((h) => h.id === picked.choice.harness);
+  const model = picked.choice.model || h?.models.find((m) => m.default)?.id || h?.models[0]?.id || '';
+  return { choice: { ...picked.choice, model }, effort: picked.effort };
+}
 
 /**
  * The model and effort the new-thread composer preselects: the role's defaults when it sets any, else the

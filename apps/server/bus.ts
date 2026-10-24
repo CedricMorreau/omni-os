@@ -11,7 +11,7 @@ export type FeedEvent =
   | { type: 'tasks'; tasks: unknown[] }
   /** Every mod status line pinned now, across all threads, whenever one is set or cleared. */
   | { type: 'mods'; mods: unknown[] }
-  /** A channel changed on another Mac (sync). Clients refetch the channel list. */
+  /** Channel settings changed here or on another Mac (sync). Clients refetch the channel list. */
   | { type: 'channel'; id: string }
   /** Ben read a thread's result (db/repos/needs-you.ts). Clients refetch Needs you; nothing else about the thread changed. */
   | { type: 'needs_you'; thread_id: string };

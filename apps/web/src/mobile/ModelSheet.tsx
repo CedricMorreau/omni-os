@@ -1,11 +1,13 @@
 import type { HarnessWithRunning } from '../api.ts';
-import { HarnessLogo } from '../components/brand.tsx';
+import { HarnessLogo, OmniMark } from '../components/brand.tsx';
 import { modelOf, type ModelChoice } from '../components/ModelPicker.tsx';
+import { AUTO_CHOICE, asksAuto } from '../thread-run.ts';
 import { MoGroup, MoListRow, MoRadio, MoSection, MoSheet } from './parts.tsx';
 
 /** What a run's chip reads: "Sonnet 5.5 · high", the model's default effort when none is picked. */
 export function runLabel(harnesses: HarnessWithRunning[] | undefined, choice: ModelChoice, effort: string) {
   if (!harnesses) return 'Model';
+  if (asksAuto(choice)) return 'Auto';
   const { harness, model } = modelOf(harnesses, choice);
   return [model?.label ?? harness?.name ?? choice.harness, effort || model?.defaultEffort].filter(Boolean).join(' · ');
 }
@@ -39,7 +41,20 @@ export function ModelSheet({
         </button>
       </div>
       <div className="mo-scroll flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto pb-3">
-        {efforts.length > 0 && (
+        <MoSection title="Auto">
+          <MoGroup>
+            <MoListRow
+              icon={<OmniMark size={20} />}
+              label="Auto"
+              sub="Picks the model and effort for your task"
+              right={<MoRadio on={asksAuto(choice)} />}
+              onClick={() => onChange(AUTO_CHOICE, '')}
+              chevron={false}
+              last
+            />
+          </MoGroup>
+        </MoSection>
+        {!asksAuto(choice) && efforts.length > 0 && (
           <MoSection title={`Effort for ${model?.label ?? 'this model'}`}>
             <MoGroup>
               {['', ...efforts].map((e, i, all) => (

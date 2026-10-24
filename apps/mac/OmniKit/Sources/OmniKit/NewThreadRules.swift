@@ -105,11 +105,13 @@ public enum NewThreadRules {
   /// The harness, model and effort a new thread starts on, as `runPreselect` in apps/web/src/new-thread-preset.ts: the role's
   /// defaults when it sets any (they replace the channel's whole, as the server resolves), else the channel's, else
   /// Auto. Either can ask for Auto too. A harness the catalog lacks falls back to Claude Code, on its default model.
+  /// The automatically attached Conductor role yields to a saved run in its own channel.
   public static func preselecting(
     _ choice: NewThreadChoice, crew: [CrewRole], harnesses: [HarnessInfo], defaults: [String: RunDefaults]
   ) -> NewThreadChoice {
-    let role = crew.first { $0.id == choice.role }?.runDefaults
     let channel = defaults[choice.channel]
+    let conductorDefault = choice.role == conductor && choice.channel == conductor && channel?.setsRun == true
+    let role = conductorDefault ? nil : crew.first { $0.id == choice.role }?.runDefaults
     let applying = role?.setsRun == true ? role : channel?.setsRun == true ? channel : nil
     guard let d = applying, !d.isAuto else { return selectingModel(harness: AutoRun.harness, model: AutoRun.model, from: choice) }
     var c = choice
