@@ -22,6 +22,7 @@ import { shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
+import { isAsking } from '../transcript/fold.ts';
 import { readPref, useApp, usePageVisible, writePref } from '../store.tsx';
 import { useThreadInterruptKey } from './useThreadInterruptKey.ts';
 import { useThreadSession } from './useThreadSession.ts';
@@ -92,6 +93,7 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
   const known = useMemo(() => [...children, ...team], [children, team]);
   const members = useMemo(() => teamOf(children), [children]);
   const reports = useMemo(() => reportNotes(queued), [queued]);
+  const asking = useMemo(() => isAsking(events), [events]);
   const [panelOpen, setPanelOpen] = useState<boolean>(() => readPref('threadPanel', true));
   const [panelWidth, setPanelWidth] = useState<number | null>(() => {
     const v = readPref<unknown>('threadPanelWidth', null);
@@ -314,6 +316,7 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
             panelOpen={panelOpen}
             onPanel={togglePanel}
             artifactCount={artifactCount}
+            asking={asking}
           />
         </div>
 

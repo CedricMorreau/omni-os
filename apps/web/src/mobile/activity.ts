@@ -56,6 +56,9 @@ function actionsOf(item: NeedsYouItem, harness: (id: string) => string, now: num
   const t = item.thread;
   let out: NeedsAction[];
   switch (b?.kind) {
+    case 'question':
+      out = [{ kind: 'open', label: 'Answer' }];
+      break;
     case 'setup':
       out = [{ kind: 'retry', label: 'Retry' }];
       break;

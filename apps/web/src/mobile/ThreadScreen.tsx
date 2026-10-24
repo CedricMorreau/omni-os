@@ -3,6 +3,7 @@ import { api, errorText, useApi, type Artifact, type BranchChanges, type Pending
 import { harnessLabel, OmniMark } from '../components/brand.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { SwitchLine } from '../components/Transcript.tsx';
+import { ASKING_LABEL, QuestionCard } from '../components/thread/QuestionCard.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { handOff, HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx';
 import { deviceRows } from '../handoff.ts';
@@ -479,7 +480,7 @@ export function ThreadScreen() {
         sub={sub}
         right={
           <>
-            <StatusPill status={needs ? 'needs' : thread.status} label={needs ? 'Needs you' : undefined} />
+            <StatusPill status={view.asking || needs ? 'needs' : thread.status} label={view.asking ? ASKING_LABEL : needs ? 'Needs you' : undefined} />
             <MoRound icon="more" label="Thread options" onClick={() => setMenu(true)} />
           </>
         }
@@ -498,6 +499,9 @@ export function ThreadScreen() {
               {t.reports.map((r, k) => (
                 <Report key={k} role={r.role} taskId={r.task_id} text={r.text} />
               ))}
+              {t.questions.map((q) => (
+                <QuestionCard key={q.id} threadId={thread.id} q={q} touch />
+              ))}
               {turnBody(t, last)}
               {t.switches.map((it) => (
                 <SwitchLine key={it.key} it={it} running={thread.status === 'running'} />
@@ -515,7 +519,8 @@ export function ThreadScreen() {
           }}
         />
         {!view.turns.length && <MoEmpty>{thread.setup ? 'Preparing the worktree.' : 'Nothing here yet.'}</MoEmpty>}
-        {card && <NeedsCardView card={card} inThread onRecovered={(r) => {
+        {/* A question's card above is where Ben answers it. */}
+        {card && card.kind !== 'question' && <NeedsCardView card={card} inThread onRecovered={(r) => {
               applyThread(r.thread, true);
               setQueued(r.pending);
             }} />}
