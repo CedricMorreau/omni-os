@@ -358,6 +358,27 @@ server.registerTool(
 );
 
 server.registerTool(
+  'send_to_grok_bot',
+  {
+    description:
+      `Send text to ${USER}'s Grok Bot, only when ${USER} asks. Pass request for that text, or thread_id alone to send the thread's title and messages. ` +
+      'A thread_id also adds that thread\'s channel id and thread id to the context. The webhook is configured in Settings, Secrets, or .env.',
+    inputSchema: {
+      request: z.string().min(1).max(100_000).optional(),
+      thread_id: z.string().min(1).max(200).optional(),
+      context: z.record(z.string(), z.unknown()).optional(),
+    },
+  },
+  async ({ request, thread_id, context }) => {
+    const body: { request?: string; thread_id?: string; context?: Record<string, unknown> } = {};
+    if (request !== undefined) body.request = request;
+    if (thread_id !== undefined) body.thread_id = thread_id;
+    if (context !== undefined) body.context = context;
+    return text(await call('/grokbot', { method: 'POST', body: JSON.stringify(body) }));
+  },
+);
+
+server.registerTool(
   'search_history',
   { description: `Full-text search across every thread ${USER} has run.`, inputSchema: { query: z.string() } },
   async ({ query }) => text(await call(`/search?q=${encodeURIComponent(query)}`)),

@@ -1,6 +1,19 @@
 import OmniKit
 import SwiftUI
 
+/// Names the Secrets form can fill in. The value is still typed and stored in the Keychain.
+private struct KnownGlobalSecret: Identifiable {
+  let name: String
+  let help: String
+  var id: String { name }
+}
+
+private let knownGlobalSecrets = [
+  KnownGlobalSecret(name: "HERMES_API_KEY", help: "The Hermes API bearer token. Global. Sent on HTTP requests, not in a shell environment."),
+  KnownGlobalSecret(name: "GROKBOT_WEBHOOK_URL", help: "Grok Bot webhook URL from the Omni OS requests routine. Global. Send to Grok Bot posts here. Stays on the server."),
+  KnownGlobalSecret(name: "GROKBOT_WEBHOOK_AUTH", help: "Authorization value for that webhook, pasted as Grok Bot shows it. Global. Stays on the server."),
+]
+
 /// The Secrets tab, like the Web UI's Secrets page. A new model per client and per visit: it loads the list
 /// fresh, and a value typed and not saved goes when the tab or the window closes.
 struct SecretsSettings: View {
@@ -37,7 +50,7 @@ struct SecretsForm: View {
     SettingsPage {
       SettingsIntro(
         icon: "lock",
-        text: Text("Values live in the Keychain under the service \(Text("omni-os").monospaced()) and are injected as environment variables when a thread runs. A channel secret overrides a global one with the same name. Omni never shows a value again after you save it; to change one, save it again with the same name.")
+        text: Text("Values live in the Keychain under the service \(Text("omni-os").monospaced()). A thread gets them as environment variables when it runs. A channel secret overrides a global one with the same name. Sync credentials and the Grok Bot webhook stay on the server, so a thread never sees them. Omni never shows a value again after you save it. To change one, save it again with the same name.")
       )
 
       SettingsCard(title: "Add or replace") {
@@ -64,18 +77,22 @@ struct SecretsForm: View {
             .autocorrectionDisabled()
             .onSubmit { valueFocused = true }
           if secrets.name.isEmpty {
-            Button {
-              secrets.scope = .global
-              secrets.name = "HERMES_API_KEY"
-              valueFocused = true
-            } label: {
-              HStack(spacing: z(6)) {
-                OmniIcon(name: "key", size: 12)
-                Text("Use HERMES_API_KEY")
+            VStack(alignment: .leading, spacing: z(6)) {
+              ForEach(knownGlobalSecrets) { known in
+                Button {
+                  secrets.scope = .global
+                  secrets.name = known.name
+                  valueFocused = true
+                } label: {
+                  HStack(spacing: z(6)) {
+                    OmniIcon(name: "key", size: 12)
+                    Text("Use \(known.name)")
+                  }
+                }
+                .buttonStyle(.pill(.ghost, height: 28))
+                .help(known.help)
               }
             }
-            .buttonStyle(.pill(.ghost, height: 28))
-            .help("The Hermes API bearer token. Global. Sent on HTTP requests, not in a shell environment.")
             .padding(.top, z(8))
           }
         }

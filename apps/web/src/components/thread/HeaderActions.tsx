@@ -4,7 +4,7 @@ import { canMarkDone } from '../../needs-you.ts';
 import { openMenu } from '../ContextMenu.tsx';
 import { Button, IconButton, StatusPill } from '../ui.tsx';
 
-// Below this header width (the side panel open, a small window) pin, done and hand off fold into one More button and
+// Below this header width (the side panel open, a small window) pin, done, hand off and Send to Grok Bot fold into one More button and
 // Interrupt drops its label, so the title keeps its room. The header is the @container; 3xl is 48rem.
 export const FOLD = '@max-3xl:hidden';
 export const UNFOLD = '@3xl:hidden';
@@ -18,6 +18,7 @@ export function HeaderActions({
   onDone,
   onRestore,
   restoring,
+  grok,
   interrupt,
   panelOpen,
   onPanel,
@@ -31,6 +32,7 @@ export function HeaderActions({
   onDone: () => void;
   onRestore: () => void;
   restoring: boolean;
+  grok: { busy: boolean; run: () => void };
   /** Set while a turn runs that can be interrupted. */
   interrupt: { busy: boolean; run: () => void } | null;
   panelOpen: boolean;
@@ -78,6 +80,9 @@ export function HeaderActions({
           Restore
         </Button>
       )}
+      <Button size="sm" variant="ghost" icon="external" busy={grok.busy} title="Send this thread's text to Grok Bot" className={FOLD} onClick={grok.run}>
+        Send to Grok Bot
+      </Button>
       <StatusPill status={thread.status} />
       {handoffReady && (
         <IconButton
@@ -89,7 +94,7 @@ export function HeaderActions({
           onClick={(e) => menuAt(e.currentTarget, true)}
         />
       )}
-      {/* The thread menu holds pin, done and hand off, and more. */}
+      {/* The thread menu holds pin, done, hand off and Send to Grok Bot, and more. */}
       {!archived && <IconButton icon="more" label="Thread actions" aria-haspopup="menu" className={UNFOLD} onClick={(e) => menuAt(e.currentTarget)} />}
       {interrupt && (
         <Button

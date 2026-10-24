@@ -33,3 +33,7 @@ To continue a thread in a terminal or Claude Desktop: `cd <cwd> && claude --resu
 - **GitHub panel**: in a repo channel, PRs, checks, diff and merge (with confirm). Threads whose branch has an open or merged PR get a PR icon in the thread list.
 
 How the process behind a thread is launched: [Architecture overview](../internals/overview.md#how-a-thread-runs).
+
+## Send to Grok Bot
+
+The thread header and the right-click menu send the title and the messages. On a phone, Thread options has the same action. The context is the channel id and the thread id. The Conductor tool is `send_to_grok_bot`. Where the webhook URL and Authorization value go: [Configuration](configuration.md#grok-bot).

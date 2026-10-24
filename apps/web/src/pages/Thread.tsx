@@ -17,7 +17,9 @@ import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { HeaderActions } from '../components/thread/HeaderActions.tsx';
 import { Avatar, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, Tabs } from '../components/ui.tsx';
 import { href } from '../router.ts';
+import { sendThreadToGrokBot } from '../grokbot.ts';
 import { blockedNote } from '../handoff.ts';
+import { useToast } from '../components/Toaster.tsx';
 import { shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
@@ -99,6 +101,9 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
   });
   const [prBusy, setPrBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [grokBusy, setGrokBusy] = useState(false);
+  const grokLock = useRef(false);
+  const toast = useToast();
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootWidth, setRootWidth] = useState(0);
 
@@ -220,6 +225,18 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
     }
   };
 
+  const sendGrok = async () => {
+    if (grokLock.current) return;
+    grokLock.current = true;
+    setGrokBusy(true);
+    setActionError(null);
+    const result = await sendThreadToGrokBot(thread.id);
+    grokLock.current = false;
+    setGrokBusy(false);
+    if (result.ok) toast({ title: 'Sent to Grok Bot', icon: 'external' });
+    else setActionError(result.error);
+  };
+
   const togglePanel = () =>
     setPanelOpen((v) => {
       writePref('threadPanel', !v);
@@ -309,6 +326,7 @@ export function ThreadPage({ id, artifact: artifactParam }: { id: string; artifa
             onDone={() => void toggleDone()}
             onRestore={() => void restore()}
             restoring={restoring}
+            grok={{ busy: grokBusy, run: () => void sendGrok() }}
             // Nothing runs while the worktree is prepared, so there is nothing to interrupt.
             interrupt={slotBusy && !thread.setup ? { busy: interrupting, run: () => void interrupt() } : null}
             panelOpen={panelOpen}
