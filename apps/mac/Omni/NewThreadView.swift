@@ -81,6 +81,11 @@ private struct NewThreadBox: View {
           composer.text = $0
           focusTick += 1
         },
+        run: { run throws(QAScriptError) in
+          guard !composer.sending else { throw QAScriptError("the new thread is sending") }
+          composer.selectModel(harness: run.harness, model: run.model)
+          composer.selectEffort(run.effort)
+        },
         send: { _ throws(QAScriptError) in
           guard composer.canSend else { throw QAScriptError("the new thread box has nothing to send") }
           guard let t = await composer.send() else { throw QAScriptError(composer.sendError ?? "the send failed") }
