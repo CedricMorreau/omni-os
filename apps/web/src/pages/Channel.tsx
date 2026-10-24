@@ -19,7 +19,7 @@ function ThreadsTab({ id, isConductor }: { id: string; isConductor: boolean }) {
   const { channel, needsYou } = useApp();
   return (
     <div className="mx-auto max-w-3xl px-4 pt-6 pb-16 md:px-8">
-      <NewThreadComposer key={presetSeq} channelId={id} placeholder={isConductor ? 'Ask the Conductor. It delegates to the crew.' : undefined} />
+      <NewThreadComposer key={`${id}:${presetSeq}`} channelId={id} placeholder={isConductor ? 'Ask the Conductor. It delegates to the crew.' : undefined} />
       <NeedsYouSection inbox={inChannel(needsYou, id)} quiet />
       <div className="mt-8">
         <ThreadGroups

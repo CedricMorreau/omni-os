@@ -4,7 +4,8 @@ import { HarnessLogo, OmniMark } from '../components/brand.tsx';
 import { AttachmentStrip, useAttachments } from '../components/Composer.tsx';
 import type { ModelChoice } from '../components/ModelPicker.tsx';
 import { Avatar, ErrorNote } from '../components/ui.tsx';
-import { channelRun, runPreselect } from '../new-thread-preset.ts';
+import { draftRun, draftRunRequest } from '../new-thread-preset.ts';
+import { asksAuto } from '../thread-run.ts';
 import { href } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { useDictation, withPhrase } from './dictation.ts';
@@ -44,8 +45,12 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
   const ch = conductor ? undefined : listed.find((c) => c.id === target);
   const role = conductor && crew.some((r) => r.id === 'conductor') ? 'conductor' : '';
   const ro = crew.find((r) => r.id === role);
-  const auto = harnesses ? runPreselect(ro && { harness: ro.harness, model: ro.model, effort: ro.effort }, channelRun(channels.find((c) => c.id === target)), harnesses) : null;
-  const run = picked?.target === target ? picked : auto;
+  const run = harnesses ? draftRun(picked?.target === target ? picked : null, ro, channels.find((c) => c.id === target), harnesses) : null;
+  const onTarget = (next: string) => {
+    if (next === target) return;
+    setTarget(next);
+    setPicked(null);
+  };
   const close = () => shell.sheet(null);
 
   const send = async () => {
@@ -60,9 +65,7 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
           channel: target,
           prompt,
           role: role || undefined,
-          harness: run?.choice.harness,
-          model: run?.choice.model || undefined,
-          effort: run?.effort || undefined,
+          ...draftRunRequest(picked?.target === target ? run : null),
         },
         att.files,
       );
@@ -84,14 +87,14 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
           <span className="w-[60px]" />
         </div>
         <div ref={strip} className="mo-scroll flex shrink-0 gap-2 overflow-x-auto px-4 pb-3">
-          <button type="button" onClick={() => setTarget('conductor')} className={pill(conductor)} aria-pressed={conductor}>
+          <button type="button" onClick={() => onTarget('conductor')} className={pill(conductor)} aria-pressed={conductor}>
             <span className="grid h-6 w-6 place-items-center rounded-full bg-bg text-fg">
               <OmniMark size={18} />
             </span>
             Conductor
           </button>
           {listed.map((c) => (
-            <button key={c.id} type="button" onClick={() => setTarget(c.id)} className={pill(target === c.id)} aria-pressed={target === c.id}>
+            <button key={c.id} type="button" onClick={() => onTarget(c.id)} className={pill(target === c.id)} aria-pressed={target === c.id}>
               <Avatar name={c.name} channelIcon={c.icon} size={24} />#{c.name}
             </button>
           ))}
@@ -129,7 +132,7 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
               disabled={!harnesses}
               className="mo-press inline-flex h-10 min-w-0 items-center gap-[7px] rounded-full bg-surface-2 px-3 text-[13px] font-medium text-fg disabled:opacity-40"
             >
-              {run && <HarnessLogo harness={run.choice.harness} size={13} />}
+              {run && (asksAuto(run.choice) ? <OmniMark size={15} /> : <HarnessLogo harness={run.choice.harness} size={13} />)}
               <span className="truncate">{run ? runLabel(harnesses, run.choice, run.effort) : 'Model'}</span>
             </button>
             <span className="flex-1" />

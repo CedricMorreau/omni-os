@@ -49,6 +49,7 @@ Auto is the first entry in the model picker and the default for a new thread. Om
 - "Quick", "fast", "asap" and the like lower the effort a step on any harness. For code, they also move the thread to Cursor's Composer, a fast and cheap coding model, as does a mechanical change across many files ("rename X across the repo"). Not for the hardest tasks, and not when the first message has images, which Cursor Agent cannot see.
 - Composer only runs while Cursor's Auto and Composer usage is under 90%. Auto never picks Grok, Gemini or Cursor's other named models, or Hermes: see [Auto routing](../internals/auto-routing.md#lanes) for why.
 - A model picked on the thread, a crew role's or a channel's default all win over Auto. Set a channel's default to Auto in its settings, or `model: auto` in a crew role's frontmatter.
+- In #conductor, a saved channel default takes precedence over the Conductor role's charter. New thread follows saved settings until you pick a model or effort for that draft. Other crew roles keep their own defaults ahead of the channel's.
 - How well it picks, and how to check that again: [Auto routing](../internals/auto-routing.md).
 
 ## Hermes (remote)

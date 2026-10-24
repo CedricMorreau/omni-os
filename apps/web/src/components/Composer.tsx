@@ -12,8 +12,8 @@ import { SlashMenu, optionId, useCommands } from './SlashMenu.tsx';
 import { FileMenu, useFileMenu } from './FileMenu.tsx';
 import { mentionSections, menuSections, pickCommand, rowKey, slashQuery } from '@omni/shared/slash-menu.ts';
 import { menuCommands, newThreadHint, replySlash } from '@omni/shared/composer-slash.ts';
-import { channelRun, newThreadBody, otherModel, runPreselect, sameSettings } from '../new-thread-preset.ts';
-import { AUTO, asksAuto } from '../thread-run.ts';
+import { draftRun, draftRunRequest, newThreadBody, otherModel, sameSettings, type DraftRun } from '../new-thread-preset.ts';
+import { asksAuto } from '../thread-run.ts';
 import { parseSlash, type SlashCommand } from '@omni/shared/slash.ts';
 import { requestIdFor, sendKey, type PendingRequest } from '../requests.ts';
 
@@ -417,8 +417,7 @@ export function NewThreadComposer({
   const [text, setText] = useState(() => preset?.prompt ?? drafts.get(key) ?? '');
   const [channel, setChannel] = useState(channelId ?? defaultChannel);
   const [role, setRole] = useState<string>(() => preset?.role ?? ((channelId ?? defaultChannel) === 'conductor' ? 'conductor' : ''));
-  const [choice, setChoice] = useState<ModelChoice>(() => preset?.choice ?? { harness: 'claude-code', model: '' });
-  const [effort, setEffort] = useState(preset?.effort ?? '');
+  const [picked, setPicked] = useState<DraftRun | null>(() => preset?.choice ? { choice: preset.choice, effort: preset.effort ?? '' } : null);
   // "New thread here" on a sidebar folder files the thread in it, until Ben takes it out.
   const [folder, setFolder] = useState(preset?.folder ?? null);
   const { data: harnesses, reload: reloadHarnesses } = useApi<HarnessWithRunning[]>('/harnesses');
@@ -429,32 +428,7 @@ export function NewThreadComposer({
   useAutosize(ref, text, big ? 360 : 260);
   useFocusRequests(ref, true);
 
-  useEffect(() => {
-    if (!channelId || channelId === channel) return;
-    setChannel(channelId);
-    preselect(role, channelId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelId]);
-
-  // Preselect the role's run defaults, else the channel's, else Auto.
-  const preselect = (r: string, c: string) => {
-    if (!harnesses) return;
-    const ro = crew.find((x) => x.id === r);
-    const run = runPreselect(ro && { harness: ro.harness, model: ro.model, effort: ro.effort }, channelRun(channels.find((x) => x.id === c)), harnesses);
-    setChoice(run.choice);
-    setEffort(run.effort);
-  };
-
-  // A new composer starts on those defaults (unless a preset says), not on the last pick.
-  useEffect(() => {
-    if (!harnesses || choice.model) return;
-    if (preset?.choice) {
-      const h = harnesses.find((x) => x.id === choice.harness);
-      const def = h?.models.find((m) => m.default) ?? h?.models[0];
-      if (def) setChoice({ harness: choice.harness, model: def.id });
-    } else preselect(role, channel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [harnesses]);
+  const { choice, effort } = draftRun(picked, crew.find((r) => r.id === role), channels.find((c) => c.id === channel), harnesses ?? []);
 
   // Default the role once crew loads, if the conductor channel is selected. A preset keeps its own.
   useEffect(() => {
@@ -471,7 +445,7 @@ export function NewThreadComposer({
     const rc = roleObj?.channel;
     const next = !channelId && rc && channels.some((c) => c.id === rc) ? rc : channel;
     setChannel(next);
-    preselect(r, next);
+    setPicked(null);
   };
   const onChannel = (c: string) => {
     setChannel(c);
@@ -479,7 +453,7 @@ export function NewThreadComposer({
     if (c === 'conductor' && !role && crew.some((x) => x.id === 'conductor')) r = 'conductor';
     if (c !== 'conductor' && role === 'conductor') r = '';
     setRole(r);
-    preselect(r, c);
+    setPicked(null);
   };
 
   const update = (v: string) => {
@@ -517,7 +491,7 @@ export function NewThreadComposer({
           channel,
           prompt,
           role: role || undefined,
-          ...(auto ? { model: AUTO } : { harness: choice.harness, model: choice.model || undefined, effort: effort || undefined }),
+          ...draftRunRequest(picked ? { choice, effort } : null),
           folder: folder && channel === preset?.channel ? folder.id : undefined,
         },
         att.files,
@@ -575,12 +549,11 @@ export function NewThreadComposer({
             defaultOpen={preset?.pickModel}
             value={choice}
             onChange={(c) => {
-              setChoice(c);
-              setEffort(''); // changing the model resets effort to the default
+              setPicked({ choice: c, effort: '' }); // changing the model resets effort to the default
             }}
           />
         )}
-        {harnesses && <EffortPicker harnesses={harnesses} choice={choice} value={effort} onChange={setEffort} />}
+        {harnesses && <EffortPicker harnesses={harnesses} choice={choice} value={effort} onChange={(effort) => setPicked({ choice, effort })} />}
         <AttachButton onPick={att.add} disabled={busy} />
         {folder && channel === preset?.channel && (
           <button
