@@ -152,6 +152,7 @@ private struct ThreadHeader: View {
       if ContextMeter.metered.contains(thread.harness) {
         ContextMeterButton(model: model, store: store, thread: thread)
       }
+      HandOffButton(model: model, store: store)
       if !thread.archived {
         let on = thread.pinnedAt != nil
         Button {
@@ -472,6 +473,9 @@ private struct TranscriptRows: View {
       }
       if let t = store.thread, t.limit != nil {
         LimitCard(model: model, store: store, thread: t)
+      }
+      if let h = store.handoff {
+        HandoffCard(store: store, handoff: h)
       }
       if store.pending.contains(where: { !$0.isParked }) {
         QueuedMessagesView(

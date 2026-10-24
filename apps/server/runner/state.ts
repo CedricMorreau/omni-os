@@ -142,6 +142,8 @@ export interface Live {
   handover?: { uuid: string; done: HandoverP };
   /** A handover still waits for a message that is not a command: the next one sent carries it. */
   handoverDue?: boolean;
+  /** Set while the thread is handed to another Mac (session.ts releaseForHandoff): what the process never read goes here, not dropped. */
+  released?: Msg[];
 }
 
 /** A sub-agent, background shell or workflow still running in some thread's process. */
@@ -337,6 +339,12 @@ export function drop(threadId: string, msgs: Msg[]) {
     track(m, 'dropped');
     addEvent(threadId, m.event.kind, { ...eventPayload(m), dropped: true });
   }
+}
+
+/** Messages this process will never read: kept for the Mac the thread is handed to, else dropped. */
+export function unread(live: Live, msgs: Msg[]) {
+  if (live.released) live.released.push(...msgs);
+  else drop(live.threadId, msgs);
 }
 
 /** startup: no child yet, or init has not arrived. running: the CLI has begun a turn. */

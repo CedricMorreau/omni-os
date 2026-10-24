@@ -10,7 +10,7 @@ import './runner/setup.ts';
 import './runner/limits.ts';
 import './runner/switch.ts';
 
-export type { ActiveTask, ModStatus, PendingMsg, SendMode } from './runner/state.ts';
+export type { ActiveTask, ModStatus, Msg, PendingMsg, SendMode } from './runner/state.ts';
 export type { Acceptance, CreateThreadInput, PostedThread } from './runner/api.ts';
 
 export {
@@ -29,9 +29,9 @@ export {
 
 export { acceptedAgain, createTeam, createThread, discardRequests, postMessage, resumeRequests, sendMessage } from './runner/api.ts';
 export { ALREADY_SENT, cancelRequests, editRequest, reorderRequests, steerRequests } from './runner/pending.ts';
-export { interruptThread, shutdownAll, stopThread } from './runner/session.ts';
+export { interruptThread, releaseForHandoff, shutdownAll, stopThread } from './runner/session.ts';
 export { retrySetup } from './runner/setup.ts';
 export { switchRun } from './runner/switch.ts';
 export { cancelLimitResume, clearLimit, fireDue, limitClock, resumeLimitNow, scheduleLimitResume, startLimits } from './runner/limits.ts';
-export { reportToParent, settleTeam } from './runner/queue.ts';
+export { reportToParent, saveOwn, settleTeam, wake } from './runner/queue.ts';
 export { buildSystemPrompt } from './runner/prompts.ts';

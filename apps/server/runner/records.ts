@@ -21,6 +21,7 @@ import {
   publishMods,
   send,
   track,
+  unread,
   type Live,
 } from './state.ts';
 
@@ -251,7 +252,7 @@ export function onExit(live: Live, code: number | null, signal: NodeJS.Signals |
       const how = code === null ? `signal ${signal}` : `code ${code}`;
       addEvent(id, 'error', { text: `${cliLabel(thread.harness)} exited with ${how}.\n${live.stderr.trim().slice(-2000)}` });
     }
-    drop(id, undelivered);
+    unread(live, undelivered);
     threads.update(id, {
       status,
       // Once the CLI has written the session file, later messages must --resume it.
