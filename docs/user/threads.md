@@ -22,6 +22,32 @@ Files can ride along with a message (paperclip, drag-and-drop or paste). They la
 
 To continue a thread in a terminal or Claude Desktop: `cd <cwd> && claude --resume <session id>` (the thread's Details panel has a copy button). Check there that the session is no longer warm first, so two processes do not write the same session.
 
+## Point the agent at lines of a diff
+
+In a thread's Changes panel (desktop, phone and the Mac app), click a line number to pick it and shift-click another in the same hunk to pick the lines between (on a phone, tap a line, then tap another). Write a note and press **Add to message**: the lines and the note go into the reply box as a chip, next to whatever you have typed. Click a chip to see what it holds, x to take it out. A message can be just chips.
+
+The agent gets the lines as you saw them, with the path, the line numbers, the commits they were compared at and your note, and is told when the file has changed since you picked them. Your message in the thread keeps the lines exactly as you sent them. It is feedback for this thread only, not a GitHub review. Hermes and Cursor Cloud threads have no Changes panel; a message with lines in it tells them the file is on your Mac. How it works: [Message context](../internals/message-context.md).
+
+## Point the agent at terminal output
+
+In a thread's Terminal tab (desktop and the Mac app), select output with the mouse as usual. A panel opens over the terminal's foot: write a note and press **Add to message**, and the selected text goes into the reply box as a chip, next to whatever you have typed. Copy and paste work as before, and Esc in the panel clears the selection. On a phone the terminal is read only and can't be dragged over: tap a line, then tap another to take the lines between, then Add to message. A message can be just chips.
+
+The chip is a snapshot of the text, the directory the shell started in, the shell's process id and the time you added it. It stays as it was when the terminal scrolls on, restarts or the shell exits. The agent gets the text as plain text and is told it was not run: escape sequences are dropped when you add it, and output that holds Omni's own block tags can't pass for them. Up to 200 lines and 8,000 characters at once; more is refused rather than cut. How it works: [Message context](../internals/message-context.md).
+
+## Point the agent at part of a web page
+
+In a thread's Browser panel (desktop, the Mac app and the phone's Browser screen), press **Annotate**. Omni screenshots the channel's own browser, the same session the agent drives, and shows that screenshot in place of the live view. Drag over the part of the page you mean, or tap an element to pick it, write a note and press **Add to message**: a chip goes into the reply box, and opening it shows the screenshot with your area outlined, the page's address and title, and when you took it. The page is only read, never clicked, navigated or changed. Esc or Cancel leaves without adding.
+
+If the page navigates, the tab changes, the browser is resized or the page scrolls while the screenshot is taken, Omni says so and offers **Try again**, so the area is never drawn on a different page than the one it describes. The screenshot is kept as a file in the thread, so the chip survives a reload (the web keeps unsent chips in this browser) and shows in the sent message. The agent gets the page's address and title, the viewport, and the area in page pixels, with the screenshot as an image: Claude Code and Codex see it, Cursor reads the file from the path it is given, and an agent on another machine (Hermes, Cursor Cloud) is told the file is on your Mac. A screenshot that has gone missing is stated, not skipped.
+
+**Picking an element.** A tap on the screenshot (rather than a drag) asks the page what element is under that spot, marks its box, and shows its tag, selector, text and a short excerpt of its markup under **Details** before you add it. The agent gets that same excerpt, quoted as data from the page. It is bounded (600 characters of text, 2,000 of markup, four parent tags), never holds what you typed into a field, and leaves a link's query and fragment out. If the page has moved on since the screenshot, the spot is in a frame from another site, or the page cannot be read, Omni says so and the screenshot and any area you drag still go with the message, without the element. How it works: [Message context](../internals/message-context.md).
+
+## Point the agent at another thread
+
+In a reply box, press the **Reference another thread** button (the speech bubble next to the paperclip on desktop and the Mac app, or **Reference a thread** under + on a phone). Search by title or channel and pick a thread: it goes into the reply box as a chip, next to whatever you have typed, and x takes it out. The search lists this channel's threads. **All channels** lists the others, and a thread from another channel is attached only when you pick it there; it is marked "other channel". Two threads with one title are told apart by the start of their id.
+
+The chip holds the thread's title, channel and id as they were when you sent the message, so renaming or archiving it later changes nothing in a sent message. Click it to see them, and **Open thread** to go there. Attaching a thread does not message it, start it or change it, and none of its messages go into yours: the agent is told the thread exists and reads its history only when it needs to, with the `read_referenced_thread` tool, one page at a time (at most 100 messages and 60,000 characters). That tool reads only a thread you attached to a message of that thread, and says so when it is gone. Claude Code, Codex, Cursor and the conductor have it; Hermes and Cursor Cloud threads run elsewhere, so they are told the reference only. A message can be just chips. How it works: [Message context](../internals/message-context.md#thread-references).
+
 ## When the agent asks you
 
 An agent can stop and ask you one to four multiple-choice questions with Omni's `ask_user_question` tool. Every Claude Code, Codex and Cursor thread has it (the `omni-ask` MCP server); Hermes threads have no MCP servers, so not there. Claude Code's own AskUserQuestion is turned off in Omni, because nothing can answer it in a headless run.
@@ -33,15 +59,30 @@ An agent can stop and ask you one to four multiple-choice questions with Omni's 
 
 ## What a thread gets
 
-- **Worktree**: in a repo channel, its own git worktree on branch `omni/<id>`. It is removed once nothing in it can be lost ([Known limits](limits.md)).
+- **Worktree**: in a repo channel, its own git worktree on branch `omni/<id>`. It is removed once nothing in it can be lost ([Known limits](limits.md)). While it is prepared, the thread shows each step (checkout, the channel's setup action if it has one, then the agent) with the setup's output and a Stop button ([Configuration](configuration.md#channel-actions)).
+- **Base**: the commit that branch starts from. The new-thread composer shows the repo's current commit as the default ("From main · a1b2c3d") and lets you pick another branch or tag, or the remote default branch. The remote default is fetched first, and the repo's own checkout and branches never move. The thread keeps the commit it resolved, and the Changes tab compares to it, so a branch that moves later changes nothing. If the fetch fails (offline, no access), the thread stops at "Setup failed" with the reason and your message kept, and Retry tries again. Threads started by a channel, crew role or automation without a choice start from the repo's current commit, as before. Hermes and Cursor Cloud threads have no worktree here, so no base.
 - **Browser**: the channel's persistent Chrome (logins survive), shown live in the thread's Browser panel. You can click and type in it too.
 - **Terminal tab**: a real shell (PTY) in the thread's working directory.
+- **Actions tab**: the channel's named actions (Theme preview, Theme check, Tests) with a Run button each, and the thread's last 20 runs. A run starts only when you press Run or Retry, in the thread's checkout once it is verified (a worktree thread's own worktree on its own branch, never the repo itself). It shows Running, Succeeded, Failed or Stopped, the exit code, and the last 64 KB of its output. Stop ends the whole process group (SIGTERM, then SIGKILL after 5 seconds). Runs left running when Omni stopped show as Stopped. Hermes and Cursor Cloud threads can't run actions: there is no checkout on this Mac. On the phone, open it from the thread's menu ([Configuration](configuration.md#channel-actions)).
 - **Secrets**: global and channel secrets from the Keychain, as env vars ([Configuration](configuration.md#secrets)).
 - **Artifacts**: anything the agent writes to its artifacts dir renders inline in the thread, and on the Artifacts page across channels.
 - **Published artifacts**: a page a Claude Code thread publishes to claude.ai with its Artifact tool shows as a card in the thread, linked to its local file. The channel's pages go into later threads' system prompt, so an update lands at the same URL. "Check comments" (or the `artifact-comments` automation) hands a page's comments back to the thread that made it.
 - **GitHub panel**: in a repo channel, PRs, checks, diff and merge (with confirm). Threads whose branch has an open or merged PR get a PR icon in the thread list.
 
 How the process behind a thread is launched: [Architecture overview](../internals/overview.md#how-a-thread-runs).
+
+## Watch PR
+
+A thread with an open PR can watch its checks and its reviews: **Watch PR** in the composer's PR menu (on the phone, the PR screen), or the Conductor's `watch_pr` tool. Omni polls GitHub itself, so no client needs to be open and an unchanged poll costs no agent turn.
+
+- A check that fails on the PR head wakes the thread once, with the head commit, the failing checks and the tail of each GitHub Actions log. The same check failing again on the same head, after a re-run, does not wake it again; failing on a new head does.
+- New review feedback from someone else wakes it too: a review that says something or asks for changes, an inline comment, a conversation comment. One wake carries everything new since the last poll, with each author, a link, the head the comment was written on and an excerpt (the first eight with their text, the rest by link). Only feedback written after the watch started counts.
+- Your own comments (the account `gh` is signed in as) never wake it, so the agent replying on the PR cannot start a loop. Comments from people with no history in the repo are ignored; bots count. A person editing a comment to new words wakes it once more; a bot editing its own comment does not, and neither does an edit back to words it already woke for.
+- Comment text is quoted to the agent as input to weigh, not as instructions from you.
+- The wake is saved before it is sent, like any queued message. One saved before a restart waits in the thread for Resume. A thread this Mac cannot run (it runs on your other Mac, its worktree is not ready) gets it held for Resume too.
+- Polls come every minute while checks run and slow to every 15 minutes while nothing changes. GitHub errors back off, and five in a row stop the watch. A rate limit pauses every watch for 15 minutes without counting as an error.
+- A watch ends when you stop it, the PR merges or closes, the thread is archived, it has woken the thread five times, or three times for review comments alone with no failing check in the wake. The PR menu says which; Watch PR starts it again with fresh budgets. Starting a watch that is already running changes nothing.
+- Watches live on the Mac that started them and are not synced.
 
 ## Send to Grok Bot
 

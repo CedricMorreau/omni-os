@@ -13,13 +13,15 @@ Each Claude Code thread gets one long-lived `claude -p --input-format stream-jso
 | cwd | worktree `data/worktrees/<thread>` on branch `omni/<id>` (repo channels), else the channel base dir, else your workspace folder |
 | context | your workspace folder added with `--add-dir`, its CLAUDE.md loaded, all your user skills and MCP servers |
 | system prompt | channel facts (store, Portal slug, repo, notes), artifacts and browser rules, the channel's design system file, the crew role charter |
-| MCP | `omni-browser` (`@playwright/mcp` at the exact version in `apps/server/package.json`, run by `node` from Omni's install, never `npx`; attached over CDP to the channel's Chrome that Omni runs, profile in `data/browsers/<channel>`); `omni-ask` (`apps/mcp/ask.ts`, the `ask_user_question` tool), which Claude Code, Codex and Cursor threads all get; conductor also gets `omni` |
+| MCP | `omni-browser` (`@playwright/mcp` at the exact version in `apps/server/package.json`, run by `node` from Omni's install, never `npx`; attached over CDP to the channel's Chrome that Omni runs, profile in `data/browsers/<channel>`); `omni-ask` (`apps/mcp/ask.ts`, the `ask_user_question` tool) and `omni-threads` (`apps/mcp/threads.ts`, `read_referenced_thread`), which Claude Code, Codex and Cursor threads all get; conductor also gets `omni`, which has `read_referenced_thread` itself |
 | env | `OMNI_THREAD_ID`, `OMNI_ARTIFACTS_DIR`, `OMNI_URL`, `OMNI_TOKEN` (the API token), plus global and channel secrets |
 | session | `--session-id` on the first run, `--resume` after, so every follow-up keeps full context. A switch to another harness and back resumes it with a handover of what it missed (`apps/server/runner/switch.ts`) |
 
 Codex threads run on `codex app-server` (ADR 0001) and Cursor threads on `cursor-agent`, each through an adapter in `apps/server/harness/` that turns its stream into the same events. Hermes is below. Cursor Cloud threads are Cursor cloud agents: `harness/cursor-cloud/` launches one through the Cloud Agents API and reads its run until it ends (docs/user/harnesses.md#cursor-cloud).
 
 Every stream event is stored in SQLite (`data/omni.db`) and pushed to the UI over SSE. The usage meter is per harness: Claude's rate-limit events drive the 5h / 7d meter, Codex reports its own, Cursor reports none.
+
+Both clients open a thread with `GET /api/threads/:id?history=recent`: its newest page of events, within a row and byte budget. Older pages come from `GET /api/threads/:id/history` as Ben scrolls up or opens a search hit. The stream then sends only rows after the newest one held. A `tool_result` travels as its first 1,024 characters and its size, and the open row loads the rest in chunks and follows a running command's tail. The budgets, cursors, compact tool output and the rows a page carries from outside it are in [Thread history](thread-history.md).
 
 Durable messages: a message is saved as a request before the client hears it was accepted, so a restart parks it instead of losing it. The states are in [CONTEXT.md](../../CONTEXT.md) under Delivery state.
 
@@ -48,14 +50,14 @@ An npm workspaces monorepo run with Turborepo (`turbo.json`). Each app and packa
 apps/server/                @omni/server: Hono API (*-api.ts), runner/, harness/ (claude, codex, cursor,
                             hermes adapters), db/, sync/, sandbox, secrets, terminal, browser, artifacts,
                             GitHub, scheduler; scripts/ for history import and sync backfill
-apps/mcp/                   @omni/mcp: omni.ts, the conductor tools; ask.ts, ask_user_question for every thread
+apps/mcp/                   @omni/mcp: omni.ts, the conductor tools; ask.ts, ask_user_question for every thread; threads.ts, read_referenced_thread for every thread but the conductor's
 apps/web/                   @omni/web: Web UI (React, Vite)
 apps/mac/                   @omni/mac: SwiftUI app (Omni/), OmniKit package, slash engine entry and bundler
 packages/shared/            @omni/shared: pure TypeScript both clients use (slash grammar, menu, pills)
 packages/test-fixtures/     @omni/test-fixtures: fake CLIs and corpora the TS and Swift tests share
 packages/typescript-config/ @omni/typescript-config: the tsconfig bases every package extends
 crew/                       shared role charters (yours override them from data/crew/)
-automations/                shared automation YAML, cron or PR events (yours go in data/automations/)
+automations/                shared automation YAML, cron or events (yours go in data/automations/)
 omni.config.example.json    every field of data/omni.config.json
 mods/                       Claude Code mods loaded with OMNI_MODS=1 (omni-progress)
 scripts/                    shell shim, Mac build, QA stack, PR screenshots, launchd install
