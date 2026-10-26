@@ -147,7 +147,8 @@ export const cursorAdapter: HarnessAdapter = {
           chatId = parsed.sessionId;
           if (chatId !== thread.session_id) cb.session(chatId);
         }
-        // A call Cursor rejects up front only completes. Open it first so its result has a named call.
+        // Cursor sends only the completion for a call it rejects before running (a glob that matches
+        // everything), so the result would have no row naming its tool. Open it first.
         if (parsed.use?.kind === 'tool_use' && !opened.has(parsed.use.payload.id)) parsed.records.unshift(parsed.use);
         for (const r of parsed.records) {
           if (r.kind === 'tool_use') opened.add(r.payload.id);
