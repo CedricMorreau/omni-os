@@ -448,14 +448,20 @@ private struct HoverChrome<Content: View>: View {
   }
 }
 
-/// The sidebar's right edge: drag it to make the sidebar 200 to 420pt wide, double-click it to put it back.
+/// A panel edge: drag to resize within its bounds, double-click to restore the initial width.
 struct SidebarResizeHandle: View {
   @Binding var width: Double
   let initial: CGFloat
+  var minimum = 200.0
+  var maximum = 420.0
+  var growsLeft = false
+  var label = "Resize sidebar"
   @State private var start: Double?
   @State private var hover = false
 
   static func clamp(_ w: Double) -> CGFloat { CGFloat(min(420, max(200, w))).rounded() }
+
+  private func clamped(_ w: Double) -> Double { min(maximum, max(minimum, w)) }
 
   var body: some View {
     Rectangle()
@@ -468,26 +474,26 @@ struct SidebarResizeHandle: View {
           .opacity(hover || start != nil ? 1 : 0)
       }
       .contentShape(Rectangle())
-      .offset(x: 4)
+      .offset(x: growsLeft ? -4 : 4)
       .pointerStyle(.columnResize)
       .onHover { hover = $0 }
       .gesture(
         DragGesture(minimumDistance: 1, coordinateSpace: .global)
           .onChanged { g in
-            let from = start ?? Double(Self.clamp(width))
+            let from = start ?? clamped(width)
             start = from
-            width = Double(Self.clamp(from + g.translation.width / UIZoom.settings.scale))
+            width = clamped(from + (growsLeft ? -1 : 1) * g.translation.width / UIZoom.settings.scale)
           }
           .onEnded { _ in start = nil })
-      .onTapGesture(count: 2) { width = Double(initial) }
+      .onTapGesture(count: 2) { width = clamped(Double(initial)) }
       .help("Drag to resize. Double-click to reset.")
       .accessibilityElement()
-      .accessibilityLabel("Resize sidebar")
-      .accessibilityValue("\(Int(Self.clamp(width))) points")
+      .accessibilityLabel(label)
+      .accessibilityValue("\(Int(clamped(width))) points")
       .accessibilityAdjustableAction { dir in
         switch dir {
-        case .increment: width = Double(Self.clamp(width + 16))
-        case .decrement: width = Double(Self.clamp(width - 16))
+        case .increment: width = clamped(clamped(width) + 16)
+        case .decrement: width = clamped(clamped(width) - 16)
         @unknown default: break
         }
       }
