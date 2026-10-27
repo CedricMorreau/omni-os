@@ -17,11 +17,7 @@ private struct ThreadInspector: ViewModifier {
   let store: ThreadStore
   @AppStorage(inspectorOpenKey) private var open = true
   @State private var selection: InspectorSelection
-  /// Presenting the inspector in the same pass that puts the thread on screen loops the window's layout and
-  /// traps, so it comes one beat after.
-  @State private var settled = false
-  @Environment(\.paneTop) private var paneTop
-  @State private var contentTop: CGFloat?
+  @AppStorage("threadInspector.width") private var width = 360.0
 
   init(model: AppModel, store: ThreadStore) {
     self.model = model
@@ -35,79 +31,88 @@ private struct ThreadInspector: ViewModifier {
 
   func body(content: Content) -> some View {
     let count = store.artifacts.count
-    // The inspector's split view lays both columns out from the window's top edge, not the pane's, which put
-    // the header and the panel's tabs under the toolbar and outside the pane's clip. Push them back down.
-    let drop = max(0, (paneTop ?? 0) - (contentTop ?? paneTop ?? 0))
-    content
-      .padding(.top, drop)
-      .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { contentTop = $0 }
-      .inspector(isPresented: Binding(get: { open && settled }, set: { open = $0 })) {
-        InspectorPanel(model: model, store: store, selection: $selection) { open = false }
-          .padding(.top, drop)
-          .inspectorColumnWidth(min: 340, ideal: 360, max: 760)
-      }
-      .toolbar {
-        // .primaryAction is the leading cluster, right after Back and Forward. Interrupt and the
-        // panel belong to this thread, so the spacer takes them to the trailing edge, Interrupt first.
-        ToolbarSpacer(.flexible, placement: .primaryAction)
-        // Nothing runs while the worktree is prepared, so there is nothing to interrupt.
-        if store.running && store.thread?.setup == nil {
-          ToolbarItem(placement: .primaryAction) {
-            InterruptButton(store: store).buttonStyle(.icon(size: 28, wide: store.interrupting))
-          }
-          .sharedBackgroundVisibility(.hidden)
-        }
-        ToolbarItem(placement: .primaryAction) {
-          Button {
-            open.toggle()
-          } label: {
-            HStack(spacing: z(4)) {
-              OmniIcon(name: "panel", size: 15)
-              if count > 0 { Text("\(count)").font(.omni(size: 11, weight: .medium).monospacedDigit()) }
+    GeometryReader { geometry in
+      let scale = UIZoom.settings.scale
+      let layout = ThreadInspectorLayout(paneWidth: geometry.size.width / scale, requestedPanelWidth: width)
+      ZStack(alignment: .trailing) {
+        content
+          .frame(width: open ? z(layout.threadWidth) : geometry.size.width)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        if open {
+          InspectorPanel(model: model, store: store, selection: $selection) { open = false }
+            .frame(width: z(layout.panelWidth))
+            .frame(maxHeight: .infinity)
+            .background(Tok.surface)
+            .overlay(alignment: .leading) { Hairline(vertical: true) }
+            .overlay(alignment: .leading) {
+              SidebarResizeHandle(
+                width: $width, initial: 360,
+                minimum: layout.minimumPanelWidth, maximum: layout.maximumPanelWidth,
+                growsLeft: true, label: "Resize inspector")
             }
-          }
-          .buttonStyle(.icon(size: 28, wide: count > 0))
-          .help(count > 0 ? "Artifacts, changes, browser, terminal, actions, details (\(count))" : "Artifacts, changes, browser, terminal, actions, details")
+        }
+      }
+      .frame(width: geometry.size.width, height: geometry.size.height)
+      .clipped()
+    }
+    .toolbar {
+      // .primaryAction is the leading cluster, right after Back and Forward. Interrupt and the
+      // panel belong to this thread, so the spacer takes them to the trailing edge, Interrupt first.
+      ToolbarSpacer(.flexible, placement: .primaryAction)
+      // Nothing runs while the worktree is prepared, so there is nothing to interrupt.
+      if store.running && store.thread?.setup == nil {
+        ToolbarItem(placement: .primaryAction) {
+          InterruptButton(store: store).buttonStyle(.icon(size: 28, wide: store.interrupting))
         }
         .sharedBackgroundVisibility(.hidden)
       }
-      .onChange(of: store.arrivedHTML?.id) {
-        guard let page = store.arrivedHTML else { return }
-        selection.arrived(page)
-        open = true
-      }
-      .onChange(of: Self.param(model.route)) { _, artifact in
-        guard let artifact else { return }
-        selection.open(artifact: artifact)
-        open = true
-      }
-      .task {
-        try? await Task.sleep(for: .milliseconds(300))
-        settled = true
-      }
-      .onAppear {
-        if Self.param(model.route) != nil { open = true }
-        #if DEBUG
-        let isOpen = $open
-        let picked = $selection
-        InspectorProbe.command = { command in
-          switch command {
-          case .open: isOpen.wrappedValue = true
-          case .close: isOpen.wrappedValue = false
-          case .artifacts, .changes, .browser, .terminal, .actions, .details:
-            isOpen.wrappedValue = true
-            picked.wrappedValue.tab = InspectorSelection.Tab(rawValue: command.rawValue) ?? .details
-          case .turn:
-            isOpen.wrappedValue = true
-            picked.wrappedValue.tab = .changes
-            ChangesProbe.show(.turn)
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          open.toggle()
+        } label: {
+          HStack(spacing: z(4)) {
+            OmniIcon(name: "panel", size: 15)
+            if count > 0 { Text("\(count)").font(.omni(size: 11, weight: .medium).monospacedDigit()) }
           }
         }
-        #endif
+        .buttonStyle(.icon(size: 28, wide: count > 0))
+        .help(count > 0 ? "Artifacts, changes, browser, terminal, actions, details (\(count))" : "Artifacts, changes, browser, terminal, actions, details")
       }
+      .sharedBackgroundVisibility(.hidden)
+    }
+    .onChange(of: store.arrivedHTML?.id) {
+      guard let page = store.arrivedHTML else { return }
+      selection.arrived(page)
+      open = true
+    }
+    .onChange(of: Self.param(model.route)) { _, artifact in
+      guard let artifact else { return }
+      selection.open(artifact: artifact)
+      open = true
+    }
+    .onAppear {
+      if Self.param(model.route) != nil { open = true }
       #if DEBUG
-      .onDisappear { InspectorProbe.command = nil }
+      let isOpen = $open
+      let picked = $selection
+      InspectorProbe.command = { command in
+        switch command {
+        case .open: isOpen.wrappedValue = true
+        case .close: isOpen.wrappedValue = false
+        case .artifacts, .changes, .browser, .terminal, .actions, .details:
+          isOpen.wrappedValue = true
+          picked.wrappedValue.tab = InspectorSelection.Tab(rawValue: command.rawValue) ?? .details
+        case .turn:
+          isOpen.wrappedValue = true
+          picked.wrappedValue.tab = .changes
+          ChangesProbe.show(.turn)
+        }
+      }
       #endif
+    }
+    #if DEBUG
+    .onDisappear { InspectorProbe.command = nil }
+    #endif
   }
 }
 
