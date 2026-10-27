@@ -34,17 +34,26 @@ private struct ThreadInspector: ViewModifier {
   }
 
   func body(content: Content) -> some View {
+    // Measure both columns together so dragging the divider does not change its own limit.
+    GeometryReader { geometry in
+      inspector(content: content, paneWidth: geometry.size.width)
+    }
+  }
+
+  private func inspector(content: Content, paneWidth: CGFloat) -> some View {
     let count = store.artifacts.count
     // The inspector's split view lays both columns out from the window's top edge, not the pane's, which put
     // the header and the panel's tabs under the toolbar and outside the pane's clip. Push them back down.
     let drop = max(0, (paneTop ?? 0) - (contentTop ?? paneTop ?? 0))
-    content
+    return content
+      // Allow the thread to use the remaining 20%, even in a narrow window.
+      .frame(minWidth: 0, maxWidth: .infinity)
       .padding(.top, drop)
       .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { contentTop = $0 }
       .inspector(isPresented: Binding(get: { open && settled }, set: { open = $0 })) {
         InspectorPanel(model: model, store: store, selection: $selection) { open = false }
           .padding(.top, drop)
-          .inspectorColumnWidth(min: 340, ideal: 360, max: 760)
+          .inspectorColumnWidth(min: 340, ideal: 360, max: max(340, paneWidth * 0.8))
       }
       .toolbar {
         // .primaryAction is the leading cluster, right after Back and Forward. Interrupt and the
