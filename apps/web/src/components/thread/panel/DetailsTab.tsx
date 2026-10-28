@@ -96,7 +96,7 @@ export function DetailsTab({
   lastResult: ResultP | null;
   warm: boolean | undefined;
   links: ThreadLinks;
-  /** Its running sub-agents (subagents.ts), first in the tab so a glance finds them. */
+  /** Its running sub-agents (subagents.ts), listed under the resume command. */
   agents: BackgroundTask[];
   onJump: (eventId: number) => void;
 }) {
@@ -112,7 +112,6 @@ export function DetailsTab({
   const resume = remote ? '' : `cd ${shellQuote(cwd)} && ${resumeCmd[thread.harness] ?? resumeCmd['claude-code']}`;
   return (
     <div className="scroll-thin h-full overflow-y-auto px-2.5 pb-3">
-      <RunningSubagents agents={agents} onJump={onJump} />
       <dl className="divide-y divide-line rounded-[20px] bg-bg py-1">
         <Row k="Channel">
           <a href={href.channel(thread.channel_id)} className="font-medium hover:underline">
@@ -251,6 +250,7 @@ export function DetailsTab({
           <code className="block rounded-xl bg-surface px-3 py-2.5 font-mono text-[11.5px] break-all text-fg-2">{resume}</code>
         </div>
       )}
+      <RunningSubagents agents={agents} onJump={onJump} />
     </div>
   );
 }

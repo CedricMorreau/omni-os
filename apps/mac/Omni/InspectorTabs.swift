@@ -204,9 +204,6 @@ struct DetailsTab: View {
       let cwd = store.cwd ?? ""
       ScrollView {
         VStack(alignment: .leading, spacing: z(14)) {
-          RunningSubagentsSection(agents: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: thread.id)) { at in
-            Task { await store.reveal(at) }
-          }
           VStack(spacing: 0) {
             let channel = store.channel?.name ?? thread.channelID
             row("Channel") {
@@ -286,6 +283,9 @@ struct DetailsTab: View {
           if !store.children.isEmpty { delegated }
           if let resume = ThreadDetails.resumeCommand(harness: thread.harness, sessionID: thread.sessionID, cwd: cwd) {
             resumeCard(resume)
+          }
+          RunningSubagentsSection(agents: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: thread.id)) { at in
+            Task { await store.reveal(at) }
           }
         }
         .font(.omni(size: 12.5))

@@ -1,7 +1,7 @@
 import OmniKit
 import SwiftUI
 
-/// RunningSubagents.tsx: the agents a thread spawned itself that still run, at the top of the Details tab. Nothing
+/// RunningSubagents.tsx: the agents a thread spawned itself that still run, under the Details tab's resume command. Nothing
 /// when none run. A row scrolls the transcript to the call that started it, loading that page when it is far back.
 struct RunningSubagentsSection: View {
   let agents: [OmniKit.BackgroundTask]

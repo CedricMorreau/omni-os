@@ -27,11 +27,11 @@ export function SubagentRow({ t, onJump }: { t: BackgroundTask; onJump: (eventId
   );
 }
 
-/** The thread's running sub-agents, at the top of the Details tab. Nothing when none run. */
+/** The thread's running sub-agents, under the Details tab's resume command. Nothing when none run. */
 export function RunningSubagents({ agents, onJump }: { agents: BackgroundTask[]; onJump: (eventId: number) => void }) {
   if (!agents.length) return null;
   return (
-    <section aria-label="Running subagents" className="mb-4">
+    <section aria-label="Running subagents" className="mt-4">
       <div className="mb-1.5 flex items-center px-2">
         <span className="caption">Running subagents</span>
         <span className="ml-auto font-num text-[11px] text-fg-3">{agents.length}</span>

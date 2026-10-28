@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { BackgroundTask } from '../src/api.ts';
 import { RunningSubagents } from '../src/components/thread/panel/RunningSubagents.tsx';
+import { DetailsTab } from '../src/components/thread/panel/DetailsTab.tsx';
+import type { Thread } from '../src/api.ts';
 import { runningSubagents, subagentKind, subagentTip } from '../src/subagents.ts';
 
 // The Details tab's "Running subagents" section (components/thread/panel/RunningSubagents.tsx) and the phone's
@@ -71,5 +73,15 @@ describe('running subagents', () => {
     expect(html.match(/<button/g)).toHaveLength(2);
     // Without a start row there is nowhere to jump.
     expect(html.match(/disabled=""/g)).toHaveLength(1);
+  });
+
+  it('sits under the Resume in terminal block in the Details tab', () => {
+    const thread = { id: 't1', channel_id: 'omni', harness: 'claude-code', session_id: 's1', cwd: '/w', source: 'manual', created_at: '2026-10-28T09:00:00.000Z', updated_at: '2026-10-28T09:00:00.000Z' } as Thread;
+    const html = renderToStaticMarkup(
+      createElement(DetailsTab, { thread, channel: undefined, parent: null, children: [], init: null, lastResult: null, warm: undefined, links: { from: null, into: [] }, agents: [task()], onJump: () => {} }),
+    );
+    const resume = html.indexOf('Resume in terminal');
+    expect(resume).toBeGreaterThan(-1);
+    expect(html.indexOf('Running subagents')).toBeGreaterThan(resume);
   });
 });

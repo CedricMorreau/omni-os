@@ -256,7 +256,7 @@ function Pending({ thread, items, onPending }: { thread: Thread; items: PendingM
   );
 }
 
-/** A running sub-agent in the options sheet. A tap closes the sheet on the turn that started it. */
+/** A running sub-agent, last in the options sheet as under the resume command on desktop. A tap closes the sheet on the turn that started it. */
 function MoSubagentRow({ t, last, onJump }: { t: BackgroundTask; last: boolean; onJump: (eventId: number) => void }) {
   const now = useNow(1000);
   return (
@@ -392,23 +392,6 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
           <MoListRow icon="play" label="Actions" sub="Preview, checks, tests" onClick={() => go(href.threadView(thread.id, 'actions'))} />
           <MoListRow icon="info" label="Details" sub="Harness, model, session" onClick={() => go(href.threadView(thread.id, 'details'))} last />
         </MoGroup>
-        {agents.length > 0 && (
-          <MoSection title="Running subagents" count={agents.length} pad={false}>
-            <MoGroup>
-              {agents.map((t, i) => (
-                <MoSubagentRow
-                  key={t.task_id}
-                  t={t}
-                  last={i === agents.length - 1}
-                  onJump={(at) => {
-                    onClose();
-                    jumpTo(at);
-                  }}
-                />
-              ))}
-            </MoGroup>
-          </MoSection>
-        )}
         <MoGroup>
           {targets.state === 'ready' && <MoListRow icon="share" label="Hand off to…" sub="Continue it on another Mac" onClick={() => setHandingOff(true)} />}
           <MoListRow
@@ -432,6 +415,23 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
           <MoListRow icon="archive" label={thread.archived ? 'Restore thread' : 'Archive thread'} chevron={false} onClick={() => void archive()} last />
         </MoGroup>
         {grokError && <ErrorNote>{grokError}</ErrorNote>}
+        {agents.length > 0 && (
+          <MoSection title="Running subagents" count={agents.length} pad={false}>
+            <MoGroup>
+              {agents.map((t, i) => (
+                <MoSubagentRow
+                  key={t.task_id}
+                  t={t}
+                  last={i === agents.length - 1}
+                  onJump={(at) => {
+                    onClose();
+                    jumpTo(at);
+                  }}
+                />
+              ))}
+            </MoGroup>
+          </MoSection>
+        )}
       </div>
     </MoSheet>
   );
