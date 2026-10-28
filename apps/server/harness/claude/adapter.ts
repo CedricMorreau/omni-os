@@ -101,6 +101,8 @@ export const claudeAdapter: HarnessAdapter = {
       '--permission-mode', config.permissionMode,
       '--add-dir', threadDir(thread.id),
       '--append-system-prompt', systemPrompt,
+      // Claude Code keys auto-memory on the cwd, and threads run outside the home folder.
+      '--settings', JSON.stringify({ autoMemoryDirectory: join(homedir(), '.claude/projects', homedir().replace(/[^a-zA-Z0-9]/g, '-'), 'memory') }),
     ];
     if (thread.effort) args.push('--effort', thread.effort);
     if (thread.cwd !== config.brainDir && existsSync(config.brainDir)) args.push('--add-dir', config.brainDir);
