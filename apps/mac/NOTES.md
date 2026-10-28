@@ -508,6 +508,7 @@ Steps (a list, or an object with the list under `steps`):
 | `{"scroll": "earlier"}` | Scrolls the open thread up with trackpad events until "Earlier messages" starts a page, and notes the row at the top then and once the page is laid out ("held" when it kept its height) |
 | `{"scroll": "gap"}` | Centres the first gap a reveal left |
 | `{"searchHit": 0}` | Opens the search screen's hit at that index as a click does, and notes where its row landed |
+| `{"subagent": 0}` | Presses the Details tab's Running subagents row at that index as a click does, and notes where the row that started it landed. Open the tab with `{"inspector": "details"}` first; a `BG:<ms>` thread has agents to list |
 | `{"snapshot": "home"}` | `home.png` for the main window, `home-settings.png` for Settings, `home-window<n>.png` for others. Fails on a blank image |
 | `{"port": 4759}` | Sets the port, as Settings would. Never 4747 |
 | `{"open": "settings"}` | Opens Settings |

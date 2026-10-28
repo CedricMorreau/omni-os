@@ -33,6 +33,12 @@ Files can ride along with a message (paperclip, drag-and-drop or paste). They la
 
 To continue a thread in a terminal or Claude Desktop: `cd <cwd> && claude --resume <session id>` (the thread's Details panel has a copy button). Check there that the session is no longer warm first, so two processes do not write the same session.
 
+## Running subagents
+
+The thread panel's Details tab lists **Running subagents** under Resume in terminal: every agent the thread started itself that is still working, such as an Agent call, a workflow, a fork or a teammate, with its kind and how long it has run. Click one to scroll the transcript to the call that started it, however far back. The Details tab shows how many run while another tab is open, and the section hides when none do. On a phone, the list is at the bottom of the thread's options sheet. Background shells and monitors are not listed, and neither are delegated threads: those are under Delegated threads, and their own agents show in their own thread.
+
+Claude Code reports its agents itself. Codex (multi-agent spawns), Cursor Agent (its task tool) and Hermes (`subagent.*` events) are mapped onto the same list. Cursor Cloud reports no sub-agents.
+
 ## Point the agent at lines of a diff
 
 In a thread's Changes panel (desktop, phone and the Mac app), click a line number to pick it and shift-click another in the same hunk to pick the lines between (on a phone, tap a line, then tap another). Write a note and press **Add to message**: the lines and the note go into the reply box as a chip, next to whatever you have typed. Click a chip to see what it holds, x to take it out. A message can be just chips.

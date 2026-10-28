@@ -190,7 +190,7 @@ private struct ShotViewer: View {
 
 // MARK: Details
 
-/// How the thread runs, and its delegated threads, live.
+/// How the thread runs, its running sub-agents and its delegated threads, live.
 struct DetailsTab: View {
   let model: AppModel
   let store: ThreadStore
@@ -283,6 +283,9 @@ struct DetailsTab: View {
           if !store.children.isEmpty { delegated }
           if let resume = ThreadDetails.resumeCommand(harness: thread.harness, sessionID: thread.sessionID, cwd: cwd) {
             resumeCard(resume)
+          }
+          RunningSubagentsSection(agents: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: thread.id)) { at in
+            Task { await store.reveal(at) }
           }
         }
         .font(.omni(size: 12.5))

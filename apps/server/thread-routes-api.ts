@@ -19,6 +19,7 @@ import { continueLinks } from './continue.ts';
 import {
   acceptedAgain,
   activeMods,
+  activeTasks,
   cancelLimitResume,
   cancelRequests,
   createTeam,
@@ -163,6 +164,10 @@ threadRoutesApi.get('/:id/summary', (c) => {
     id: t.id, title: t.title, status: t.status, channel: t.channel_id, role: t.role, task_id: t.task_id,
     updated_at: t.updated_at, last_reply: events.lastRunText(t.id) || events.lastAssistantText(t.id),
     artifacts: artifacts.byThread(t.id).map((a) => a.name),
+    // The agents it spawned that still run, as the thread panel's Running subagents list shows them.
+    running_subagents: activeTasks()
+      .filter((k) => k.thread_id === t.id && k.subagent)
+      .map((k) => ({ description: k.description, kind: k.subagent_type ?? k.task_type, started_at: k.started_at, tool_uses: k.tool_uses })),
   });
 });
 

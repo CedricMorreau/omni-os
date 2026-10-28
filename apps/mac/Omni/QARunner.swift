@@ -190,6 +190,9 @@ final class QARunner {
           guard let hit = QAProbe.openSearchHit?(i) else { throw QAScriptError("no search result \(i) on screen") }
           routedAt = .now
           result.note = try await revealed(hit)
+        case .subagent(let i):
+          guard let jump = QAProbe.jumpSubagent?(i) else { throw QAScriptError("no Running subagents row \(i) on screen") }
+          result.note = try await revealed(thread: jump.thread, at: jump.at)
         case .editPending(let text):
           guard let edit = QAProbe.editPending, edit(text) else { throw QAScriptError("no editable unsent message on screen") }
           try? await Task.sleep(for: .milliseconds(500))
@@ -523,6 +526,7 @@ final class QARunner {
     case .webhookSecret(let id): "webhookSecret \(id)"
     case .deliveries(let target): "deliveries \(target.automation)"
     case .searchHit(let i): "searchHit \(i)"
+    case .subagent(let i): "subagent \(i)"
     case .imageZoom(let scale): "imageZoom \(scale.map { "\($0)" } ?? "fit")"
     case .nativeBrowser(let address): "nativeBrowser \(address.prefix(60))"
     case .type(let text): "type \(text.prefix(40))"
@@ -815,10 +819,15 @@ final class QARunner {
   /// Waits for the thread a search hit opened to show the hit's row in view, and says where.
   private func revealed(_ hit: SearchHit) async throws(QAScriptError) -> String {
     guard let at = hit.eventID else { return "a title hit: the thread opens at the bottom" }
+    return try await revealed(thread: hit.threadID, at: at)
+  }
+
+  /// Waits for the open thread to show the row holding an event in view, and says where.
+  private func revealed(thread: String, at: Int) async throws(QAScriptError) -> String {
     let deadline = ContinuousClock.now + .seconds(15)
     while ContinuousClock.now < deadline {
       try? await Task.sleep(for: .milliseconds(100))
-      guard let store = QAProbe.store, store.id == hit.threadID, store.revealTarget == nil, store.history.spanIndex(at) != nil,
+      guard let store = QAProbe.store, store.id == thread, store.revealTarget == nil, store.history.spanIndex(at) != nil,
         let id = store.transcript.itemID(holding: at), let frame = QAProbe.rows?.frames[id],
         let height = QAProbe.scroller?.viewportHeight(), frame.minY < height, frame.maxY > 0
       else { continue }

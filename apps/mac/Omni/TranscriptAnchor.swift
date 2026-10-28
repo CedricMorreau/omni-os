@@ -96,5 +96,7 @@ extension QAProbe {
   static weak var rows: TopRows?
   /// Opens the search screen's hit at an index, nil when there is none.
   static var openSearchHit: ((Int) -> SearchHit?)?
+  /// Presses the Details tab's Running subagents row at an index: the thread and event it jumps to, nil when none.
+  static var jumpSubagent: ((Int) -> (thread: String, at: Int)?)?
 }
 #endif

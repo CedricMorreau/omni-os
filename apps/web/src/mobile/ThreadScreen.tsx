@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, errorText, useApi, type Artifact, type BranchChanges, type PendingMsg, type Thread } from '../api.ts';
+import { api, errorText, useApi, type Artifact, type BackgroundTask, type BranchChanges, type PendingMsg, type Thread } from '../api.ts';
 import { harnessLabel, OmniMark } from '../components/brand.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { SwitchLine } from '../components/Transcript.tsx';
@@ -17,7 +17,8 @@ import { MoContinueLinks } from '../components/ContinueLinks.tsx';
 import { deviceRows } from '../handoff.ts';
 import { Button, ErrorNote, Icon, Loader, StatusDot, StatusPill } from '../components/ui.tsx';
 import { changesView } from '../changes.ts';
-import { duration, plural } from '../format.ts';
+import { duration, plural, toDate } from '../format.ts';
+import { runningSubagents, subagentKind } from '../subagents.ts';
 import { ArtifactThumb } from '../pages/Artifacts.tsx';
 import { canMarkDone, reasonOf } from '../needs-you.ts';
 import { isOmnis, parkedLabel } from '../requests.ts';
@@ -29,7 +30,7 @@ import { ContextChips, hasContext } from '../message-context/ContextChips.tsx';
 import { needsCard } from './activity.ts';
 import { MoComposer, type ComposerChip } from './MoComposer.tsx';
 import { NeedsActions, NeedsCardView } from './NeedsCard.tsx';
-import { MoAvatar, MoBubble, MoDiff, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoSheet, MoStripes } from './parts.tsx';
+import { MoAvatar, MoBubble, MoDiff, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoSection, MoSheet, MoStripes } from './parts.tsx';
 import { shortTime } from './rows.ts';
 import { useShell, useThread } from './shell.tsx';
 import { threadView, type NowDoing, type PlanView, type TurnView } from './thread-view.ts';
@@ -255,10 +256,28 @@ function Pending({ thread, items, onPending }: { thread: Thread; items: PendingM
   );
 }
 
+/** A running sub-agent, last in the options sheet as under the resume command on desktop. A tap closes the sheet on the turn that started it. */
+function MoSubagentRow({ t, last, onJump }: { t: BackgroundTask; last: boolean; onJump: (eventId: number) => void }) {
+  const now = useNow(1000);
+  return (
+    <MoListRow
+      icon={<Loader size={14} className="mx-0.5 text-live-text" />}
+      label={t.description}
+      sub={subagentKind(t)}
+      right={duration(Math.max(0, now - toDate(t.started_at).getTime()))}
+      chevron={false}
+      disabled={!t.event_id}
+      onClick={() => t.event_id && onJump(t.event_id)}
+      last={last}
+    />
+  );
+}
+
 function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: string | null; onClose: () => void }) {
   const shell = useShell();
-  const { setPinned, setDone, reloadChannels } = useApp();
-  const { applyThread, blocked, handoff, setHandoff } = useThread();
+  const { setPinned, setDone, reloadChannels, tasks } = useApp();
+  const { applyThread, blocked, handoff, setHandoff, jumpTo } = useThread();
+  const agents = useMemo(() => runningSubagents(tasks, thread.id), [tasks, thread.id]);
   const targets = useHandoffTargets(thread, blocked, handoff);
   // Set while the sheet lists the Macs the thread can go to.
   const [handingOff, setHandingOff] = useState(false);
@@ -396,6 +415,23 @@ function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: stri
           <MoListRow icon="archive" label={thread.archived ? 'Restore thread' : 'Archive thread'} chevron={false} onClick={() => void archive()} last />
         </MoGroup>
         {grokError && <ErrorNote>{grokError}</ErrorNote>}
+        {agents.length > 0 && (
+          <MoSection title="Running subagents" count={agents.length} pad={false}>
+            <MoGroup>
+              {agents.map((t, i) => (
+                <MoSubagentRow
+                  key={t.task_id}
+                  t={t}
+                  last={i === agents.length - 1}
+                  onJump={(at) => {
+                    onClose();
+                    jumpTo(at);
+                  }}
+                />
+              ))}
+            </MoGroup>
+          </MoSection>
+        )}
       </div>
     </MoSheet>
   );

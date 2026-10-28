@@ -12,7 +12,13 @@ describe('runner: background tasks', () => {
     const t = await h.start('BG:2500 fan out');
     await h.untilResults(t.id, 1);
     const [task] = r.activeTasks().filter((x) => x.thread_id === t.id);
-    expect(task).toMatchObject({ thread_id: t.id, channel_id: t.channel_id, background: true, description: 'Background task 2500ms', task_type: 'local_agent' });
+    expect(task).toMatchObject({ thread_id: t.id, channel_id: t.channel_id, background: true, description: 'Background task 2500ms', task_type: 'local_agent', subagent: true });
+    // The row it started on, which the thread panel's list jumps to.
+    expect(task.event_id).toBe(h.byKind(t.id, 'task')[0].id);
+    // The conductor's get_thread lists it too.
+    const { threadRoutesApi } = await import('../thread-routes-api.ts');
+    const summary = await (await threadRoutesApi.request(`/${t.id}/summary`)).json();
+    expect(summary.running_subagents).toMatchObject([{ description: 'Background task 2500ms', kind: 'general-purpose' }]);
     expect(h.thread(t.id).status).toBe('done');
 
     // Past the 1s keepalive, the process is still up for the task.

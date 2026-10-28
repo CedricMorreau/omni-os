@@ -357,6 +357,10 @@ export interface BackgroundTask {
   description: string;
   subagent_type?: string;
   task_type?: string;
+  /** An agent the thread spawned (Agent call, workflow, fork, teammate), not a background shell or monitor. */
+  subagent: boolean;
+  /** The stored row that started it: where the thread panel's list jumps to. */
+  event_id?: number;
   background: boolean;
   /** ISO time. */
   started_at: string;

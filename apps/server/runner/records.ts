@@ -6,7 +6,7 @@ import { onToolResult } from '../published.ts';
 import { turnFinished } from '../sync/files.ts';
 import { observeToolResult } from '../tool-failures.ts';
 import { toolTails } from '../tool-tail.ts';
-import { type ModUi, type Record as StreamRecord, type TaskUpdate } from '../stream.ts';
+import { isSubagent, type ModUi, type Record as StreamRecord, type TaskUpdate } from '../stream.ts';
 import { armIdle, clearInterrupt, endTurn, requeueHeld, teardown } from './session.ts';
 import { finishTurnSnapshot, startTurnSnapshot } from './snapshots.ts';
 import { pump, reportToParent } from './queue.ts';
@@ -49,7 +49,10 @@ export function onTask(live: Live, u: TaskUpdate) {
   const id = live.threadId;
   const known = live.tasks.get(u.task_id);
   if (u.event === 'started') {
+    // Codex can report a sub-agent's start twice: from its spawn call and from its own activity item.
+    if (known) return;
     const t = threads.get(id);
+    const row = addEvent(id, 'task', u);
     live.tasks.set(u.task_id, {
       thread_id: id,
       channel_id: live.channelId,
@@ -59,12 +62,13 @@ export function onTask(live: Live, u: TaskUpdate) {
       description: u.description || 'Task',
       subagent_type: u.subagent_type,
       task_type: u.task_type,
+      subagent: isSubagent(u),
+      event_id: row.id,
       // Agents started with run_in_background say so here; a foreground one can be backgrounded later.
       background: !!u.background,
       started_at: new Date().toISOString(),
     });
     live.taskSaved.set(u.task_id, Date.now());
-    addEvent(id, 'task', u);
     return publishTasks(true);
   }
   if (u.event === 'progress') {

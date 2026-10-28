@@ -192,7 +192,14 @@ private struct InspectorPanel: View {
   }
 
   private func count(_ tab: InspectorSelection.Tab, files: Int) -> Int? {
-    let n = tab == .artifacts ? files : tab == .browser ? store.screenshots.count : 0
+    let n =
+      switch tab {
+      case .artifacts: files
+      case .browser: store.screenshots.count
+      // The Details tab lists them: a count on it says some run while another tab is open.
+      case .details: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: store.id).count
+      default: 0
+      }
     return n > 0 ? n : nil
   }
 }

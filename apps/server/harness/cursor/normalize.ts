@@ -204,10 +204,25 @@ function nestedToolUse(evt: any): StreamRecord | null {
   return use;
 }
 
+/**
+ * A taskToolCall runs a sub-agent for as long as the call lasts, so its start and end are a task's.
+ * `subagentType` is a message in Cursor's protocol: its one set case names the kind.
+ */
+function subagentTask(id: string, value: any, end?: { failed: boolean }): StreamRecord {
+  if (end) return { kind: 'task', payload: { task_id: id, tool_use_id: id, event: 'ended', status: end.failed ? 'failed' : 'completed' } };
+  const args = value?.args ?? {};
+  const kind = args.subagentType ?? args.subagent_type;
+  const type = typeof kind === 'string' ? kind : kind && typeof kind === 'object' ? Object.keys(kind)[0] : undefined;
+  const description = String(args.description || 'Subagent');
+  return { kind: 'task', payload: { task_id: id, tool_use_id: id, event: 'started', description, task_type: 'local_agent', ...(type ? { subagent_type: type } : {}) } };
+}
+
 function nestedToolCall(evt: any): StreamRecord[] {
   if (evt.subtype === 'started') {
     const use = nestedToolUse(evt);
-    return use ? [use] : [];
+    if (!use) return [];
+    const entry = nestedEntry(evt)!;
+    return entry.key === 'taskToolCall' ? [use, subagentTask(entry.id, entry.value)] : [use];
   }
   const entry = nestedEntry(evt);
   if (!entry || (evt.subtype !== 'completed' && evt.subtype !== 'failed')) return [];
@@ -221,7 +236,8 @@ function nestedToolCall(evt: any): StreamRecord[] {
     !!body?.error || result?.success === false || body?.status === 'failed' || (body?.exitCode != null && body.exitCode !== 0);
   let text = resultText(evt.error || body);
   if (body?.exitCode != null && body.exitCode !== 0) text = `Exit code ${body.exitCode}\n${text}`;
-  return [toolResult(id, text || (failed ? 'Tool reported failure.' : ''), failed)];
+  const done = toolResult(id, text || (failed ? 'Tool reported failure.' : ''), failed);
+  return entry.key === 'taskToolCall' ? [done, subagentTask(id, value, { failed })] : [done];
 }
 
 function resultText(result: any): string {

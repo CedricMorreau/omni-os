@@ -66,6 +66,44 @@ const recordsOf = (turnId: string) =>
     .filter((l) => l.params?.turnId === turnId)
     .flatMap((l) => (l.method === 'item/started' ? normalizeStarted(l.params.item) : l.method === 'item/completed' ? normalizeItem(l.params.item) : []));
 
+describe('codex sub-agents', () => {
+  const spawn = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: 'collabAgentToolCall', id: 'call_1', tool: 'spawnAgent', status: 'completed', senderThreadId: 'parent',
+      receiverThreadIds: ['agent_a'], prompt: 'Audit the docs\nthen report', model: null, reasoningEffort: null,
+      agentsStates: { agent_a: { status: 'running', message: null } }, ...extra,
+    }) as CodexItem;
+
+  it('starts a task per spawned agent, on the spawn call\'s row', () => {
+    const recs = normalizeItem(spawn());
+    expect(recs[0]).toMatchObject({ kind: 'tool_use', payload: { id: 'call_1', name: 'collabAgentToolCall' } });
+    expect(recs.slice(1)).toEqual([
+      { kind: 'task', payload: { task_id: 'agent_a', tool_use_id: 'call_1', event: 'started', description: 'Audit the docs', task_type: 'local_agent' } },
+    ]);
+  });
+
+  it('starts nothing for a failed spawn', () => {
+    expect(normalizeItem(spawn({ status: 'failed', agentsStates: {} })).filter((r) => r.kind === 'task')).toEqual([]);
+  });
+
+  it('ends an agent any call reports stopped', () => {
+    const wait = { type: 'collabAgentToolCall', id: 'call_2', tool: 'wait', status: 'completed', senderThreadId: 'parent', receiverThreadIds: ['agent_a', 'agent_b', 'agent_c'],
+      prompt: null, agentsStates: { agent_a: { status: 'completed' }, agent_b: { status: 'errored' }, agent_c: { status: 'running' } } } as unknown as CodexItem;
+    expect(normalizeItem(wait).filter((r) => r.kind === 'task')).toEqual([
+      { kind: 'task', payload: { task_id: 'agent_a', event: 'ended', status: 'completed' } },
+      { kind: 'task', payload: { task_id: 'agent_b', event: 'ended', status: 'failed' } },
+    ]);
+  });
+
+  it('moves the task along from the agent\'s own activity items, with no row of their own', () => {
+    const activity = (kind: string) => ({ type: 'subAgentActivity', id: `act_${kind}`, kind, agentThreadId: 'agent_a', agentPath: '/root/auditor', model: null, reasoningEffort: null }) as unknown as CodexItem;
+    expect(normalizeItem(activity('started'))).toEqual([{ kind: 'task', payload: { task_id: 'agent_a', event: 'started', description: 'auditor', task_type: 'local_agent' } }]);
+    expect(normalizeItem(activity('interacted'))).toEqual([]);
+    expect(normalizeItem(activity('completed'))).toEqual([{ kind: 'task', payload: { task_id: 'agent_a', event: 'ended', status: 'completed' } }]);
+    expect(normalizeItem(activity('interrupted'))).toEqual([{ kind: 'task', payload: { task_id: 'agent_a', event: 'ended', status: 'stopped' } }]);
+  });
+});
+
 describe('codex review and compaction', () => {
   it('shows a status on entering review, and the review text once, as the reply', () => {
     const recs = recordsOf('turn_review');
