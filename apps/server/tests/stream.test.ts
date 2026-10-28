@@ -7,7 +7,7 @@ vi.mock('../db.ts', () => {
   throw new Error('db.ts must not be imported by stream tests');
 });
 
-import { parseEvent, LineSplitter, type Record } from '../stream.ts';
+import { isSubagent, parseEvent, LineSplitter, type Record } from '../stream.ts';
 
 const SAMPLE = join(import.meta.dirname, 'fixtures', 'stream-sample.jsonl');
 const sampleLines = () =>
@@ -48,6 +48,12 @@ describe('parseEvent: system', () => {
 
   it('drops task_summary with null detail', () => {
     expect(parseEvent({ type: 'system', subtype: 'task_summary', detail: null }).records).toEqual([]);
+  });
+
+  it('tells agents from background shells and monitors', () => {
+    for (const task_type of ['local_agent', 'local_workflow', 'remote_agent', 'in_process_teammate']) expect(isSubagent({ task_type })).toBe(true);
+    for (const task_type of ['local_bash', 'monitor_mcp', 'dream', undefined]) expect(isSubagent({ task_type })).toBe(false);
+    expect(isSubagent({ subagent_type: 'Explore' })).toBe(true);
   });
 
   it('maps the task lifecycle to task records', () => {

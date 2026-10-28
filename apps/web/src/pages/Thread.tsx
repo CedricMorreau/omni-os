@@ -27,6 +27,8 @@ import { shownResult } from '../needs-you.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
+import { runningSubagents } from '../subagents.ts';
+import { plural } from '../format.ts';
 import { isAsking } from '../transcript/fold.ts';
 import { readPref, useApp, usePageVisible, writePref } from '../store.tsx';
 import { useThreadInterruptKey } from './useThreadInterruptKey.ts';
@@ -54,7 +56,7 @@ function ModStatusLines({ lines }: { lines: ModStatus[] }) {
 }
 
 export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; artifact?: number; at?: number }) {
-  const { setOpenThread, mods, reloadChannels, needsYou, readResult, setPinned, setDone } = useApp();
+  const { setOpenThread, mods, tasks, reloadChannels, needsYou, readResult, setPinned, setDone } = useApp();
   const modLines = useMemo(() => mods.filter((m) => m.thread_id === id), [mods, id]);
   // GET /api/harnesses, the same list the reply pills load. Until it arrives, canSteer uses the Cursor fallback.
   const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
@@ -68,6 +70,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
     history,
     revealTarget,
     clearReveal,
+    jumpTo,
     files,
     shots,
     selectedArtifact,
@@ -109,6 +112,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
   const members = useMemo(() => teamOf(children), [children]);
   const reports = useMemo(() => reportNotes(queued), [queued]);
   const asking = useMemo(() => isAsking(events), [events]);
+  const agents = useMemo(() => runningSubagents(tasks, id), [tasks, id]);
   const [panelOpen, setPanelOpen] = useState<boolean>(() => readPref('threadPanel', true));
   const [panelWidth, setPanelWidth] = useState<number | null>(() => {
     const v = readPref<unknown>('threadPanelWidth', null);
@@ -273,7 +277,16 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
               { id: 'browser', icon: 'browser', title: 'Browser', badge: shots.length ? <span className="font-num text-[10.5px] text-fg-4">{shots.length}</span> : undefined },
               { id: 'terminal', icon: 'terminal', title: 'Terminal' },
               { id: 'actions', icon: 'play', title: 'Actions' },
-              { id: 'details', icon: 'info', title: 'Details' },
+              {
+                id: 'details',
+                icon: 'info',
+                title: 'Details',
+                badge: agents.length ? (
+                  <span className="font-num text-[10.5px] text-fg-4" title={`${plural(agents.length, 'subagent')} running`}>
+                    {agents.length}
+                  </span>
+                ) : undefined,
+              },
             ]}
           />
         </div>
@@ -289,7 +302,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
           </Suspense>
         )}
         {panelTab === 'actions' && <ActionsTab thread={thread} />}
-        {panelTab === 'details' && <DetailsTab thread={thread} channel={channel} parent={parent} children={children} init={init} lastResult={lastResult} warm={warm} links={links} />}
+        {panelTab === 'details' && <DetailsTab thread={thread} channel={channel} parent={parent} children={children} init={init} lastResult={lastResult} warm={warm} links={links} agents={agents} onJump={jumpTo} />}
       </div>
     </div>
   );

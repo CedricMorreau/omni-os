@@ -247,11 +247,11 @@ export function applyHermesEvent(prev: HermesNormState, raw: unknown): HermesApp
       boundary();
       const id = toolId(state, evt);
       state.open.push({ id, tool: 'subagent' });
+      const description = str(evt.task ?? evt.name ?? evt.description ?? 'subagent');
       records.push(
-        toolUse(id, 'Agent', {
-          description: str(evt.task ?? evt.name ?? evt.description ?? 'subagent'),
-          prompt: str(evt.prompt ?? evt.summary ?? ''),
-        }),
+        toolUse(id, 'Agent', { description, prompt: str(evt.prompt ?? evt.summary ?? '') }),
+        // Listed as running in the thread panel until its completion.
+        { kind: 'task', payload: { task_id: id, tool_use_id: id, event: 'started', description, task_type: 'remote_agent' } },
       );
       break;
     }
@@ -264,7 +264,7 @@ export function applyHermesEvent(prev: HermesNormState, raw: unknown): HermesApp
         id = toolId(state, evt);
         records.push(toolUse(id, 'Agent', { description: str(evt.name ?? 'subagent'), prompt: '' }));
       }
-      records.push(toolResult(id, summary, failed));
+      records.push(toolResult(id, summary, failed), { kind: 'task', payload: { task_id: id, tool_use_id: id, event: 'ended', status: failed ? 'failed' : 'completed' } });
       break;
     }
     case 'approval.request':

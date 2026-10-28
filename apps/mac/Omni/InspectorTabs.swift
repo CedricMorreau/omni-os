@@ -190,7 +190,7 @@ private struct ShotViewer: View {
 
 // MARK: Details
 
-/// How the thread runs, and its delegated threads, live.
+/// How the thread runs, its running sub-agents and its delegated threads, live.
 struct DetailsTab: View {
   let model: AppModel
   let store: ThreadStore
@@ -204,6 +204,9 @@ struct DetailsTab: View {
       let cwd = store.cwd ?? ""
       ScrollView {
         VStack(alignment: .leading, spacing: z(14)) {
+          RunningSubagentsSection(agents: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: thread.id)) { at in
+            Task { await store.reveal(at) }
+          }
           VStack(spacing: 0) {
             let channel = store.channel?.name ?? thread.channelID
             row("Channel") {

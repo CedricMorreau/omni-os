@@ -160,6 +160,21 @@ describe('Cursor nested stream tools', () => {
     ]);
   });
 
+  it('lists a taskToolCall as a running sub-agent from its start to its end', () => {
+    const args = { description: 'Map the repo', prompt: 'look around', subagentType: { explore: {} } };
+    expect(normalizeCursor(event('taskToolCall', args)).records).toEqual([
+      { kind: 'tool_use', payload: { id: 'call-stable', name: 'Task', input: args, parent: null } },
+      { kind: 'task', payload: { task_id: 'call-stable', tool_use_id: 'call-stable', event: 'started', description: 'Map the repo', task_type: 'local_agent', subagent_type: 'explore' } },
+    ]);
+    expect(normalizeCursor(event('taskToolCall', args, 'completed', { success: { summary: 'done' } })).records).toMatchObject([
+      { kind: 'tool_result', payload: { tool_use_id: 'call-stable', is_error: false } },
+      { kind: 'task', payload: { task_id: 'call-stable', event: 'ended', status: 'completed' } },
+    ]);
+    expect(normalizeCursor(event('taskToolCall', args, 'failed', { error: { message: 'no' } })).records[1]).toMatchObject({
+      kind: 'task', payload: { event: 'ended', status: 'failed' },
+    });
+  });
+
   // Read success is the documented stream-json example, not an invented flat result.
   it('attaches the documented nested read result without adding another row', () => {
     const records = normalizeCursor(event('readToolCall', { path: 'file.txt' }, 'completed', {

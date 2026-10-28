@@ -98,8 +98,20 @@ describe('Hermes normalizer', () => {
       { event: 'subagent.start', name: 'builder', prompt: 'fix it', seq: 0 },
       { event: 'subagent.complete', status: 'ok', summary: 'fixed', seq: 1 },
     ]);
+    expect(records.map((r) => r.kind)).toEqual(['tool_use', 'task', 'tool_result', 'task']);
     expect(records[0].payload).toMatchObject({ name: 'Agent' });
-    expect(records[1].payload).toMatchObject({ text: 'fixed', is_error: false });
+    const id = (records[0].payload as { id: string }).id;
+    expect(records[1].payload).toEqual({ task_id: id, tool_use_id: id, event: 'started', description: 'builder', task_type: 'remote_agent' });
+    expect(records[2].payload).toMatchObject({ text: 'fixed', is_error: false });
+    expect(records[3].payload).toEqual({ task_id: id, tool_use_id: id, event: 'ended', status: 'completed' });
+  });
+
+  it('ends a failed subagent as failed', () => {
+    const { records } = play([
+      { event: 'subagent.start', name: 'builder', seq: 0 },
+      { event: 'subagent.complete', status: 'failed', seq: 1 },
+    ]);
+    expect(records.at(-1)!.payload).toMatchObject({ event: 'ended', status: 'failed' });
   });
 
   it('still emits a tool row when the completion arrives without a start', () => {

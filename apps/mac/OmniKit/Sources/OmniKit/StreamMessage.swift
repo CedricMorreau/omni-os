@@ -160,16 +160,40 @@ public struct BackgroundTask: Decodable, Hashable, Sendable, Identifiable {
   public let taskID: String
   public let toolUseID: String?
   public let description: String
+  public var subagentType: String? = nil
+  public var taskType: String? = nil
+  /// The stored row that started it: where the thread panel's Running subagents list jumps to.
+  public var eventID: Int? = nil
   public let background: Bool
   public let startedAt: Date
   public let lastTool: String?
   public let toolUses: Int?
+  private var subagentFlag: Bool? = nil
 
   /// The sidebar thread it nests under: its own, or for a team member, its lead.
   public var hostID: String { leadID ?? threadID }
 
+  /// An agent the thread spawned (Agent call, workflow, fork, teammate), not a background shell or monitor.
+  /// A server from before the flag sends none, and then nothing is listed as a sub-agent.
+  public var subagent: Bool { subagentFlag ?? false }
+
+  /// What kind of agent it is: its sub-agent type, else what the CLI calls the task. subagents.ts on the web.
+  public var kind: String? {
+    if let subagentType, !subagentType.isEmpty { return subagentType }
+    return ["local_workflow": "workflow", "remote_agent": "remote", "in_process_teammate": "teammate"][taskType ?? ""]
+  }
+
+  /// The agents a thread spawned itself that still run, oldest first. A delegated thread's agents are listed on it.
+  public static func runningSubagents(_ tasks: [BackgroundTask], in threadID: String) -> [BackgroundTask] {
+    tasks.filter { $0.threadID == threadID && $0.subagent }.sorted { $0.startedAt < $1.startedAt }
+  }
+
   enum CodingKeys: String, CodingKey {
     case description, background
+    case subagentType = "subagent_type"
+    case taskType = "task_type"
+    case eventID = "event_id"
+    case subagentFlag = "subagent"
     case threadID = "thread_id"
     case channelID = "channel_id"
     case leadID = "lead_id"

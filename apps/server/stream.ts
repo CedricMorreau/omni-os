@@ -105,6 +105,12 @@ function modUi(evt: any): ModUi | null {
   return out;
 }
 
+/** The CLI task types that are agents. local_bash, monitor_mcp and dream are not. */
+const AGENT_TASK_TYPES = new Set(['local_agent', 'local_workflow', 'remote_agent', 'in_process_teammate']);
+
+/** A task that is an agent the thread spawned (Agent call, workflow, fork, teammate), not a shell or monitor. */
+export const isSubagent = (u: Pick<TaskUpdate, 'task_type' | 'subagent_type'>) => !!u.subagent_type || AGENT_TASK_TYPES.has(u.task_type ?? '');
+
 const opt = <T>(v: T | null | undefined) => (v === null || v === undefined || v === '' ? undefined : v);
 
 /** The CLI's task_* system events as one record shape. Undefined fields are left out. */

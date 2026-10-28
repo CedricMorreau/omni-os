@@ -354,7 +354,7 @@ server.registerTool(
 
 server.registerTool(
   'get_thread',
-  { description: 'Status, last reply and artifacts of a thread.', inputSchema: { thread_id: z.string() } },
+  { description: 'Status, last reply, artifacts and running subagents of a thread.', inputSchema: { thread_id: z.string() } },
   async ({ thread_id }) => text(await call(`/threads/${thread_id}/summary`)),
 );
 

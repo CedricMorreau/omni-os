@@ -129,6 +129,12 @@ export function useThreadSession(id: string, artifactParam: number | undefined, 
     void reveal(at).then((ok) => (ok ? setRevealTarget(at) : toast({ icon: 'alert', title: 'Could not load that message', body: 'The thread opened at its latest messages.' })));
   }, [ready, at, reveal, toast]);
   const clearReveal = useCallback(() => setRevealTarget(null), []);
+  // Scroll to an event from inside the thread (a running sub-agent's row), as often as it is asked.
+  const jumpTo = useCallback(
+    (eventId: number) =>
+      void reveal(eventId).then((ok) => (ok ? setRevealTarget(eventId) : toast({ icon: 'alert', title: 'Could not load that point in the thread' }))),
+    [reveal, toast],
+  );
 
   const live = useThreadStream(
     id,
@@ -250,6 +256,7 @@ export function useThreadSession(id: string, artifactParam: number | undefined, 
     history,
     revealTarget,
     clearReveal,
+    jumpTo,
     files,
     shots,
     selectedArtifact,

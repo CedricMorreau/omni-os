@@ -172,6 +172,10 @@ export interface ActiveTask {
   description: string;
   subagent_type?: string;
   task_type?: string;
+  /** An agent it spawned (Agent call, workflow, fork, teammate), not a background shell or monitor. */
+  subagent: boolean;
+  /** The stored row that started it, for jumping to that point in the thread. */
+  event_id?: number;
   background: boolean;
   started_at: string;
   last_tool?: string;

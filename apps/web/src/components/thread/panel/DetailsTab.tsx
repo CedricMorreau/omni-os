@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import type { Channel, Thread } from '../../../api.ts';
+import type { BackgroundTask, Channel, Thread } from '../../../api.ts';
 import { HarnessMark } from '../../brand.tsx';
 import { Chip, CopyButton, StatusDot } from '../../ui.tsx';
 import { duration, fullDate, plural } from '../../../format.ts';
@@ -7,6 +7,7 @@ import { href } from '../../../router.ts';
 import { cloudAgentUrl } from '../../../cloud-agent.ts';
 import type { ThreadLinks } from '../../../continue.ts';
 import { ContinueLinkItem } from '../../ContinueLinks.tsx';
+import { RunningSubagents } from './RunningSubagents.tsx';
 
 export interface InitP {
   model?: string;
@@ -84,6 +85,8 @@ export function DetailsTab({
   lastResult,
   warm,
   links,
+  agents,
+  onJump,
 }: {
   thread: Thread;
   channel: Channel | undefined;
@@ -93,6 +96,9 @@ export function DetailsTab({
   lastResult: ResultP | null;
   warm: boolean | undefined;
   links: ThreadLinks;
+  /** Its running sub-agents (subagents.ts), first in the tab so a glance finds them. */
+  agents: BackgroundTask[];
+  onJump: (eventId: number) => void;
 }) {
   const cwd = init?.cwd || thread.cwd;
   const cloud = thread.harness === 'cursor-cloud';
@@ -106,6 +112,7 @@ export function DetailsTab({
   const resume = remote ? '' : `cd ${shellQuote(cwd)} && ${resumeCmd[thread.harness] ?? resumeCmd['claude-code']}`;
   return (
     <div className="scroll-thin h-full overflow-y-auto px-2.5 pb-3">
+      <RunningSubagents agents={agents} onJump={onJump} />
       <dl className="divide-y divide-line rounded-[20px] bg-bg py-1">
         <Row k="Channel">
           <a href={href.channel(thread.channel_id)} className="font-medium hover:underline">

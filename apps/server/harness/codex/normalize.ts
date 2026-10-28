@@ -151,15 +151,67 @@ export function normalizeItem(item: CodexItem, savedImage?: string | null): Stre
       ];
     }
 
-    default: {
+    case 'collabAgentToolCall':
+      return [...rawRow(item), ...collabTasks(item)];
+
+    case 'subAgentActivity':
+      // Its spawn call already has a row; this only moves the agent's task along.
+      return subAgentActivity(item);
+
+    default:
       // Anything Omni doesn't recognise still shows, under its own name, with its raw input.
-      const failed = item.status === 'failed' || item.status === 'declined' || item.success === false;
-      return [
-        { kind: 'tool_use', payload: { id: item.id, name: String(item.type), input: rawInput(item), parent: null } },
-        ...(failed ? [result(item.id, 'Tool reported failure.', true)] : []),
-      ];
-    }
+      return rawRow(item);
   }
+}
+
+/** An item Omni has no mapping for, under its own name with its raw input. */
+function rawRow(item: CodexItem): StreamRecord[] {
+  const failed = item.status === 'failed' || item.status === 'declined' || item.success === false;
+  return [
+    { kind: 'tool_use', payload: { id: item.id, name: String(item.type), input: rawInput(item), parent: null } },
+    ...(failed ? [result(item.id, 'Tool reported failure.', true)] : []),
+  ];
+}
+
+/** Codex sub-agent states that mean it stopped, and the task status each ends with. */
+const AGENT_ENDED: Record<string, string> = { completed: 'completed', errored: 'failed', interrupted: 'stopped', shutdown: 'stopped', notFound: 'stopped' };
+
+const agentTask = (taskId: string, toolUseId: string | undefined, description: string): StreamRecord => ({
+  kind: 'task',
+  payload: { task_id: taskId, ...(toolUseId ? { tool_use_id: toolUseId } : {}), event: 'started', description, task_type: 'local_agent' },
+});
+
+/**
+ * A multi-agent call: a spawn starts a task per agent it created, keyed by the agent's thread id and shown on the
+ * spawn's row. Any call (wait, close, send) that reports an agent stopped ends that agent's task.
+ */
+function collabTasks(item: CodexItem): StreamRecord[] {
+  const { tool, status, prompt, receiverThreadIds, agentsStates } = item as {
+    tool?: string;
+    status?: string;
+    prompt?: string | null;
+    receiverThreadIds?: string[];
+    agentsStates?: Record<string, { status?: string } | undefined>;
+  };
+  const out: StreamRecord[] = [];
+  if (tool === 'spawnAgent' && status !== 'failed') {
+    const description = (prompt ?? '').trim().split('\n')[0].slice(0, 120) || 'Codex agent';
+    for (const id of receiverThreadIds ?? []) out.push(agentTask(id, item.id, description));
+  }
+  for (const [id, state] of Object.entries(agentsStates ?? {})) {
+    const ended = AGENT_ENDED[state?.status ?? ''];
+    if (ended) out.push({ kind: 'task', payload: { task_id: id, event: 'ended', status: ended } });
+  }
+  return out;
+}
+
+/** A sub-agent's own lifecycle item. A start the spawn already reported is ignored by the runner. */
+function subAgentActivity(item: CodexItem): StreamRecord[] {
+  const { kind, agentThreadId, agentPath } = item as { kind?: string; agentThreadId?: string; agentPath?: string };
+  if (!agentThreadId) return [];
+  if (kind === 'started') return [agentTask(agentThreadId, undefined, agentPath?.split('/').filter(Boolean).at(-1) || 'Codex agent')];
+  if (kind === 'completed' || kind === 'interrupted') return [{ kind: 'task', payload: { task_id: agentThreadId, event: 'ended', status: kind === 'completed' ? 'completed' : 'stopped' } }];
+  return [];
 }
 
 /** Codex's own names for what a review looks at; anything else is Ben's instructions. */

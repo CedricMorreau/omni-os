@@ -170,6 +170,22 @@ private func threadStub(_ id: String, status: String = "done", minute: Int = 0, 
     #expect(member.hostID == "t1")
   }
 
+  @Test func runningSubagentsAreTheThreadsOwnAgentsOldestFirst() throws {
+    let tasks = try decode([BackgroundTask].self, """
+      [{"thread_id":"t1","channel_id":"acme","task_id":"late","description":"Write tests","subagent":true,"event_id":9,"background":false,"started_at":"2026-10-10T08:05:00Z"},
+       {"thread_id":"t1","channel_id":"acme","task_id":"shell","description":"npm test","subagent":false,"task_type":"local_bash","background":true,"started_at":"2026-10-10T08:00:00Z"},
+       {"thread_id":"m1","channel_id":"acme","lead_id":"t1","task_id":"member","description":"x","subagent":true,"background":false,"started_at":"2026-10-10T08:00:00Z"},
+       {"thread_id":"t1","channel_id":"acme","task_id":"early","description":"Map the repo","subagent":true,"subagent_type":"Explore","task_type":"local_agent","event_id":4,"background":false,"started_at":"2026-10-10T07:55:00Z"},
+       {"thread_id":"t1","channel_id":"acme","task_id":"old","description":"From an older server","background":false,"started_at":"2026-10-10T07:50:00Z"}]
+      """)
+    let running = BackgroundTask.runningSubagents(tasks, in: "t1")
+    #expect(running.map(\.taskID) == ["early", "late"])
+    #expect(running.map(\.eventID) == [4, 9])
+    #expect(running.map(\.kind) == ["Explore", nil])
+    let workflow = try decode(BackgroundTask.self, #"{"thread_id":"t1","channel_id":"acme","task_id":"w","description":"x","subagent":true,"task_type":"local_workflow","background":false,"started_at":"2026-10-10T08:00:00Z"}"#)
+    #expect(workflow.kind == "workflow")
+  }
+
   @Test func anEmptyOpenFolderSaysSo() throws {
     let c = try acme(folders: [folderRow("f1", name: "A"), folderRow("f2", name: "B", collapsed: 1)])
     #expect(SidebarSections.threads(in: c.folders[0], openID: nil).empty)
