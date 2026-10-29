@@ -73,6 +73,17 @@ const channelSchema = z.object({
   default_harness: runDefault,
   default_model: runDefault,
   default_effort: runDefault,
+  default_base: z.string().trim().min(1).nullish(),
+  links: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1, 'Give the link a name.').max(40),
+        url: z.string().trim().url('Use a full address, like https://example.com.').regex(/^https?:\/\//i, 'Use an http or https address.'),
+      }),
+    )
+    .max(20)
+    .nullish()
+    .transform((l) => (l == null ? l : JSON.stringify(l))),
 });
 
 /** A channel's latest threads of any status, so the sidebar can keep finished ones findable. */

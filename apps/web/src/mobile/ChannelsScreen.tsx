@@ -5,6 +5,7 @@ import { useLiveThreads } from '../components/ThreadList.tsx';
 import { Avatar, Icon, Segmented, StatusDot } from '../components/ui.tsx';
 import { inChannel, reasonOf } from '../needs-you.ts';
 import { href } from '../router.ts';
+import { QuickLinks } from '../components/QuickLinks.tsx';
 import { readPref, useApp, useNow, writePref } from '../store.tsx';
 import { useFolders } from '../folders.tsx';
 import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoRow, MoScroll, MoSection, MoTitle } from './parts.tsx';
@@ -38,6 +39,8 @@ function Counts({ needs, running }: { needs: number; running: number }) {
 }
 
 /** The Channels tab: the Conductor, then every channel by kind with what needs Ben and what runs in it. */
+const MO_PILL = 'hov inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-surface px-3 text-[13px] text-fg-2 [--hov:var(--surface-2)]';
+
 export function ChannelsScreen() {
   const shell = useShell();
   const { channels, needsYou, profile, channel } = useApp();
@@ -218,6 +221,11 @@ export function ChannelScreen({ id }: { id: string }) {
         right={<MoRound icon="more" label="Channel settings" onClick={() => shell.open(href.settings(id))} />}
       />
       <MoScroll>
+        {ch && ch.kind !== 'system' && (
+          <div className="flex flex-wrap items-center gap-1.5 px-4 pt-2">
+            <QuickLinks channelId={ch.id} links={ch.links ?? []} editable pillClassName={MO_PILL} />
+          </div>
+        )}
         <div className="px-4 pt-2">
           <Segmented
             label="Threads"

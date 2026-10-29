@@ -57,10 +57,56 @@ server.registerTool(
         repo: c.github_repo,
         running: c.running,
         notes: c.notes,
+        links: c.links,
         folders: folderSummary(c.folders),
       })),
     );
   },
+);
+
+server.registerTool(
+  'tickets',
+  {
+    description:
+      `Status of every open ticket, sorted by what needs ${USER} first: go (deploy waits for the go), decide (plan approval or a question), check (manual test, draft to post, result to read), ` +
+      'working (a turn runs), client (waiting on the client, with days). Each row has ref, title, channel, stage, round, badge, gates, a draft if one waits, and thread_id. ' +
+      'Pass closed: true to include closed tickets.',
+    inputSchema: { channel: z.string().optional(), closed: z.boolean().optional() },
+  },
+  async ({ channel, closed }) => {
+    const q = new URLSearchParams({ ...(channel && { channel }), ...(closed && { closed: '1' }) });
+    return text(await call(`/tickets?${q}`));
+  },
+);
+
+server.registerTool(
+  'create_ticket',
+  {
+    description:
+      `Open a ticket for ${USER}: a new thread in the client channel that reads the ticket and proposes its route of stages for the user to confirm. source productive needs the Productive task link, slack the Slack message link; local needs no link. ` +
+      'Put everything the link does not say in context. The ticket starts from the channel\'s default branch; pass base (like origin/master) only when the user names another branch.',
+    inputSchema: {
+      channel: z.string(),
+      source: z.enum(['productive', 'slack', 'local']),
+      link: z.string().optional(),
+      context: z.string().optional(),
+      title: z.string().optional(),
+      base: z.string().optional(),
+      ref: z.string().optional().describe('The ticket number the user uses, like 997 (Productive shows it as Task Number). The link only has the internal id.'),
+    },
+  },
+  async (body) => text(await call('/tickets', { method: 'POST', body: JSON.stringify(body) })),
+);
+
+server.registerTool(
+  'set_quick_links',
+  {
+    description:
+      `Replace the quick links shown as pills in a channel's header (name + https URL, at most 20). Read the current ones with list_channels first and send the full list back, ` +
+      `so a link ${USER} did not mention stays. Only when ${USER} asks to add, change or remove a link.`,
+    inputSchema: { channel: z.string(), links: z.array(z.object({ label: z.string().min(1).max(40), url: z.string().url() })).max(20) },
+  },
+  async ({ channel, links }) => text((await call(`/channels/${encodeURIComponent(channel)}`, { method: 'PATCH', body: JSON.stringify({ links }) })).links),
 );
 
 server.registerTool(

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import type { Thread, Channel as ChannelRow, EventRow, Artifact, Folder, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult } from '@omni/server/db.ts';
+import type { Thread, Channel as ChannelRow, ChannelLink, EventRow, Artifact, Folder, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult } from '@omni/server/db.ts';
 import type { Attachment } from '@omni/server/uploads.ts';
 import type { HarnessInfo, ModelEntry, HarnessId } from '@omni/server/harness/types.ts';
 import type { CommandList as HarnessCommands } from '@omni/server/commands.ts';
@@ -23,7 +23,8 @@ export type CommandList = HarnessCommands & { recent?: string[] };
 // ---------- response shapes ----------
 
 /** A channel as the API sends it: the design system's file stays on the server, only its name and size come. */
-export type Channel = Omit<ChannelRow, 'design_system'> & { design_system_size: number };
+export type { ChannelLink };
+export type Channel = Omit<ChannelRow, 'design_system' | 'default_base' | 'links'> & { design_system_size: number; links: ChannelLink[] };
 
 /** Just enough of a thread to list it under its channel in the sidebar. */
 export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at'> &
@@ -177,6 +178,9 @@ export interface CrewRole {
   effort?: string;
   channel?: string;
   mcp: string[];
+  skills: string[];
+  stages: number[];
+  source: 'shipped' | 'yours';
   charter: string;
   error?: string;
 }

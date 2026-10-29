@@ -262,6 +262,26 @@ CREATE TABLE IF NOT EXISTS pr_watch_events (
   created_at TEXT NOT NULL,
   PRIMARY KEY (thread_id, key)
 );
+CREATE TABLE IF NOT EXISTS tickets (
+  thread_id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  source TEXT NOT NULL,
+  link TEXT,
+  context TEXT,
+  stage INTEGER NOT NULL DEFAULT 1,
+  stage_at TEXT NOT NULL,
+  skipped TEXT NOT NULL DEFAULT '[]',
+  round INTEGER NOT NULL DEFAULT 1,
+  plan_ok TEXT,
+  client_ok TEXT,
+  go_ok TEXT,
+  draft_kind TEXT,
+  draft TEXT,
+  closed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 /** Add a column the current schema needs to a database created by an older version. Safe to run again. */
@@ -317,7 +337,10 @@ export function migrate() {
   // When Ben marked the thread done, out of Needs you; null for every existing thread. Synced with the row.
   ensureColumn('threads', 'done_at', 'TEXT');
   // What a new thread in the channel runs on when neither the thread nor its role picks (apps/server/harness/resolve.ts).
-  for (const col of ['default_harness', 'default_model', 'default_effort']) ensureColumn('channels', col, 'TEXT');
+  for (const col of ['default_harness', 'default_model', 'default_effort', 'default_base', 'links']) ensureColumn('channels', col, 'TEXT');
+  ensureColumn('tickets', 'role', 'TEXT');
+  ensureColumn('tickets', 'route', 'TEXT');
+  ensureColumn('tickets', 'route_proposal', 'TEXT');
   // The channel's design system: one standalone HTML file for the pages its threads write, and the file's name.
   ensureColumn('channels', 'design_system', 'TEXT');
   ensureColumn('channels', 'design_system_name', 'TEXT');

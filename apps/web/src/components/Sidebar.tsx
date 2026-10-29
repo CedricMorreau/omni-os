@@ -876,6 +876,9 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
               <NavLink to={href.automations()} icon="zap" active={route.name === 'automations'} onNavigate={onNavigate}>
                 Automations
               </NavLink>
+              <NavLink to={href.roles()} icon="tool" active={route.name === 'roles'} onNavigate={onNavigate}>
+                Roles
+              </NavLink>
               <NavLink to={href.secrets()} icon="key" active={route.name === 'secrets'} onNavigate={onNavigate}>
                 Secrets
               </NavLink>

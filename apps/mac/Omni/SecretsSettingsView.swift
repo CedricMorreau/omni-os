@@ -57,17 +57,25 @@ struct SecretsForm: View {
         VStack(alignment: .leading, spacing: 0) {
           FieldLabel(text: "Scope")
           FieldBox {
-            Picker("Scope", selection: $secrets.scope) {
-              ForEach(secrets.scopeOptions) { Text($0.label).tag($0.scope) }
+            Menu {
+              Picker("Scope", selection: $secrets.scope) {
+                ForEach(secrets.scopeOptions) { Text($0.label).tag($0.scope) }
+              }
+              .pickerStyle(.inline)
+              .labelsHidden()
+            } label: {
+              HStack {
+                Text(secrets.label(for: secrets.scope)).font(.omni(size: 14)).foregroundStyle(Tok.fg)
+                Spacer(minLength: 0)
+                OmniIcon(name: "chevronDown", size: 13).foregroundStyle(Tok.fg3)
+              }
+              .contentShape(Rectangle())
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
+            .menuStyle(.button)
             .buttonStyle(.plain)
-            .font(.omni(size: 14))
+            .menuIndicator(.hidden)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .trailing) {
-              OmniIcon(name: "chevronDown", size: 13).foregroundStyle(Tok.fg3).allowsHitTesting(false)
-            }
+            .accessibilityLabel("Scope: \(secrets.label(for: secrets.scope))")
           }
         }
         VStack(alignment: .leading, spacing: 0) {

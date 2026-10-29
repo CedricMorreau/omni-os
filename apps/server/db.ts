@@ -9,7 +9,7 @@ seedSystemChannels();
 
 export { db, tx } from './db/connection.ts';
 export { migrate } from './db/migrate.ts';
-export type { ChannelKind, Channel } from './db/repos/channels.ts';
+export type { ChannelKind, Channel, ChannelLink } from './db/repos/channels.ts';
 export { channels, publicChannel } from './db/repos/channels.ts';
 export type { ThreadStatus, ThreadSource, ThreadSetup, ThreadLimit, LimitStop, Thread, PastSession, Sessions, PendingHandover, SessionState, StoredSessionState } from './db/repos/threads.ts';
 export { THREAD_COLUMNS, threads } from './db/repos/threads.ts';

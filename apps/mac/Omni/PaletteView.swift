@@ -140,6 +140,7 @@ private struct PaletteRow: View {
     case "house": "home"
     case "square.stack.3d.up": "layers"
     case "bolt": "zap"
+    case "person.2": "delegate"
     case "key": "key"
     case "arrow.triangle.2.circlepath", "arrow.clockwise": "refresh"
     case "sun.max": "sun"

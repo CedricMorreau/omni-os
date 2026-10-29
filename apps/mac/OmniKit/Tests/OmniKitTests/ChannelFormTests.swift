@@ -199,6 +199,20 @@ import OmniKit
     #expect(without.designSystemSize == 0)
   }
 
+  @Test func readsAndSavesTheQuickLinks() async throws {
+    let base = #"{"id":"a","name":"A","kind":"client","use_worktree":1,"browser_headless":1,"archived":0,"created_at":"2026-01-05T09:00:00.000Z""#
+    let with = try decode(Channel.self, base + #","links":[{"label":"Productive","url":"https://app.productive.io/p/1"}]}"#)
+    #expect(with.links == [ChannelLink(label: "Productive", url: "https://app.productive.io/p/1")])
+    #expect(try decode(Channel.self, base + "}").links.isEmpty)
+
+    let t = StubTransport(body: base + "}")
+    let client = OmniClient(port: 4799, transport: t)
+    _ = try await client.setChannelLinks("a", [ChannelLink(label: "Vercel", url: "https://vercel.com/x")])
+    #expect(t.requests[0].httpMethod == "PATCH")
+    #expect(t.requests[0].url?.path == "/api/channels/a")
+    #expect(try bodyJSON(t.requests[0]) == .object(["links": .array([.object(["label": .string("Vercel"), "url": .string("https://vercel.com/x")])])]))
+  }
+
   @Test func refusesADesignSystemFileThatIsTooBigOrNotText() {
     #expect(DesignSystemFile.read(Data("<html></html>".utf8)) == .success("<html></html>"))
     #expect(DesignSystemFile.read(Data(count: DesignSystemFile.maxBytes + 1)) == .failure(.init(message: "That file is too big: keep it under 25 MB.")))

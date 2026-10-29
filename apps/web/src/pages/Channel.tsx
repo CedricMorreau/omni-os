@@ -7,6 +7,7 @@ import { inChannel } from '../needs-you.ts';
 import { ArchivedThreads, ThreadGroups, useLiveThreads, useThreadPRs } from '../components/ThreadList.tsx';
 import { Avatar, Button, Empty, StatusDot, Icon, LinkButton, Loading, Tabs } from '../components/ui.tsx';
 import { href, usePresetSeq, type ChannelTab } from '../router.ts';
+import { QuickLinks } from '../components/QuickLinks.tsx';
 import { useApp } from '../store.tsx';
 import { ChannelActionsEditor } from '../components/ChannelActionsEditor.tsx';
 import { ChannelSettingsForm, Section } from './ChannelSettings.tsx';
@@ -151,6 +152,11 @@ export function ChannelPage({ id, tab, pr }: { id: string; tab: ChannelTab; pr?:
           </div>
         )}
         <Tabs className="mt-5" tabs={tabs} value={tab} />
+        {tab === 'threads' && ch.kind !== 'system' && (
+          <div className="mt-4 flex flex-wrap items-center gap-1.5">
+            <QuickLinks channelId={ch.id} links={ch.links ?? []} editable pillClassName={linkCls} />
+          </div>
+        )}
       </div>
 
       {tab === 'threads' && <ThreadsTab id={id} isConductor={isConductor} />}

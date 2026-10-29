@@ -28,6 +28,9 @@ describe('parseCrewFile', () => {
       model: 'opus',
       channel: 'volero',
       mcp: ['omni'],
+      skills: [],
+      stages: [],
+      source: 'shipped',
       charter: 'You write and ship code.\n\n- Keep changes scoped.',
     });
   });
@@ -41,6 +44,9 @@ describe('parseCrewFile', () => {
       model: undefined,
       channel: undefined,
       mcp: [],
+      skills: [],
+      stages: [],
+      source: 'shipped',
       charter: 'Just do quick asks.',
     });
   });
@@ -48,6 +54,11 @@ describe('parseCrewFile', () => {
   it('handles empty frontmatter and a non-array mcp value', () => {
     expect(parseCrewFile('a', '---\n\n---\nbody')).toMatchObject({ name: 'a', mcp: [], charter: 'body' });
     expect(parseCrewFile('b', '---\nmcp: omni\n---\nbody').mcp).toEqual([]);
+  });
+
+  it('reads the skills and stages of a role', () => {
+    const role = parseCrewFile('reviewer', '---\nskills: [ponytail:ponytail-review, code-review]\nstages: [5, "9"]\n---\nReview.', 'yours');
+    expect(role).toMatchObject({ skills: ['ponytail:ponytail-review', 'code-review'], stages: [5, 9], source: 'yours' });
   });
 
   it('accepts frontmatter with no body', () => {

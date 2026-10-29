@@ -76,6 +76,7 @@ export function screenOf(r: Route): ScreenKey {
       return 'search';
     case 'automations':
     case 'secrets':
+    case 'roles':
     case 'sync':
     case 'storage':
     case 'new-channel':

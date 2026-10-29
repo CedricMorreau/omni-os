@@ -226,6 +226,11 @@ extension OmniClient {
     try await send("PATCH", "/api/channels/\(uriComponent(id))", body: form.body(system: system))
   }
 
+  public func setChannelLinks(_ id: String, _ links: [ChannelLink]) async throws(OmniAPIError) -> Channel {
+    let list = links.map { JSONValue.object(["label": .string($0.label), "url": .string($0.url)]) }
+    return try await send("PATCH", "/api/channels/\(uriComponent(id))", body: JSONValue.object(["links": .array(list)]))
+  }
+
   public func setChannelArchived(_ id: String, _ archived: Bool) async throws(OmniAPIError) -> Channel {
     try await send("PATCH", "/api/channels/\(uriComponent(id))", body: JSONValue.object(["archived": .number(archived ? 1 : 0)]))
   }

@@ -28,6 +28,8 @@ const channel = (patch: Partial<Channel> = {}): Channel => ({
   default_harness: null,
   default_model: null,
   default_effort: null,
+  default_base: null,
+  links: null,
   design_system: null,
   design_system_name: null,
   browser_headless: 1,
@@ -37,7 +39,7 @@ const channel = (patch: Partial<Channel> = {}): Channel => ({
   ...patch,
 });
 
-const role = (mcp: string[]): CrewRole => ({ id: 'r', name: 'R', description: '', mcp, charter: 'x' });
+const role = (mcp: string[]): CrewRole => ({ id: 'r', name: 'R', description: '', mcp, skills: [], stages: [], source: 'shipped', charter: 'x' });
 
 const THREAD = 'thread-123';
 const OMNI_URL = 'http://127.0.0.1:4747';

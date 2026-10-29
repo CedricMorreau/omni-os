@@ -83,6 +83,28 @@ describe('the base a thread starts from', () => {
     expect(head(repo)).toBe(stale);
   });
 
+  it('takes the channel default base when the thread names none, and fetches an origin branch first', async () => {
+    const { repo, push } = remote();
+    git(repo, 'checkout', '-q', '-b', 'feature');
+    const local = commit(repo);
+    const newest = push();
+    const made = await start(channel(repo, { default_base: 'origin/main' }));
+    expect(made.status).toBe(200);
+    const t = await ready(made.body.id);
+    expect(head(t.cwd)).toBe(newest);
+    expect(head(repo)).toBe(local);
+    expect(git(repo, 'branch', '--show-current')).toBe('feature');
+  });
+
+  it('shows the channel default base as the default choice in the composer', async () => {
+    const { repo } = remote();
+    git(repo, 'checkout', '-q', '-b', 'feature');
+    commit(repo);
+    const id = channel(repo, { default_base: 'origin/main' });
+    const options = (await request('GET', `/channels/${id}/bases`)).body;
+    expect(options.head).toEqual({ ref: 'origin/main', sha: git(repo, 'rev-parse', 'origin/main') });
+  });
+
   it('starts from an existing local ref, and a ref that moves later does not move the thread', async () => {
     const { repo } = remote();
     git(repo, 'branch', 'release');

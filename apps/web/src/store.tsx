@@ -17,6 +17,7 @@ interface AppState {
   /** Change the channel list in place, ahead of the server: folder edits show at once (apps/web/src/folders.tsx). */
   updateChannels: (fn: (list: ChannelWithRunning[]) => ChannelWithRunning[]) => void;
   crew: CrewRole[];
+  reloadCrew: () => void;
   usage: HarnessUsage;
   status: Omit<Status, 'usage'> | null;
   /** The name Omni calls the user by, null until the first status load. Empty when nobody set it yet. */
@@ -268,6 +269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPinned,
       updateChannels: setChannels,
       crew,
+      reloadCrew,
       usage,
       status,
       profile,
@@ -287,7 +289,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       openThread,
       setOpenThread,
     }),
-    [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, usage, status, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, setDone, openThread],
+    [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, reloadCrew, usage, status, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, setDone, openThread],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

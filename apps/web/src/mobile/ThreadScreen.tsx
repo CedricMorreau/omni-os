@@ -8,6 +8,7 @@ import { PRWakeList } from '../components/thread/PRWatch.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { CloudAgentCard } from '../components/thread/CloudAgentCard.tsx';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
+import { RouteCard } from '../components/thread/RouteCard.tsx';
 import { ClippedNote, HistoryCtx, HistoryEdgeRow } from '../components/thread/HistoryEdgeRow.tsx';
 import { useReveal } from '../pages/useReveal.ts';
 import { useScrollAnchor } from '../pages/useScrollAnchor.ts';
@@ -585,6 +586,7 @@ export function ThreadScreen() {
           </>
         }
       />
+      <RouteCard thread={thread} version={events.length} className="mx-4 mt-1 mb-1 shrink-0" />
       <div ref={scroll} className="mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 [overflow-anchor:none]">
         <HistoryCtx.Provider value={history}>
           <div className="flex flex-col gap-4">

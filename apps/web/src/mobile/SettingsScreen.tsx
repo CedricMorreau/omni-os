@@ -123,6 +123,7 @@ export function SettingsScreen() {
         <MoSection title="This Omni">
           <MoGroup>
             <MoListRow icon="monitor" label={host || 'Omni'} sub={syncSub(sync.data, now)} onClick={() => shell.open(href.sync())} />
+            <MoListRow icon="tool" label="Roles" sub="Instructions and skills for each ticket stage" onClick={() => shell.open(href.roles())} />
             <MoListRow icon="key" label="Secrets" sub="Names only; values stay in the Mac's Keychain" onClick={() => shell.open(href.secrets())} />
             <MoListRow icon="archive" label="Storage" sub="Worktrees on this Mac and what can be cleaned up" onClick={() => shell.open(href.storage())} />
             <MoListRow

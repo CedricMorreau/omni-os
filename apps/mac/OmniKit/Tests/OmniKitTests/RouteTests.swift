@@ -15,6 +15,7 @@ import OmniKit
     .search(query: ""),
     .search(query: "fix the cart & checkout? 100%+"),
     .automations,
+    .roles,
     .secrets,
     .settings,
     .artifacts,
@@ -38,6 +39,7 @@ import OmniKit
     #expect(Route.thread(id: "abc", artifact: 3).hash == "#/t/abc?artifact=3")
     #expect(Route.search(query: "a b&c").hash == "#/search?q=a%20b%26c")
     #expect(Route.automations.hash == "#/automations")
+    #expect(Route.roles.hash == "#/roles")
     #expect(Route.secrets.hash == "#/secrets")
     #expect(Route.settings.hash == "#/settings")
     #expect(Route.artifacts.hash == "#/artifacts")

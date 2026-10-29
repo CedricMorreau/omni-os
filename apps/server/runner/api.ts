@@ -134,7 +134,8 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
   const id = input.id ?? randomUUID();
   const remote = isRemoteHarness(harness);
   // Refused before anything is made, so a ref that names nothing leaves the draft where it was typed.
-  const base = await checkBase(channel, input.base, { remote });
+  const pick = input.base ?? (channel.default_base ? { kind: 'ref' as const, ref: channel.default_base } : null);
+  const base = await checkBase(channel, pick, { remote });
   const wd = await prepareWorkdir(channel, id, { remote });
   const thread = threads.create({
     id,

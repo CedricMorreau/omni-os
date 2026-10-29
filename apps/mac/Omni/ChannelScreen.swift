@@ -34,6 +34,9 @@ private struct ChannelView: View {
           .padding(.top, z(40))
         links
         tabs.padding(.top, z(20))
+        if tab == .threads && channel.kind != .system {
+          quickLinks.padding(.top, z(16))
+        }
         Group {
           switch tab {
           case .threads:
@@ -87,6 +90,18 @@ private struct ChannelView: View {
     case .personal: "Personal"
     case .system: "System"
     default: channel.kind.rawValue
+    }
+  }
+
+  private var quickLinks: some View {
+    HStack(spacing: z(6)) {
+      ForEach(Array(channel.links.enumerated()), id: \.offset) { _, link in
+        if let url = URL(string: link.url) {
+          LinkPill(icon: "globe", text: link.label, url: url)
+        }
+      }
+      QuickLinksButton(model: model, channelID: channel.id, links: channel.links)
+      Spacer(minLength: 0)
     }
   }
 
@@ -353,6 +368,107 @@ private struct ArchivedThreadRow: View {
       await reload()
     } else {
       failed = true
+    }
+  }
+}
+
+private struct QuickLinksButton: View {
+  let model: AppModel
+  let channelID: String
+  let links: [ChannelLink]
+  @State private var editing = false
+  @State private var hovering = false
+
+  var body: some View {
+    Button { editing = true } label: {
+      HStack(spacing: z(4)) {
+        OmniIcon(name: links.isEmpty ? "plus" : "pencil", size: 12).foregroundStyle(Tok.fg3)
+        if links.isEmpty { Text("Add link").foregroundStyle(Tok.fg3) }
+      }
+      .font(.omni(size: 12))
+      .padding(.horizontal, z(10))
+      .frame(minWidth: z(28), minHeight: z(28))
+      .background(hovering ? Tok.surface2 : Tok.surface, in: Capsule())
+      .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .help(links.isEmpty ? "Add a quick link" : "Edit quick links")
+    .accessibilityLabel(links.isEmpty ? "Add a quick link" : "Edit quick links")
+    .popover(isPresented: $editing, arrowEdge: .bottom) {
+      QuickLinksEditor(model: model, channelID: channelID, start: links) { editing = false }
+    }
+  }
+}
+
+private struct QuickLinksEditor: View {
+  let model: AppModel
+  let channelID: String
+  let done: () -> Void
+  @State private var rows: [ChannelLink]
+  @State private var saving = false
+  @State private var error: String?
+
+  init(model: AppModel, channelID: String, start: [ChannelLink], done: @escaping () -> Void) {
+    self.model = model
+    self.channelID = channelID
+    self.done = done
+    _rows = State(initialValue: start.isEmpty ? [ChannelLink(label: "", url: "")] : start)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: z(10)) {
+      Text("Quick links").font(.omni(size: 14, weight: .medium)).foregroundStyle(Tok.fg)
+      ForEach(rows.indices, id: \.self) { i in
+        HStack(spacing: z(6)) {
+          TextField("Name", text: $rows[i].label, prompt: Text("Productive"))
+            .textFieldStyle(.omni)
+            .frame(width: z(140))
+            .accessibilityLabel("Link \(i + 1) name")
+          TextField("Address", text: $rows[i].url, prompt: Text("https://"))
+            .textFieldStyle(.omniMono)
+            .frame(width: z(300))
+            .accessibilityLabel("Link \(i + 1) address")
+          Button { rows.remove(at: i) } label: { OmniIcon(name: "trash", size: 13).foregroundStyle(Tok.fg3) }
+            .buttonStyle(.plain)
+            .help("Remove this link")
+            .accessibilityLabel("Remove link \(i + 1)")
+        }
+      }
+      Button { rows.append(ChannelLink(label: "", url: "")) } label: {
+        HStack(spacing: z(6)) {
+          OmniIcon(name: "plus", size: 12)
+          Text("Add link")
+        }
+      }
+      .buttonStyle(.pill(.ghost, height: 30))
+      .disabled(rows.count >= 20)
+      if let error { ErrorNote(text: error) }
+      HStack(spacing: z(8)) {
+        Spacer(minLength: 0)
+        Button("Cancel", action: done).buttonStyle(.pill(.ghost, height: 32))
+        Button(saving ? "Saving" : "Save") { Task { await save() } }
+          .buttonStyle(.pill(.primary, height: 32))
+          .disabled(saving)
+          .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(z(16))
+    .frame(width: z(520))
+  }
+
+  private func save() async {
+    let kept = rows
+      .map { ChannelLink(label: $0.label.trimmingCharacters(in: .whitespaces), url: $0.url.trimmingCharacters(in: .whitespaces)) }
+      .filter { !($0.label.isEmpty && $0.url.isEmpty) }
+    saving = true
+    defer { saving = false }
+    do {
+      _ = try await model.client.setChannelLinks(channelID, kept)
+      await model.store.reloadChannels()
+      done()
+    } catch {
+      self.error = error.message
     }
   }
 }

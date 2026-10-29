@@ -11,6 +11,7 @@ public enum SidebarItem: Hashable, Sendable {
   case newChannel
   case artifacts
   case automations
+  case roles
   case secrets
   case settings
 
@@ -23,6 +24,7 @@ public enum SidebarItem: Hashable, Sendable {
     case .newChannel: self = .newChannel
     case .artifacts: self = .artifacts
     case .automations: self = .automations
+    case .roles: self = .roles
     case .secrets: self = .secrets
     case .settings: self = .settings
     case .search, .notFound: return nil
@@ -37,6 +39,7 @@ public enum SidebarItem: Hashable, Sendable {
     case .newChannel: .newChannel
     case .artifacts: .artifacts
     case .automations: .automations
+    case .roles: .roles
     case .secrets: .secrets
     case .settings: .settings
     }
@@ -52,6 +55,7 @@ extension Route {
     case .thread: "Thread"
     case .search: "Search"
     case .automations: "Automations"
+    case .roles: "Roles"
     case .secrets: "Secrets"
     case .settings: "Settings"
     case .artifacts: "Artifacts"

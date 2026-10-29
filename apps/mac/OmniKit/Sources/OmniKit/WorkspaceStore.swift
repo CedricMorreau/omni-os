@@ -196,6 +196,10 @@ public final class WorkspaceStore {
     await load([.channels, .pinned])
   }
 
+  public func reloadCrew() async {
+    await load([.crew])
+  }
+
   /// A pin or unpin the app shows before the server has it. A pinned load already out is dropped, so it cannot put
   /// back the list from before; the next load is the server's answer.
   func editPinned(_ thread: ThreadStub, on: Bool) {

@@ -69,12 +69,12 @@ describe('onboarding', () => {
 describe('personal overrides', () => {
   it('a charter in data/crew replaces the shared one and placeholders are filled', () => {
     mkdirSync(paths.personalCrew, { recursive: true });
-    writeFileSync(join(paths.personalCrew, 'inbox.md'), '---\nname: My inbox\n---\nWork for {{user}} in {{workspace}}.');
-    const inbox = listCrew().find((c) => c.id === 'inbox')!;
-    expect(inbox.name).toBe('My inbox');
-    expect(inbox.charter).toBe(`Work for Ada in ${resolved.workspaceRoot().replace(home, '~')}.`);
-    rmSync(join(paths.personalCrew, 'inbox.md'));
-    expect(listCrew().find((c) => c.id === 'inbox')!.charter).not.toMatch(/\{\{|phillbert/);
+    writeFileSync(join(paths.personalCrew, 'ticket.md'), '---\nname: My ticket\n---\nWork for {{user}} in {{workspace}}.');
+    const ticket = listCrew().find((c) => c.id === 'ticket')!;
+    expect(ticket.name).toBe('My ticket');
+    expect(ticket.charter).toBe(`Work for Ada in ${resolved.workspaceRoot().replace(home, '~')}.`);
+    rmSync(join(paths.personalCrew, 'ticket.md'));
+    expect(listCrew().find((c) => c.id === 'ticket')!.charter).not.toMatch(/\{\{|phillbert/);
   });
 
   it('toggling a shared automation writes the user config, never the YAML', () => {

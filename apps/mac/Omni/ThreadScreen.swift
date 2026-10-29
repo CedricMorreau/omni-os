@@ -68,6 +68,7 @@ private struct ThreadView: View {
       if let thread = store.thread {
         VStack(spacing: 0) {
           ThreadHeader(model: model, store: store, thread: thread)
+          TicketRouteCard(client: model.client, store: store)
           TranscriptView(model: model, store: store, ui: ui, markdown: markdown)
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
           ReplyComposerHost(model: model, store: store, thread: thread)

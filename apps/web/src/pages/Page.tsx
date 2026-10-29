@@ -5,6 +5,7 @@ import { AutomationsPage } from './Automations.tsx';
 import { ChannelPage } from './Channel.tsx';
 import { NewChannelPage } from './ChannelSettings.tsx';
 import { HomePage } from './Home.tsx';
+import { RolesPage } from './Roles.tsx';
 import { SearchPage } from './Search.tsx';
 import { SecretsPage } from './Secrets.tsx';
 import { SettingsPage } from './Settings.tsx';
@@ -28,6 +29,8 @@ export function Page({ route }: { route: Route }) {
       return <AutomationsPage />;
     case 'secrets':
       return <SecretsPage />;
+    case 'roles':
+      return <RolesPage />;
     case 'sync':
       return <SyncPage />;
     case 'storage':

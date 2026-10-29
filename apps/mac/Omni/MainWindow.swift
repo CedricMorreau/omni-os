@@ -190,6 +190,8 @@ struct DetailView: View {
       SearchScreen(model: model, query: query)
     } else if model.route == .automations {
       AutomationsView(model: model)
+    } else if model.route == .roles {
+      RolesScreen(model: model)
     } else if case .artifacts = model.route {
       ArtifactsScreen(model: model)
     } else {
@@ -235,6 +237,7 @@ extension Route {
     case .thread: "text.bubble"
     case .search: "magnifyingglass"
     case .automations: "bolt"
+    case .roles: "person.2"
     case .secrets: "key"
     case .settings: "slider.horizontal.3"
     case .artifacts: "square.stack.3d.up"

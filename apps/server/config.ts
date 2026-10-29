@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { configPath, resolved } from './user-config.ts';
@@ -106,6 +107,7 @@ export const paths = {
   mcpAsk: join(ROOT, 'apps', 'mcp', 'ask.ts'),
   /** read_referenced_thread alone, which every local thread without `omni` gets. */
   mcpThreads: join(ROOT, 'apps', 'mcp', 'threads.ts'),
+  mcpTicket: join(ROOT, 'apps', 'mcp', 'ticket.ts'),
   /** Claude Code mods (plugins of function hooks) Omni loads when config.mods is on. */
   mods: join(ROOT, 'mods'),
   modProgress: join(ROOT, 'mods', 'omni-progress'),
@@ -120,3 +122,5 @@ export const artifactsDir = (threadId: string) => join(paths.threads, threadId, 
 export const designSystemFile = (threadId: string) => join(paths.threads, threadId, 'design-system.html');
 export const browserOutDir = (threadId: string) => join(paths.threads, threadId, 'browser');
 export const uploadsDir = (threadId: string) => join(paths.threads, threadId, 'uploads');
+export const memoryDir = () => join(homedir(), '.claude/projects', homedir().replace(/[^a-zA-Z0-9]/g, '-'), 'memory');
+export const clientFile = (channelId: string) => join(memoryDir(), 'clients', `${channelId}.md`);

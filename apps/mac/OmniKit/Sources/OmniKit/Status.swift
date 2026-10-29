@@ -255,12 +255,19 @@ public struct CrewRole: Decodable, Hashable, Sendable, Identifiable {
   public let effort: String?
   public let channel: String?
   public let mcp: [String]
+  public let skills: [String]
+  public let stages: [Int]
+  public let source: Source
   public let charter: String
   /// Why the role's defaults can't run, e.g. a model its harness does not offer.
   public let error: String?
 
   enum CodingKeys: String, CodingKey {
-    case id, name, description, harness, model, effort, channel, mcp, charter, error
+    case id, name, description, harness, model, effort, channel, mcp, skills, stages, source, charter, error
+  }
+
+  public enum Source: String, Decodable, Hashable, Sendable {
+    case shipped, yours
   }
 
   public init(from decoder: any Decoder) throws {
@@ -273,6 +280,9 @@ public struct CrewRole: Decodable, Hashable, Sendable, Identifiable {
     effort = try c.decodeEffort(.effort)
     channel = try c.decodeIfPresent(String.self, forKey: .channel)
     mcp = try c.decodeIfPresent([String].self, forKey: .mcp) ?? []
+    skills = try c.decodeIfPresent([String].self, forKey: .skills) ?? []
+    stages = try c.decodeIfPresent([Int].self, forKey: .stages) ?? []
+    source = (try? c.decodeIfPresent(Source.self, forKey: .source)) ?? .shipped
     charter = try c.decodeIfPresent(String.self, forKey: .charter) ?? ""
     error = try c.decodeIfPresent(String.self, forKey: .error)
   }

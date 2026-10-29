@@ -65,9 +65,10 @@ export async function baseOptions(channel: Channel): Promise<BaseOptions> {
     });
   const origin = await gitOr(repo, ['remote', 'get-url', REMOTE]);
   const known = origin ? (await gitOr(repo, ['symbolic-ref', '--short', `refs/remotes/${REMOTE}/HEAD`]))?.replace(`${REMOTE}/`, '') ?? null : null;
+  const preset = channel.default_base ? await commitOf(repo, channel.default_base) : null;
   return {
     available: true,
-    head: { ref: current ?? 'HEAD', sha },
+    head: preset ? { ref: channel.default_base!, sha: preset } : { ref: current ?? 'HEAD', sha },
     refs,
     remote: origin ? { remote: REMOTE, branch: known, sha: known ? await commitOf(repo, `refs/remotes/${REMOTE}/${known}`) : null } : null,
   };
@@ -117,10 +118,20 @@ const fetchRemoteDefault = (repo: string) =>
     return { sha, ref: `${REMOTE}/${branch}` };
   });
 
-/** The commit a pick names right now, and the ref to call it by. A `remote-default` pick fetches; nothing else touches the network. */
+const fetchRemoteBranch = (repo: string, branch: string) =>
+  alone(repo, async () => {
+    try {
+      await git(repo, ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', REMOTE, `+refs/heads/${branch}:refs/remotes/${REMOTE}/${branch}`], 60_000);
+    } catch (err) {
+      throw new Error(`Could not fetch ${REMOTE}/${branch}: ${gitMessage(err)}`);
+    }
+  });
+
+/** The commit a pick names right now, and the ref to call it by. A `remote-default` pick and an `origin/<branch>` ref fetch; nothing else touches the network. */
 export async function resolvePick(repo: string, pick: BasePick): Promise<{ sha: string; ref: string }> {
   if (pick.kind === 'remote-default') return fetchRemoteDefault(repo);
   if (pick.kind === 'ref') {
+    if (pick.ref.startsWith(`${REMOTE}/`)) await fetchRemoteBranch(repo, pick.ref.slice(REMOTE.length + 1));
     const refusal = await checkPick(repo, pick);
     if (refusal) throw new Error(refusal);
     return { sha: (await commitOf(repo, pick.ref))!, ref: pick.ref };

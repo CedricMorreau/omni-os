@@ -12,6 +12,7 @@ public enum Route: Hashable, Sendable {
   case thread(id: String, artifact: Int? = nil)
   case search(query: String)
   case automations
+  case roles
   case secrets
   /// The workspace Settings page (`#/settings`): the user's name. A channel's own tab is `.channel(_, .settings)`.
   case settings
@@ -63,6 +64,7 @@ public enum Route: Hashable, Sendable {
     switch (a, b) {
     case ("search", _): self = .search(query: query.first("q") ?? "")
     case ("automations", nil): self = .automations
+    case ("roles", nil): self = .roles
     case ("secrets", nil): self = .secrets
     case ("settings", nil): self = .settings
     case ("artifacts", nil): self = .artifacts
@@ -83,6 +85,7 @@ public enum Route: Hashable, Sendable {
     case .thread(let id, _): "#/t/\(uriComponent(id))"
     case .search(let q): "#/search?q=\(uriComponent(q))"
     case .automations: "#/automations"
+    case .roles: "#/roles"
     case .secrets: "#/secrets"
     case .settings: "#/settings"
     case .artifacts: "#/artifacts"

@@ -214,6 +214,7 @@ export function playwrightMcpBin() {
 export const ASK_SERVER = 'omni-ask';
 /** The server with read_referenced_thread alone (apps/mcp/threads.ts), for threads that do not get `omni`, which has it too. */
 export const THREADS_SERVER = 'omni-threads';
+export const TICKET_SERVER = 'omni-ticket';
 /** How long a harness lets an ask_user_question call wait for the user: a day. */
 export const ASK_TIMEOUT_SEC = 86_400;
 
@@ -241,6 +242,7 @@ export function buildMcpConfig(input: McpInput) {
   } else {
     servers[THREADS_SERVER] = { command: paths.tsx, args: [paths.mcpThreads], env: api };
   }
+  if (input.role?.mcp.includes('ticket')) servers[TICKET_SERVER] = { command: paths.tsx, args: [paths.mcpTicket], env: api };
   return { mcpServers: servers };
 }
 

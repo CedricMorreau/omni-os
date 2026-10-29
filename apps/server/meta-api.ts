@@ -6,7 +6,7 @@ import { pollErrors, watchedRepo } from './automation-watch.ts';
 import { isPrTrigger } from './automation-events.ts';
 import { recentDeliveries } from './automation-deliveries.ts';
 import { webhookInfo } from './github-webhook-api.ts';
-import { listCrew } from './crew.ts';
+import { PROTECTED_ROLES, ROLE_ID, deleteRole, getCrew, listCrew, saveRole } from './crew.ts';
 import { channelCatalog, freshCatalog, getCatalog } from './harness/catalog-service.ts';
 import { validateDefaults } from './harness/resolve.ts';
 import { HARNESS_INSTALL } from './harness/types.ts';
@@ -25,6 +25,36 @@ metaApi.get('/crew', (c) => {
       error: r.error ?? validateDefaults({ harness: r.harness, model: r.model, effort: r.effort }, cat),
     })),
   );
+});
+
+const roleInput = z.object({
+  name: z.string().trim().min(1, 'Give the role a name.').max(40),
+  description: z.string().trim().max(200).default(''),
+  model: z.string().trim().optional(),
+  skills: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+  stages: z.array(z.number().int().min(1).max(10)).max(10).default([]),
+  charter: z.string().max(20_000).default(''),
+});
+
+const roleError = (message: string, status: 400 | 404 | 409) => Object.assign(new Error(message), { status });
+
+metaApi.post('/crew', async (c) => {
+  const body = roleInput.extend({ id: z.string().regex(ROLE_ID, 'Use lowercase letters, digits and dashes for the id.') }).parse(await c.req.json());
+  if (getCrew(body.id)) throw roleError(`A role with the id "${body.id}" already exists.`, 409);
+  return c.json(saveRole(body.id, body), 201);
+});
+
+metaApi.put('/crew/:id', async (c) => {
+  const current = getCrew(c.req.param('id'));
+  if (!current) throw roleError('No such role.', 404);
+  return c.json(saveRole(current.id, roleInput.parse(await c.req.json()), current));
+});
+
+metaApi.delete('/crew/:id', (c) => {
+  const id = c.req.param('id');
+  if (PROTECTED_ROLES.includes(id)) throw roleError(`The ${id} role cannot be deleted.`, 409);
+  if (!deleteRole(id)) throw roleError(getCrew(id) ? 'A shipped role cannot be deleted. Remove its stages instead.' : 'No such role.', getCrew(id) ? 409 : 404);
+  return c.json({ ok: true });
 });
 
 // The harnesses with their availability, fix command, models, efforts, cap and running count.

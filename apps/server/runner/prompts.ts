@@ -1,5 +1,6 @@
 // The system prompt handed to a harness for one thread.
-import { config, artifactsDir, browserOutDir, designSystemFile } from '../config.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { config, artifactsDir, browserOutDir, clientFile, designSystemFile } from '../config.ts';
 import { artifacts, type Channel, type Thread } from '../db.ts';
 import type { CrewRole } from '../crew.ts';
 import { isRemoteHarness } from '../harness/types.ts';
@@ -54,6 +55,7 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
         ? `- You are in a dedicated git worktree on branch ${thread.branch}. Commit here; open a PR when asked.`
         : '',
     channel.notes ? `- Channel notes: ${channel.notes}` : '',
+    ...clientLines(channel),
     ...(role?.mcp.includes('omni')
       ? [
           '',
@@ -119,4 +121,17 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
   }
   if (role) lines.push('', `## Your role: ${role.name}`, role.charter);
   return lines.filter((l) => l !== '').join('\n').replace(/\n## /g, '\n\n## ');
+}
+
+export function clientLines(channel: Channel): string[] {
+  const file = clientFile(channel.id);
+  if (!existsSync(file)) return [];
+  return [
+    '',
+    `## Client file: ${channel.name}`,
+    `What ${userName()} knows about this client: stack, deploy, preview, Productive, contacts, gotchas. Source: ${file}.`,
+    'When you learn something that every later thread for this client needs, update that file in the same section. Never write a password, token or other secret in it: the file is backed up to GitHub.',
+    '',
+    readFileSync(file, 'utf8').trim(),
+  ];
 }

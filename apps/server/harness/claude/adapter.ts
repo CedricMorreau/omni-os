@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { apiToken } from '../../api-token.ts';
-import { config, paths, artifactsDir, threadDir } from '../../config.ts';
+import { config, paths, artifactsDir, memoryDir, threadDir } from '../../config.ts';
 import type { Thread } from '../../db.ts';
 import { ASK_TIMEOUT_SEC } from '../../sandbox.ts';
 import { parseEvent, LineSplitter } from '../../stream.ts';
@@ -102,7 +102,7 @@ export const claudeAdapter: HarnessAdapter = {
       '--add-dir', threadDir(thread.id),
       '--append-system-prompt', systemPrompt,
       // Claude Code keys auto-memory on the cwd, and threads run outside the home folder.
-      '--settings', JSON.stringify({ autoMemoryDirectory: join(homedir(), '.claude/projects', homedir().replace(/[^a-zA-Z0-9]/g, '-'), 'memory') }),
+      '--settings', JSON.stringify({ autoMemoryDirectory: memoryDir() }),
     ];
     if (thread.effort) args.push('--effort', thread.effort);
     if (thread.cwd !== config.brainDir && existsSync(config.brainDir)) args.push('--add-dir', config.brainDir);

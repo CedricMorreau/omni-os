@@ -17,6 +17,7 @@ import { HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx
 import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { HeaderActions } from '../components/thread/HeaderActions.tsx';
+import { RouteCard } from '../components/thread/RouteCard.tsx';
 import { ContinueCrumbs } from '../components/ContinueLinks.tsx';
 import { Avatar, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, Segmented } from '../components/ui.tsx';
 import { href } from '../router.ts';
@@ -367,6 +368,10 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
             artifactCount={artifactCount}
             asking={asking}
           />
+        </div>
+
+        <div className="shrink-0 px-3 md:px-6">
+          <RouteCard thread={thread} version={events.length} className="mx-auto mb-1 max-w-4xl" />
         </div>
 
         {/* transcript */}

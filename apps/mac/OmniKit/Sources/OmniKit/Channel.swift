@@ -10,6 +10,16 @@ public struct ChannelKind: OpenEnum {
   public static let system: Self = "system"
 }
 
+public struct ChannelLink: Codable, Hashable, Sendable {
+  public var label: String
+  public var url: String
+
+  public init(label: String, url: String) {
+    self.label = label
+    self.url = url
+  }
+}
+
 /// A channel row. Field names follow `Channel` in apps/server/db.ts.
 public struct Channel: Decodable, Hashable, Sendable, Identifiable {
   public let id: String
@@ -34,9 +44,10 @@ public struct Channel: Decodable, Hashable, Sendable, Identifiable {
   public let defaultHarness: HarnessID?
   public let defaultModel: String?
   public let defaultEffort: String?
+  public let links: [ChannelLink]
 
   enum CodingKeys: String, CodingKey {
-    case id, name, kind, notes, icon, archived
+    case id, name, kind, notes, icon, archived, links
     case repoPath = "repo_path"
     case designSystemName = "design_system_name"
     case designSystemSize = "design_system_size"
@@ -73,6 +84,7 @@ public struct Channel: Decodable, Hashable, Sendable, Identifiable {
     defaultHarness = try c.decodeIfPresent(String.self, forKey: .defaultHarness).flatMap { $0.isEmpty ? nil : HarnessID(rawValue: $0) }
     defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel).flatMap { $0.isEmpty ? nil : $0 }
     defaultEffort = try c.decodeEffort(.defaultEffort)
+    links = try c.decodeIfPresent([ChannelLink].self, forKey: .links) ?? []
   }
 
   public var runDefaults: RunDefaults { RunDefaults(harness: defaultHarness, model: defaultModel, effort: defaultEffort) }
