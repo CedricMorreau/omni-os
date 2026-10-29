@@ -181,3 +181,27 @@ describe('roles per stage', () => {
     expect(T.moveTicket(id, 4).role).toBeNull();
   });
 });
+
+describe('tickets from the composer and from existing threads', () => {
+  it('finds the source in the text the user typed', () => {
+    expect(T.sourceFromText('please do https://app.productive.io/1-example/projects/100/tasks/task/123?filter=x now')).toEqual({ source: 'productive', link: 'https://app.productive.io/1-example/projects/100/tasks/task/123?filter=x' });
+    expect(T.sourceFromText('see https://example.slack.com/archives/C1/p2')).toMatchObject({ source: 'slack' });
+    expect(T.sourceFromText('fix the footer')).toEqual({ source: 'local', link: null });
+  });
+
+  it('turns a plain thread into a ticket at intake, once', async () => {
+    const thread = await fakeStart({ id: 'plain-1' });
+    db.threads.update(thread.id, { role: null });
+    const { ticket, prompt } = T.attachTicket(thread.id, { source: 'productive', link: 'https://app.productive.io/1/projects/2/tasks/task/20706074', ref: '1053' });
+    expect(ticket).toMatchObject({ ref: '#1053', stage: 0, source: 'productive' });
+    expect(db.threads.get(thread.id)?.role).toBe('ticket');
+    expect(prompt).toContain('done earlier in this thread');
+    expect(() => T.attachTicket(thread.id, { source: 'local' })).toThrow(/ticket already/);
+  });
+
+  it('sets the ticket title with the route proposal', async () => {
+    const { thread_id: id } = await local();
+    T.proposeRoute(id, [3, 4], {}, 'Product specifications');
+    expect(T.ticketView(T.tickets.get(id)!).title).toBe('Product specifications');
+  });
+});

@@ -99,6 +99,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  'attach_ticket',
+  {
+    description:
+      `Turn an existing thread in a client channel into a ticket, keeping its history and branch, when ${USER} asks (for example work that was started as a plain thread). ` +
+      'source productive needs the Productive task link; ref is the ticket number the user uses (like 1053). The thread then does intake and proposes its route.',
+    inputSchema: { thread_id: z.string(), source: z.enum(['productive', 'slack', 'local']), link: z.string().optional(), ref: z.string().optional() },
+  },
+  async (body) => text(await call('/tickets/attach', { method: 'POST', body: JSON.stringify(body) })),
+);
+
+server.registerTool(
   'set_quick_links',
   {
     description:

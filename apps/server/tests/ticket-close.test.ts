@@ -40,3 +40,17 @@ describe('closing a ticket', () => {
     expect(H.byKind(id, 'user').some((e) => String(e.p.text).includes('The user closed this ticket'))).toBe(false);
   });
 });
+
+describe('a ticket from the channel composer', () => {
+  it('makes a ticket when a client channel thread starts with the ticket role, with the link from the prompt', async () => {
+    const made = await call('POST', '/threads', { channel: 'acme', role: 'ticket', prompt: 'please pick up https://app.productive.io/1/projects/2/tasks/task/555' });
+    expect(made.status).toBe(200);
+    const ticket = await call('GET', `/tickets/${made.body.id}`);
+    expect(ticket.body).toMatchObject({ ref: '#555', source: 'productive', stage: 0 });
+  });
+
+  it('keeps a thread without the ticket role a plain thread', async () => {
+    const made = await call('POST', '/threads', { channel: 'acme', prompt: 'quick question' });
+    expect((await call('GET', `/tickets/${made.body.id}`)).status).toBe(404);
+  });
+});

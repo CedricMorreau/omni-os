@@ -125,8 +125,9 @@ const checkStages = (stages: number[]) => {
 
 const unrouted = (route: number[]) => STAGES.map((_, i) => i + 1).filter((n) => !route.includes(n));
 
-export function proposeRoute(threadId: string, stages: number[], reasons: Record<string, string> = {}) {
+export function proposeRoute(threadId: string, stages: number[], reasons: Record<string, string> = {}, title?: string) {
   open(threadId);
+  if (title?.trim()) threads.update(threadId, { title: title.trim().slice(0, 120) });
   return tickets.update(threadId, { route_proposal: { stages: checkStages(stages), reasons } });
 }
 
@@ -271,3 +272,32 @@ export const CLOSING_CHORES = [
   '2. Archive this thread with ticket_archive.',
   'Post nothing to Productive or Slack.',
 ].join('\n');
+
+export function sourceFromText(text: string): { source: Source; link: string | null } {
+  const productive = text.match(/https?:\/\/app\.productive\.io\/\S*\/tasks\/(?:task\/)?\d+\S*/)?.[0];
+  if (productive) return { source: 'productive', link: productive };
+  const slack = text.match(/https?:\/\/[\w.-]*slack\.com\/archives\/\S+/)?.[0];
+  if (slack) return { source: 'slack', link: slack };
+  return { source: 'local', link: null };
+}
+
+export function attachTicket(threadId: string, input: { source: Source; link?: string | null; ref?: string | null; context?: string | null }) {
+  const thread = threads.get(threadId);
+  if (!thread) throw new TicketError('no such thread', 404);
+  if (tickets.get(threadId)) throw new TicketError('this thread is a ticket already', 409);
+  if (input.source !== 'local' && !input.link?.trim()) throw new TicketError(`a ${input.source} ticket needs its link`);
+  const link = input.source === 'local' ? null : input.link!.trim();
+  const ref = input.ref?.trim().match(/^#?\d+$/) ? `#${input.ref.trim().replace(/^#/, '')}` : ticketRef(input.source, link);
+  tickets.insert({ thread_id: threadId, channel_id: thread.channel_id, ref, source: input.source, link, context: input.context?.trim() || null });
+  threads.update(threadId, { role: 'ticket' });
+  return {
+    ticket: ticketView(tickets.get(threadId)!),
+    prompt: [
+      `This thread is now ticket ${ref}.`,
+      link ? `Link: ${link}` : null,
+      'Do intake now: keep the work this thread already did, propose the route with ticket_propose_route, leave the stages that are done out with the reason "done earlier in this thread", and give the ticket its title. Keep working on this thread\'s branch.',
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+  };
+}

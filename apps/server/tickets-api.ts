@@ -8,6 +8,7 @@ import {
   SOURCES,
   TicketError,
   CLOSING_CHORES,
+  attachTicket,
   clientFeedback,
   closeTicket,
   createTicket,
@@ -97,11 +98,22 @@ ticketsApi.post('/:id/role', async (c) => {
 const stagesSchema = z.array(z.number().int().min(1).max(10)).min(1).max(10);
 
 ticketsApi.post('/:id/route-proposal', async (c) => {
-  const { stages, reasons } = z.object({ stages: stagesSchema, reasons: z.record(z.string(), z.string().max(300)).default({}) }).parse(await c.req.json());
-  return c.json(view(proposeRoute(c.req.param('id'), stages, reasons)));
+  const { stages, reasons, title } = z
+    .object({ stages: stagesSchema, reasons: z.record(z.string(), z.string().max(300)).default({}), title: z.string().max(120).optional() })
+    .parse(await c.req.json());
+  return c.json(view(proposeRoute(c.req.param('id'), stages, reasons, title)));
 });
 
 ticketsApi.post('/:id/route', async (c) => {
   const { stages } = z.object({ stages: stagesSchema }).parse(await c.req.json());
   return c.json(view(setRoute(c.req.param('id'), stages)));
+});
+
+ticketsApi.post('/attach', async (c) => {
+  const body = z
+    .object({ thread_id: z.string(), source: z.enum(SOURCES).default('local'), link: z.string().nullish(), ref: z.string().max(20).nullish(), context: z.string().nullish() })
+    .parse(await c.req.json());
+  const { ticket, prompt } = attachTicket(body.thread_id, body);
+  await postMessage(body.thread_id, prompt, { mode: 'queue' });
+  return c.json(ticket);
 });

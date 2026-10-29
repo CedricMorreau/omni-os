@@ -12,6 +12,7 @@ import { stampThreadReferences } from './message-context/thread-reference.ts';
 import { commentsPrompt, isArtifactUrl } from '@omni/shared/published.ts';
 import { bus } from './bus.ts';
 import { uploadsDir } from './config.ts';
+import { createTicket, sourceFromText } from './tickets.ts';
 import { artifacts, channels, events, fileDigests, messageRequests, publicChannel, requestFingerprint, threads, type Thread } from './db.ts';
 import { readBody } from './read-body.ts';
 import { compactBlocked, contextView } from './context.ts';
@@ -86,6 +87,14 @@ threadRoutesApi.post('/', async (c) => {
   const { data, files } = await readBody(c);
   const body = createSchema.parse(data);
   checkUploads(files);
+  const channel = channels.get(body.channel);
+  if (body.role === 'ticket' && channel?.kind === 'client') {
+    const found = sourceFromText(body.prompt);
+    const ticket = await createTicket({ channel: channel.id, ...found, context: body.prompt, title: body.title }, ({ id, prompt }) =>
+      createThread({ ...body, id, prompt, files }),
+    );
+    return c.json(threads.get(ticket.thread_id));
+  }
   return c.json(await createThread({ ...body, files }));
 });
 

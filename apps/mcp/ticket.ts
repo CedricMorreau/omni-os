@@ -31,9 +31,13 @@ server.registerTool(
     description:
       `At intake, after you read the ticket: propose which of the ten stages this ticket needs (1 Research, 2 Build plan, 3 Execute, 4 Test, 5 Review, 6 Manual test, 7 Preview + QA note, 8 Client approval, 9 Deploy, 10 Closing). ` +
       `Give a one-line reason for every stage you leave out, keyed by its number. ${USER} ticks and unticks stages on the route card and confirms it there or in this thread. Then stop and wait.`,
-    inputSchema: { stages: z.array(z.number().int().min(1).max(10)).min(1), reasons: z.record(z.string(), z.string()).optional() },
+    inputSchema: {
+      stages: z.array(z.number().int().min(1).max(10)).min(1),
+      reasons: z.record(z.string(), z.string()).optional(),
+      title: z.string().max(120).optional().describe('The ticket title: the Productive task name, or a short name for Slack or local work. It replaces the thread title.'),
+    },
   },
-  async ({ stages, reasons }) => text(await post('/route-proposal', { stages, reasons: reasons ?? {} })),
+  async ({ stages, reasons, title }) => text(await post('/route-proposal', { stages, reasons: reasons ?? {}, title })),
 );
 
 server.registerTool(
