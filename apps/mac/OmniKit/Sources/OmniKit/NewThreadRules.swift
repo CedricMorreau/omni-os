@@ -55,6 +55,15 @@ extension CrewRole {
 /// How the pickers move each other, as `NewThreadComposer` in apps/web/src/components/Composer.tsx.
 public enum NewThreadRules {
   public static let conductor = "conductor"
+  public static let ticket = "ticket"
+
+  public static func withTicketRole(_ choice: NewThreadChoice, crew: [CrewRole], clients: Set<String>) -> NewThreadChoice {
+    var c = choice
+    let client = clients.contains(c.channel)
+    if client, c.role.isEmpty, crew.contains(where: { $0.id == ticket }) { c.role = ticket }
+    if !client, c.role == ticket { c.role = "" }
+    return c
+  }
 
   /// A new composer: the channel's own, else Conductor, on Auto. The role, and the run it or the channel sets, come
   /// once crew and harnesses load.

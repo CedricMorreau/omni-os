@@ -45,6 +45,21 @@ private let channels: Set<String> = ["conductor", "acme", "inbox"]
     #expect(fixed.channel == "acme" && fixed.role == "")
   }
 
+  @Test func addsTheTicketRoleOnlyInAClientChannel() {
+    let team = crew(#",{"id":"ticket","name":"Ticket","description":""}"#)
+    let start = NewThreadChoice(channel: "acme", role: "", harness: .claudeCode, model: "auto", effort: "")
+    #expect(NewThreadRules.withTicketRole(start, crew: team, clients: ["acme"]).role == "ticket")
+    #expect(NewThreadRules.withTicketRole(start, crew: crew(), clients: ["acme"]).role == "")
+    #expect(NewThreadRules.withTicketRole(start, crew: team, clients: []).role == "")
+    var builder = start
+    builder.role = "builder"
+    #expect(NewThreadRules.withTicketRole(builder, crew: team, clients: ["acme"]).role == "builder")
+    var ticketElsewhere = start
+    ticketElsewhere.channel = "inbox"
+    ticketElsewhere.role = "ticket"
+    #expect(NewThreadRules.withTicketRole(ticketElsewhere, crew: team, clients: ["acme"]).role == "")
+  }
+
   @Test func pickingARolePresetsChannelHarnessModelAndEffort() {
     var c = NewThreadRules.settled(NewThreadRules.initial(fixedChannel: nil), crew: crew(), harnesses: harnesses())
     c = NewThreadRules.selectingRole("builder", from: c, crew: crew(), channels: channels, harnesses: harnesses(), channelFixed: false)
@@ -278,6 +293,27 @@ private final class FakeNewThreadAPI: NewThreadAPI {
     #expect(await m.send() == nil)
     #expect(m.sendError == "bad role")
     #expect(DraftStore(directory: dir.url).text(for: "new:acme") == "hi")
+  }
+
+  @Test func preselectsTheTicketRoleInAClientChannelUntilARoleIsPicked() {
+    let dir = TempDir("drafts")
+    let team = crew(#",{"id":"ticket","name":"Ticket","description":""}"#)
+    let m = NewThreadComposerModel(fixedChannel: "acme", api: FakeNewThreadAPI(), drafts: DraftStore(directory: dir.url))
+    m.update(crew: team, channels: channels, harnesses: harnesses(), clients: ["acme"])
+    #expect(m.choice.role == "ticket")
+    m.selectRole("")
+    m.update(crew: team, channels: channels, harnesses: harnesses(), clients: ["acme"])
+    #expect(m.choice.role == "")
+    let inbox = NewThreadComposerModel(fixedChannel: "inbox", api: FakeNewThreadAPI(), drafts: DraftStore(directory: dir.url))
+    inbox.update(crew: team, channels: channels, harnesses: harnesses(), clients: ["acme"])
+    #expect(inbox.choice.role == "")
+    let home = NewThreadComposerModel(fixedChannel: nil, api: FakeNewThreadAPI(), drafts: DraftStore(directory: dir.url))
+    home.update(crew: team, channels: channels, harnesses: harnesses(), clients: ["acme"])
+    #expect(home.choice.role == "conductor")
+    home.selectChannel("acme")
+    #expect(home.choice.role == "ticket")
+    home.selectChannel("inbox")
+    #expect(home.choice.role == "")
   }
 
   @Test func opensOnTheChannelsRunAndKeepsAPickOrPreset() {

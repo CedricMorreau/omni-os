@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_STAGES, canClose, draftLabel, initialTicks, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
+import { ALL_STAGES, canClose, defaultRoleFor, draftLabel, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
 
 const proposal = { stages: [3, 4, 9, 10], reasons: { '1': 'tiny copy fix', '2': ' no plan needed ' } };
 
@@ -84,5 +84,74 @@ describe('canClose', () => {
     expect(canClose({ closed_at: '2026-10-29T12:00:00Z', route: [10], stage: 10 })).toBe(false);
     expect(canClose({ closed_at: null, route: null, stage: 0 })).toBe(false);
     expect(canClose({ closed_at: null, route: [], stage: 0 })).toBe(false);
+  });
+});
+
+describe('stagePhase', () => {
+  it('maps each stage to its phase', () => {
+    expect([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => stagePhase(n))).toEqual([
+      'intake', 'plan', 'plan', 'build', 'build', 'build', 'manual', 'client', 'client', 'deploy', 'closing',
+    ]);
+  });
+
+  it('uses the closed phase for a closed ticket at any stage', () => {
+    expect(stagePhase(10, true)).toBe('closed');
+    expect(stagePhase(3, true)).toBe('closed');
+  });
+
+  it('names the colour token of a phase', () => {
+    expect(phaseColor('deploy')).toBe('var(--phase-deploy)');
+  });
+});
+
+describe('stage text', () => {
+  it('writes the pill as number and name, or Intake, or Closed', () => {
+    expect(stagePillText({ stage: 3, closed_at: null })).toBe('3 · Execute');
+    expect(stagePillText({ stage: 0, closed_at: null })).toBe('Intake');
+    expect(stagePillText({ stage: 10, closed_at: '2026-10-29T12:00:00Z' })).toBe('Closed');
+  });
+
+  it('writes the section label', () => {
+    expect(stageLabel(0)).toBe('Intake');
+    expect(stageLabel(1)).toBe('1 Research');
+    expect(stageLabel(10)).toBe('10 Closing');
+  });
+});
+
+describe('groupByStage', () => {
+  const t = (thread_id: string, stage: number, updated_at: string, closed_at: string | null = null) => ({ thread_id, ref: thread_id, title: thread_id, stage, updated_at, closed_at });
+
+  it('makes one section per stage in stage order, only for stages that hold tickets', () => {
+    const sections = groupByStage([t('a', 3, '2026-10-01'), t('b', 0, '2026-10-02'), t('c', 9, '2026-10-03'), t('d', 3, '2026-10-04')]);
+    expect(sections.map((s) => [s.stage, s.label, s.phase, s.items.map((i) => i.thread_id)])).toEqual([
+      [0, 'Intake', 'intake', ['b']],
+      [3, '3 Execute', 'build', ['d', 'a']],
+      [9, '9 Deploy', 'deploy', ['c']],
+    ]);
+  });
+
+  it('leaves out closed tickets and returns nothing for an empty list', () => {
+    expect(groupByStage([t('a', 10, '2026-10-01', '2026-10-02')])).toEqual([]);
+    expect(groupByStage([])).toEqual([]);
+  });
+
+  it('removes ticket threads from the other threads', () => {
+    expect(withoutTickets([{ id: 'a' }, { id: 'x' }], [t('a', 3, '2026-10-01')])).toEqual([{ id: 'x' }]);
+  });
+});
+
+describe('defaultRoleFor', () => {
+  const crew = [{ id: 'conductor' }, { id: 'ticket' }, { id: 'builder' }];
+
+  it('picks Ticket in a client channel and Conductor in the conductor channel', () => {
+    expect(defaultRoleFor({ id: 'acme', kind: 'client' }, crew)).toBe('ticket');
+    expect(defaultRoleFor({ id: 'conductor', kind: 'system' }, crew)).toBe('conductor');
+  });
+
+  it('picks no role in other channels or before the crew loads', () => {
+    expect(defaultRoleFor({ id: 'inbox', kind: 'internal' }, crew)).toBe('');
+    expect(defaultRoleFor({ id: 'me', kind: 'personal' }, crew)).toBe('');
+    expect(defaultRoleFor(undefined, crew)).toBe('');
+    expect(defaultRoleFor({ id: 'acme', kind: 'client' }, [])).toBe('');
   });
 });

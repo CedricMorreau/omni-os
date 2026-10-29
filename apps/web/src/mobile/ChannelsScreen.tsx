@@ -2,14 +2,17 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ChannelWithRunning, ConductorHandoffGroup, Thread, ThreadStub } from '../api.ts';
 import { OmniMark } from '../components/brand.tsx';
 import { useLiveThreads } from '../components/ThreadList.tsx';
-import { Avatar, Icon, Segmented, StatusDot } from '../components/ui.tsx';
+import { Avatar, Chip, Icon, Segmented, StatusDot } from '../components/ui.tsx';
 import { inChannel, reasonOf } from '../needs-you.ts';
 import { href } from '../router.ts';
 import { QuickLinks } from '../components/QuickLinks.tsx';
+import { StagePill } from '../components/StagePill.tsx';
+import { useChannelTickets } from '../components/TicketGroups.tsx';
+import { groupByStage, phaseColor, type TicketView } from '../ticket-route.ts';
 import { readPref, useApp, useNow, writePref } from '../store.tsx';
 import { useFolders } from '../folders.tsx';
 import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoRow, MoScroll, MoSection, MoTitle } from './parts.tsx';
-import { rowOf, type RowItem } from './rows.ts';
+import { rowOf, shortTime, type RowItem } from './rows.ts';
 import { useShell } from './shell.tsx';
 
 const GROUPS: { label: string; kinds: string[] }[] = [
@@ -142,6 +145,8 @@ export function ChannelScreen({ id }: { id: string }) {
   const [tab, setTab] = useState<'active' | 'recent'>('active');
   const conductor = id === 'conductor';
   const name = conductor ? 'Conductor' : `#${ch?.name ?? id}`;
+  const tickets = useChannelTickets(id, ch?.kind === 'client', list.data);
+  const sections = useMemo(() => groupByStage(tickets), [tickets]);
 
   const { active, recent, activeFolders, recentFolders } = useMemo(() => {
     const info = ch ? { name: ch.name, icon: ch.icon } : undefined;
@@ -150,8 +155,9 @@ export function ChannelScreen({ id }: { id: string }) {
     const activeRows: RowItem[] = [];
     const recentRows: RowItem[] = [];
     const handoffChildren = new Set((id === 'conductor' ? ch?.handoffs ?? [] : []).flatMap((g) => g.children.map((child) => child.id)));
+    const ticketIds = new Set(tickets.map((t) => t.thread_id));
 
-    for (const t of (list.data ?? []).filter((x) => x.source !== 'team' && !handoffChildren.has(x.id))) {
+    for (const t of (list.data ?? []).filter((x) => x.source !== 'team' && !handoffChildren.has(x.id) && !ticketIds.has(x.id))) {
       const item = needs.get(t.id);
       const row = rowOf(t, info, now);
       const finalRow = item ? { ...row, meta: reasonOf(item).label, status: reasonOf(item).glyph === 'needs' ? 'needs' : row.status } : row;
@@ -195,7 +201,7 @@ export function ChannelScreen({ id }: { id: string }) {
     }
 
     return { active: activeRows, recent: recentRows, activeFolders: foldersFor('active'), recentFolders: foldersFor('recent') };
-  }, [list.data, needsYou, id, ch, now]);
+  }, [list.data, needsYou, id, ch, now, tickets]);
 
   const tabFolders = tab === 'active' ? activeFolders : recentFolders;
   const activeCount = active.length + activeFolders.reduce((n, f) => n + f.rows.length, 0);
@@ -226,6 +232,16 @@ export function ChannelScreen({ id }: { id: string }) {
             <QuickLinks channelId={ch.id} links={ch.links ?? []} editable pillClassName={MO_PILL} />
           </div>
         )}
+        {sections.map((s) => (
+          <MoSection
+            key={s.stage}
+            title={<span style={{ color: phaseColor(s.phase) }}>{s.label}</span>}
+            count={s.items.length}
+          >
+            <MobileTicketRows items={s.items} now={now} onOpen={(t) => shell.open(href.thread(t.thread_id))} />
+          </MoSection>
+        ))}
+        {sections.length > 0 && <div className="px-5 pt-2 text-[12px] font-medium text-fg-3">Other threads</div>}
         <div className="px-4 pt-2">
           <Segmented
             label="Threads"
@@ -279,6 +295,29 @@ export function ChannelScreen({ id }: { id: string }) {
         </button>
       </div>
     </>
+  );
+}
+
+function MobileTicketRows({ items, now, onOpen }: { items: TicketView[]; now: number; onOpen: (t: TicketView) => void }) {
+  return (
+    <div className="flex flex-col">
+      {items.map((t, i) => (
+        <button key={t.thread_id} type="button" onClick={() => onOpen(t)} className="mo-row flex w-full flex-col gap-1 px-1 py-2.5 text-left">
+          <span className={`flex w-full min-w-0 flex-col gap-1 pb-2.5 -mb-2.5 ${i === items.length - 1 ? '' : 'border-b border-line'}`}>
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-[15px] leading-[1.3] text-fg">{t.title}</span>
+              <span className="shrink-0 text-[12px] leading-none text-fg-3 tabular-nums">{shortTime(t.updated_at, now)}</span>
+            </span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Chip tone="outline" className="font-num">
+                {t.ref}
+              </Chip>
+              <StagePill ticket={t} />
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
 

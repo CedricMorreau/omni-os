@@ -38,6 +38,8 @@ public final class NewThreadComposerModel {
   /// The pickers hold the preselected run (the role's or the channel's), not a preset or a pick, so they follow the
   /// lists as they load.
   @ObservationIgnored private var preselected = true
+  @ObservationIgnored private var clients: Set<String> = []
+  @ObservationIgnored private var roleChosen = false
   @ObservationIgnored private let api: any NewThreadAPI
   @ObservationIgnored private let drafts: DraftStore
   @ObservationIgnored private let readFile: @Sendable (StagedFile) throws -> UploadFile
@@ -56,12 +58,16 @@ public final class NewThreadComposerModel {
   }
 
   /// Takes the workspace's lists as they load or change: channel ids, and each one's run defaults.
-  public func update(crew: [CrewRole], channels: Set<String>, harnesses: [HarnessInfo], defaults: [String: RunDefaults] = [:]) {
+  public func update(
+    crew: [CrewRole], channels: Set<String>, harnesses: [HarnessInfo], defaults: [String: RunDefaults] = [:], clients: Set<String> = []
+  ) {
     if self.crew != crew { self.crew = crew }
     if self.harnesses != harnesses { self.harnesses = harnesses }
     self.channels = channels
     self.defaults = defaults
+    self.clients = clients
     var next = NewThreadRules.settled(choice, crew: crew, harnesses: harnesses)
+    if !roleChosen { next = NewThreadRules.withTicketRole(next, crew: crew, clients: clients) }
     if preselected { next = NewThreadRules.preselecting(next, crew: crew, harnesses: harnesses, defaults: defaults) }
     if next != choice { choice = next }
   }
@@ -79,6 +85,7 @@ public final class NewThreadComposerModel {
     var c = choice
     if fixedChannel == nil { c.channel = preset.channel }
     c.role = preset.role
+    roleChosen = true
     c.harness = preset.harness ?? .claudeCode
     c.model = preset.model ?? ""
     c.effort = preset.effort ?? ""
@@ -93,6 +100,7 @@ public final class NewThreadComposerModel {
 
   public func selectRole(_ id: String) {
     preselected = true
+    roleChosen = true
     choice = NewThreadRules.selectingRole(
       id, from: choice, crew: crew, channels: channels, harnesses: harnesses, channelFixed: fixedChannel != nil, defaults: defaults)
   }
@@ -100,7 +108,10 @@ public final class NewThreadComposerModel {
   public func selectChannel(_ id: String) {
     guard fixedChannel == nil else { return }
     preselected = true
-    choice = NewThreadRules.selectingChannel(id, from: choice, crew: crew, harnesses: harnesses, defaults: defaults)
+    roleChosen = false
+    let next = NewThreadRules.selectingChannel(id, from: choice, crew: crew, harnesses: harnesses, defaults: defaults)
+    let ticketed = NewThreadRules.withTicketRole(next, crew: crew, clients: clients)
+    choice = ticketed == next ? next : NewThreadRules.preselecting(ticketed, crew: crew, harnesses: harnesses, defaults: defaults)
   }
 
   public func selectModel(harness: HarnessID, model: String) {

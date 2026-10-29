@@ -4,7 +4,8 @@ import { HarnessLogo, OmniMark } from '../components/brand.tsx';
 import { useBasePick, useBaseRows } from '../components/BasePicker.tsx';
 import { AttachmentStrip, useAttachments } from '../components/Composer.tsx';
 import type { ModelChoice } from '../components/ModelPicker.tsx';
-import { Avatar, ErrorNote } from '../components/ui.tsx';
+import { Avatar, ErrorNote, Segmented } from '../components/ui.tsx';
+import { defaultRoleFor } from '../ticket-route.ts';
 import { draftRun, draftRunRequest } from '../new-thread-preset.ts';
 import { baseRequest } from '../worktree-base.ts';
 import { asksAuto } from '../thread-run.ts';
@@ -38,6 +39,7 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
   const [base, setBase] = useBasePick(target);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noRole, setNoRole] = useState(false);
   const att = useAttachments();
   const file = useRef<HTMLInputElement>(null);
   const mic = useDictation((p) => setText((t) => withPhrase(t, p)));
@@ -49,7 +51,8 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
 
   const conductor = target === 'conductor';
   const ch = conductor ? undefined : listed.find((c) => c.id === target);
-  const role = conductor && crew.some((r) => r.id === 'conductor') ? 'conductor' : '';
+  const suggested = defaultRoleFor(conductor ? { id: 'conductor' } : ch, crew);
+  const role = suggested === 'ticket' && noRole ? '' : suggested;
   const ro = crew.find((r) => r.id === role);
   const run = harnesses ? draftRun(picked?.target === target ? picked : null, ro, channels.find((c) => c.id === target), harnesses) : null;
   const { rows: baseRows, reload: reloadBases } = useBaseRows(target, run?.choice.harness ?? '');
@@ -119,6 +122,20 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
             placeholder={ch ? `Describe the task for #${ch.name}` : 'Ask the Conductor. It delegates to the crew.'}
             className="resize-none bg-transparent px-2 text-[16px] leading-[1.45] text-fg outline-none placeholder:text-fg-4"
           />
+          {suggested === 'ticket' && (
+            <div className="px-1">
+              <Segmented
+                label="Role"
+                size="sm"
+                value={noRole ? 'none' : 'ticket'}
+                onChange={(v) => setNoRole(v === 'none')}
+                options={[
+                  { id: 'ticket', label: 'Ticket' },
+                  { id: 'none', label: 'No role' },
+                ]}
+              />
+            </div>
+          )}
           {baseRows && (
             <BaseChip
               rows={baseRows}

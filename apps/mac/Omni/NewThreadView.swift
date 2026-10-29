@@ -57,6 +57,7 @@ private struct NewThreadBox: View {
     let channels: Set<String>
     let harnesses: [HarnessInfo]
     let defaults: [String: RunDefaults]
+    let clients: Set<String>
   }
 
   private var lists: Lists {
@@ -64,7 +65,8 @@ private struct NewThreadBox: View {
     let own = channelHarnesses.flatMap { $0.channel == composer.choice.channel ? $0.list : nil }
     return Lists(
       crew: model.store.crew, channels: Set(channels.map(\.id)), harnesses: own ?? model.store.harnesses,
-      defaults: Dictionary(channels.map { ($0.id, $0.runDefaults) }, uniquingKeysWith: { a, _ in a }))
+      defaults: Dictionary(channels.map { ($0.id, $0.runDefaults) }, uniquingKeysWith: { a, _ in a }),
+      clients: Set(channels.filter { $0.kind == .client }.map(\.id)))
   }
 
   private var placeholder: String {
@@ -109,7 +111,7 @@ private struct NewThreadBox: View {
     }
     #endif
     .onChange(of: lists, initial: true) { _, l in
-      composer.update(crew: l.crew, channels: l.channels, harnesses: l.harnesses, defaults: l.defaults)
+      composer.update(crew: l.crew, channels: l.channels, harnesses: l.harnesses, defaults: l.defaults, clients: l.clients)
     }
     .onAppear {
       menu.onEdit = { text, at in
@@ -270,7 +272,7 @@ private struct NewThreadBox: View {
       guard let list = try? await model.client.harnesses(channel: channel) else { return }
       channelHarnesses = (channel, list)
       let l = lists
-      composer.update(crew: composer.crew, channels: l.channels, harnesses: l.harnesses, defaults: l.defaults)
+      composer.update(crew: composer.crew, channels: l.channels, harnesses: l.harnesses, defaults: l.defaults, clients: l.clients)
     }
   }
 

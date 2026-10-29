@@ -121,6 +121,59 @@ public struct Ticket: Decodable, Hashable, Sendable {
 
 extension Ticket: Identifiable {
   public var id: String { threadID }
+  public var phase: TicketPhase { .of(stage: stage, closed: closedAt != nil) }
+  public var stageLabel: String { TicketPhase.label(stage: stage, name: stageName, closed: closedAt != nil) }
+  public var updated: Date? { OmniJSON.parseDate(updatedAt) }
+}
+
+public enum TicketPhase: String, CaseIterable, Hashable, Sendable {
+  case neutral, discover, build, manualTest, client, deploy, closing
+
+  public static func of(stage: Int, closed: Bool = false) -> TicketPhase {
+    if closed { return .neutral }
+    switch stage {
+    case 1, 2: return .discover
+    case 3...5: return .build
+    case 6: return .manualTest
+    case 7, 8: return .client
+    case 9: return .deploy
+    case 10: return .closing
+    default: return .neutral
+    }
+  }
+
+  public static func label(stage: Int, name: String, closed: Bool) -> String {
+    if closed { return "Closed" }
+    guard (1...TicketStage.all.count).contains(stage) else { return "Intake" }
+    let shown = name.isEmpty ? TicketStage.all[stage - 1].name : name
+    return "\(stage) · \(shown)"
+  }
+}
+
+public enum TicketBoard {
+  public struct Section: Hashable, Sendable, Identifiable {
+    public let stage: Int
+    public let title: String
+    public let tickets: [Ticket]
+    public var id: Int { stage }
+    public var phase: TicketPhase { .of(stage: stage) }
+  }
+
+  public static func sections(_ tickets: [Ticket]) -> [Section] {
+    let open = tickets.filter { $0.closedAt == nil }
+    return (0...TicketStage.all.count).compactMap { stage in
+      let here = open.filter { min(max($0.stage, 0), TicketStage.all.count) == stage }
+        .sorted { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
+      guard !here.isEmpty else { return nil }
+      let title = stage == 0 ? "Intake" : "\(stage) \(TicketStage.all[stage - 1].name)"
+      return Section(stage: stage, title: title, tickets: here)
+    }
+  }
+
+  public static func others(_ threads: [OmniThread], tickets: [Ticket]) -> [OmniThread] {
+    let ids = Set(tickets.map(\.threadID))
+    return threads.filter { !ids.contains($0.id) }
+  }
 }
 
 public enum TicketRoute {
@@ -206,6 +259,10 @@ extension OmniClient {
     } catch .http(status: 404, _) {
       return nil
     }
+  }
+
+  public func tickets(channel: String) async throws(OmniAPIError) -> [Ticket] {
+    try await send("GET", "/api/tickets", query: [("channel", channel)])
   }
 
   public func setTicketRoute(threadID: String, stages: [Int]) async throws(OmniAPIError) -> Ticket {

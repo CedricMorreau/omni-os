@@ -1,41 +1,43 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorText, type Thread } from '../../api.ts';
 import { STAGES } from '../../roles.ts';
-import { ALL_STAGES, canClose, draftLabel, initialTicks, routeMode, routeSummary, skipReason, stageState, toggleStage, type StageState, type TicketView } from '../../ticket-route.ts';
+import { ALL_STAGES, canClose, draftLabel, initialTicks, phaseColor, routeMode, routeSummary, skipReason, stagePhase, stageState, toggleStage, type StageState, type TicketView } from '../../ticket-route.ts';
+import { phaseStyle, StagePill } from '../StagePill.tsx';
 import { Button, CopyButton, ErrorNote, StatusDot } from '../ui.tsx';
 
 const ticketPath = (id: string) => `/tickets/${encodeURIComponent(id)}`;
 
-function useTicket(thread: Pick<Thread, 'id' | 'role' | 'status'>, version: number) {
+export function useTicket(thread: Pick<Thread, 'id' | 'role' | 'status'> | null, version: number) {
   const [ticket, setTicket] = useState<TicketView | null>(null);
   const [gone, setGone] = useState<string | null>(null);
-  const enabled = thread.role === 'ticket' && gone !== thread.id;
+  const id = thread?.id ?? null;
+  const enabled = !!thread && thread.role === 'ticket' && gone !== id;
 
-  useEffect(() => setTicket(null), [thread.id]);
+  useEffect(() => setTicket(null), [id]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !id) return;
     let alive = true;
     api
-      .get<TicketView>(ticketPath(thread.id))
+      .get<TicketView>(ticketPath(id))
       .then((t) => alive && setTicket(t))
       .catch((e) => {
         if (alive && e instanceof ApiError && e.status === 404) {
-          setGone(thread.id);
+          setGone(id);
           setTicket(null);
         }
       });
     return () => {
       alive = false;
     };
-  }, [enabled, thread.id, thread.status, version]);
+  }, [enabled, id, thread?.status, version]);
 
   return [enabled ? ticket : null, setTicket] as const;
 }
 
 const CHIP: Record<StageState, string> = {
   done: 'bg-surface-2 text-fg-2',
-  current: 'bg-fg text-on-ink',
+  current: 'font-semibold',
   next: 'bg-bg text-fg-2 shadow-[inset_0_0_0_1px_var(--line-strong)]',
   off: 'text-fg-4 line-through decoration-fg-4',
 };
@@ -47,14 +49,18 @@ function StageChips({ ticket }: { ticket: TicketView }) {
     <ol className="flex flex-wrap gap-1" aria-label="Route">
       {STAGES.map((name, i) => {
         const state = stageState(i + 1, ticket);
+        const phase = stagePhase(i + 1);
         return (
           <li
             key={name}
             title={`${i + 1} ${name}: ${STATE_LABEL[state]}`}
             aria-current={state === 'current' ? 'step' : undefined}
+            style={state === 'current' ? { ...phaseStyle(phase), boxShadow: `inset 0 0 0 1.5px ${phaseColor(phase)}` } : undefined}
             className={`inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap ${CHIP[state]}`}
           >
-            <span className="tabular-nums opacity-60">{i + 1}</span>
+            <span className="tabular-nums" style={state === 'off' ? undefined : { color: phaseColor(phase) }}>
+              {i + 1}
+            </span>
             {name}
             <span className="sr-only">, {STATE_LABEL[state]}</span>
           </li>
@@ -180,11 +186,10 @@ function CloseTicket({ ticket, onClosed }: { ticket: TicketView; onClosed: (t: T
   );
 }
 
-export function RouteCard({ thread, version, className = '' }: { thread: Pick<Thread, 'id' | 'role' | 'status'>; version: number; className?: string }) {
-  const [ticket, setTicket] = useTicket(thread, version);
+export function RouteCard({ ticket, onTicket: setTicket, className = '' }: { ticket: TicketView | null; onTicket: (t: TicketView) => void; className?: string }) {
   const [editing, setEditing] = useState(false);
 
-  useEffect(() => setEditing(false), [thread.id]);
+  useEffect(() => setEditing(false), [ticket?.thread_id]);
 
   if (!ticket) return null;
   const closed = !!ticket.closed_at;
@@ -203,18 +208,11 @@ export function RouteCard({ thread, version, className = '' }: { thread: Pick<Th
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
         <span className="font-num font-medium text-fg">{ticket.ref}</span>
         {ticket.round > 1 && <span className="text-fg-3">Round {ticket.round}</span>}
-        <span className="text-fg-4">·</span>
-        <span className="min-w-0 truncate text-fg-2">{ticket.stage_name}</span>
+        <StagePill ticket={ticket} />
         {summary && (
           <>
             <span className="text-fg-4">·</span>
             <span className="text-fg-3 tabular-nums">{summary}</span>
-          </>
-        )}
-        {closed && (
-          <>
-            <span className="text-fg-4">·</span>
-            <span className="font-medium text-fg">Closed</span>
           </>
         )}
         {!closed && mode === 'route' && !editing && (

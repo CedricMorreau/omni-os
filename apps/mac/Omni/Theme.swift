@@ -1,4 +1,5 @@
 import AppKit
+import OmniKit
 import SwiftUI
 
 /// The Web UI's tokens (apps/web/src/index.css, after Bencho): warm neutrals, ink as the action color,
@@ -35,6 +36,26 @@ enum Tok {
   static let warn = dyn(0xb45309, 0xf5b544)
   /// The done disc's edge: ink on white, none in dark.
   static let doneEdge = dyn(0x17181a, 0x17181a, alpha: 1, darkAlpha: 0)
+
+  static let phaseNeutral = dyn(0x6b7280, 0x9ca3af)
+  static let phaseDiscover = dyn(0x2563eb, 0x60a5fa)
+  static let phaseBuild = dyn(0x7c3aed, 0xa78bfa)
+  static let phaseManualTest = dyn(0xea580c, 0xfb923c)
+  static let phaseClient = dyn(0xb45309, 0xfbbf24)
+  static let phaseDeploy = dyn(0xdc2626, 0xf87171)
+  static let phaseClosing = dyn(0x16a34a, 0x4ade80)
+
+  static func phase(_ phase: TicketPhase) -> Color {
+    switch phase {
+    case .neutral: phaseNeutral
+    case .discover: phaseDiscover
+    case .build: phaseBuild
+    case .manualTest: phaseManualTest
+    case .client: phaseClient
+    case .deploy: phaseDeploy
+    case .closing: phaseClosing
+    }
+  }
 
   static let diffAdd = Color(hex: 0xc6f52b).opacity(0.22)
   static let diffDelete = Color(hex: 0xff4420).opacity(0.12)

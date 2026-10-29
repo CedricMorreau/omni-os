@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { api, errorText, useApi, type ChannelWithRunning, type Thread } from '../api.ts';
 import { CHANNEL_KIND } from '../format.ts';
 import { NewThreadComposer } from '../components/Composer.tsx';
@@ -8,6 +8,8 @@ import { ArchivedThreads, ThreadGroups, useLiveThreads, useThreadPRs } from '../
 import { Avatar, Button, Empty, StatusDot, Icon, LinkButton, Loading, Tabs } from '../components/ui.tsx';
 import { href, usePresetSeq, type ChannelTab } from '../router.ts';
 import { QuickLinks } from '../components/QuickLinks.tsx';
+import { TicketGroups, useChannelTickets } from '../components/TicketGroups.tsx';
+import { withoutTickets } from '../ticket-route.ts';
 import { useApp } from '../store.tsx';
 import { ChannelActionsEditor } from '../components/ChannelActionsEditor.tsx';
 import { ChannelSettingsForm, Section } from './ChannelSettings.tsx';
@@ -19,22 +21,35 @@ function ThreadsTab({ id, isConductor }: { id: string; isConductor: boolean }) {
   const prs = useThreadPRs(id);
   const presetSeq = usePresetSeq();
   const { channel, needsYou } = useApp();
+  const ch = channel(id);
+  const tickets = useChannelTickets(id, ch?.kind === 'client', list.data);
+  const others = useMemo(() => (list.data && tickets.length ? withoutTickets(list.data, tickets) : list.data), [list.data, tickets]);
   return (
     <div className="mx-auto max-w-3xl px-4 pt-6 pb-16 md:px-8">
       <NewThreadComposer key={`${id}:${presetSeq}`} channelId={id} placeholder={isConductor ? 'Ask the Conductor. It delegates to the crew.' : undefined} />
       <NeedsYouSection inbox={inChannel(needsYou, id)} quiet />
       <div className="mt-8">
+        {tickets.length > 0 && (
+          <>
+            <TicketGroups tickets={tickets} />
+            <h2 className="mt-8 mb-1 px-3.5 text-[13px] font-medium text-fg-2">Other threads</h2>
+          </>
+        )}
         <ThreadGroups
-          threads={list.data}
+          threads={others}
           loading={list.loading}
           error={list.error}
           onRetry={list.reload}
           prs={prs}
-          channel={channel(id)}
+          channel={ch}
           empty={
-            <Empty icon="message" title="No threads in this channel yet">
-              Start one above. Crew threads delegated by the Conductor land here too.
-            </Empty>
+            tickets.length ? (
+              <p className="px-3.5 py-2 text-[13px] text-fg-3">No other threads.</p>
+            ) : (
+              <Empty icon="message" title="No threads in this channel yet">
+                Start one above. Crew threads delegated by the Conductor land here too.
+              </Empty>
+            )
           }
         />
         <ArchivedThreads channelId={id} />

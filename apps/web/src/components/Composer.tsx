@@ -21,6 +21,7 @@ import { requestIdFor, sendKey, type PendingRequest } from '../requests.ts';
 import type { MessageContext } from '@omni/shared/message-context.ts';
 import { ContextChips } from '../message-context/ContextChips.tsx';
 import { ForkThreadButton } from './ContinueSheet.tsx';
+import { defaultRoleFor } from '../ticket-route.ts';
 import { removeDraftContext, settleDraftContext, useDraftContext } from '../message-context/draft.ts';
 
 // Unsent text survives navigation (not reloads). Keyed by where the composer lives.
@@ -422,7 +423,8 @@ export function NewThreadComposer({
   }, [preset]);
   const [text, setText] = useState(() => preset?.prompt ?? drafts.get(key) ?? '');
   const [channel, setChannel] = useState(channelId ?? defaultChannel);
-  const [role, setRole] = useState<string>(() => preset?.role ?? ((channelId ?? defaultChannel) === 'conductor' ? 'conductor' : ''));
+  const [role, setRole] = useState<string>(() => preset?.role ?? defaultRoleFor(channels.find((c) => c.id === (channelId ?? defaultChannel)), crew));
+  const rolePicked = useRef(false);
   const [picked, setPicked] = useState<DraftRun | null>(() => preset?.choice ? { choice: preset.choice, effort: preset.effort ?? '' } : null);
   // "New thread here" on a sidebar folder files the thread in it, until Ben takes it out.
   const [folder, setFolder] = useState(preset?.folder ?? null);
@@ -440,14 +442,15 @@ export function NewThreadComposer({
 
   // Default the role once crew loads, if the conductor channel is selected. A preset keeps its own.
   useEffect(() => {
-    if (!preset && !role && channel === 'conductor' && crew.some((r) => r.id === 'conductor')) setRole('conductor');
+    if (!preset && !rolePicked.current) setRole(defaultRoleFor(channels.find((c) => c.id === channel), crew));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crew]);
+  }, [crew, channels]);
 
   const roleObj = crew.find((r) => r.id === role);
   const visibleChannels = channels.filter((c) => !c.archived);
 
   const onRole = (r: string) => {
+    rolePicked.current = true;
     setRole(r);
     const roleObj = crew.find((x) => x.id === r);
     const rc = roleObj?.channel;
@@ -457,10 +460,8 @@ export function NewThreadComposer({
   };
   const onChannel = (c: string) => {
     setChannel(c);
-    let r = role;
-    if (c === 'conductor' && !role && crew.some((x) => x.id === 'conductor')) r = 'conductor';
-    if (c !== 'conductor' && role === 'conductor') r = '';
-    setRole(r);
+    const auto = !rolePicked.current || role === 'conductor' || role === 'ticket';
+    setRole(auto ? defaultRoleFor(channels.find((x) => x.id === c), crew) : role);
     setPicked(null);
   };
 

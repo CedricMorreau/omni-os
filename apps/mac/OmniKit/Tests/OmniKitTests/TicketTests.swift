@@ -142,4 +142,45 @@ private let proposedJSON = """
     #expect(t.requests[0].url?.path == "/api/tickets/t1/close")
     #expect(try bodyJSON(t.requests[0]) == .object(["by": .string("user")]))
   }
+  @Test func mapsEachStageToItsPhase() {
+    let phases = (0...10).map { TicketPhase.of(stage: $0) }
+    #expect(phases == [.neutral, .discover, .discover, .build, .build, .build, .manualTest, .client, .client, .deploy, .closing])
+    #expect(TicketPhase.of(stage: 9, closed: true) == .neutral)
+    #expect(TicketPhase.of(stage: 11) == .neutral)
+  }
+
+  @Test func labelsTheStagePill() throws {
+    #expect(try decode(Ticket.self, routedJSON).stageLabel == "3 · Execute")
+    #expect(try decode(Ticket.self, proposedJSON).stageLabel == "Intake")
+    #expect(try decode(Ticket.self, #"{"thread_id":"t","stage":10,"closed_at":"2026-10-29T09:00:00.000Z"}"#).stageLabel == "Closed")
+    #expect(try decode(Ticket.self, routedJSON).phase == .build)
+  }
+
+  @Test func groupsTicketsByStageInStageOrder() throws {
+    let list = try decode([Ticket].self, """
+      [{"thread_id":"a","stage":3,"updated_at":"2026-10-28T09:00:00.000Z"},
+       {"thread_id":"b","stage":0,"updated_at":"2026-10-28T09:00:00.000Z"},
+       {"thread_id":"c","stage":3,"updated_at":"2026-10-29T09:00:00.000Z"},
+       {"thread_id":"d","stage":10,"updated_at":"2026-10-28T09:00:00.000Z"},
+       {"thread_id":"e","stage":5,"closed_at":"2026-10-28T09:00:00.000Z"}]
+      """)
+    let sections = TicketBoard.sections(list)
+    #expect(sections.map(\.title) == ["Intake", "3 Execute", "10 Closing"])
+    #expect(sections[1].tickets.map(\.threadID) == ["c", "a"])
+    #expect(sections.map(\.phase) == [.neutral, .build, .closing])
+    #expect(TicketBoard.sections([]).isEmpty)
+    let t1 = try decode(OmniThread.self, threadJSON())
+    let t2 = try decode(OmniThread.self, threadJSON().replacingOccurrences(of: #""id":"t1""#, with: #""id":"t9""#))
+    let tickets = try decode([Ticket].self, #"[{"thread_id":"t1"}]"#)
+    #expect(TicketBoard.others([t1, t2], tickets: tickets).map(\.id) == ["t9"])
+  }
+
+  @Test func listsAChannelsTickets() async throws {
+    let t = StubTransport(body: "[\(routedJSON)]")
+    let list = try await OmniClient(port: 4799, transport: t).tickets(channel: "acme")
+    #expect(list.map(\.threadID) == ["t1"])
+    #expect(t.requests[0].httpMethod == "GET")
+    #expect(t.requests[0].url?.path == "/api/tickets")
+    #expect(t.requests[0].url?.query == "channel=acme")
+  }
 }

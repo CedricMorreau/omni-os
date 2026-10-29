@@ -222,25 +222,47 @@ private struct ChannelThreads: View {
   @State private var archived: [OmniThread] = []
   @State private var prs: [String: BranchPRMark] = [:]
   @State private var error: String?
+  @State private var tickets: [Ticket] = []
+
+  private struct TicketsWatch: Hashable {
+    let channel: String
+    let threads: [String]
+    let epoch: Int
+  }
 
   var body: some View {
     let threads = ThreadListing.merging(loaded: loaded ?? [], live: model.store.recent, channel: channel.id)
     let nestedChildren = Set(channel.handoffs.flatMap { $0.children.map(\.id) })
-    let visibleThreads = threads.filter { !nestedChildren.contains($0.id) }
+    let client = channel.kind == .client
+    let shownTickets = client ? tickets : []
+    let visibleThreads = TicketBoard.others(threads.filter { !nestedChildren.contains($0.id) }, tickets: shownTickets)
     VStack(alignment: .leading, spacing: z(32)) {
       NewThreadComposerView(model: model, channelID: channel.id)
         .id(channel.id)
       NeedsYouSection(model: model, inbox: model.store.needsYou?.inChannel(channel.id), quiet: true)
+      let ticketed = loaded != nil && !shownTickets.isEmpty
+      if ticketed {
+        TicketStageList(model: model, sections: TicketBoard.sections(shownTickets))
+      }
       if let error, loaded == nil {
         ErrorNote(text: error) { Task { await load() } }
       } else if loaded == nil {
         LoadingNote()
-      } else if !channel.folders.isEmpty {
-        ThreadFolderList(model: model, channel: channel, threads: visibleThreads, prs: prs, handoffs: channel.handoffs)
-      } else if visibleThreads.isEmpty {
-        EmptyNote(symbol: "message", title: "No threads in this channel yet", message: "Start one above. Crew threads delegated by the Conductor land here too.")
+      } else if ticketed, visibleThreads.isEmpty, channel.folders.isEmpty {
+        EmptyView()
       } else {
-        ThreadDayList(model: model, threads: visibleThreads, prs: prs, handoffs: channel.handoffs)
+        VStack(alignment: .leading, spacing: z(8)) {
+          if ticketed {
+            Text("Other threads").omniCaption().padding(.horizontal, z(10))
+          }
+          if !channel.folders.isEmpty {
+            ThreadFolderList(model: model, channel: channel, threads: visibleThreads, prs: prs, handoffs: channel.handoffs)
+          } else if visibleThreads.isEmpty {
+            EmptyNote(symbol: "message", title: "No threads in this channel yet", message: "Start one above. Crew threads delegated by the Conductor land here too.")
+          } else {
+            ThreadDayList(model: model, threads: visibleThreads, prs: prs, handoffs: channel.handoffs)
+          }
+        }
       }
       if loaded != nil, !archived.isEmpty {
         ArchivedThreadsSection(model: model, threads: archived) { await load() }
@@ -254,6 +276,16 @@ private struct ChannelThreads: View {
     }
     // An archive or a restore moves a thread between the two lists; refetch both, keeping what shows meanwhile.
     .onChange(of: model.store.archiveEpoch) { Task { await load() } }
+    .task(id: TicketsWatch(
+      channel: client ? channel.id : "", threads: threads.map { "\($0.id)|\($0.status)|\($0.updatedAt.timeIntervalSince1970)" },
+      epoch: model.store.archiveEpoch)
+    ) {
+      guard client else {
+        tickets = []
+        return
+      }
+      if let list = try? await model.client.tickets(channel: channel.id), !Task.isCancelled { tickets = list }
+    }
     // A merge shows up within a minute, as on the web.
     .task(id: channel.id) {
       while !Task.isCancelled {
@@ -274,6 +306,75 @@ private struct ChannelThreads: View {
       if error != .cancelled { self.error = error.message }
     }
     if let list = await gone.value, !Task.isCancelled { archived = list }
+  }
+}
+
+private struct TicketStageList: View {
+  let model: AppModel
+  let sections: [TicketBoard.Section]
+
+  var body: some View {
+    LazyVStack(alignment: .leading, spacing: z(12)) {
+      ForEach(sections) { section in
+        VStack(alignment: .leading, spacing: 0) {
+          HStack(spacing: z(6)) {
+            Circle().fill(Tok.phase(section.phase)).frame(width: z(7), height: z(7))
+            Text(section.title)
+              .foregroundStyle(Tok.phase(section.phase))
+            Text("\(section.tickets.count)")
+              .foregroundStyle(Tok.fg4)
+          }
+          .omniCaption()
+          .padding(.horizontal, z(10))
+          .padding(.vertical, z(6))
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel("\(section.title), \(Format.plural(section.tickets.count, "ticket"))")
+          ForEach(section.tickets) { ticket in
+            TicketListRow(model: model, ticket: ticket)
+              .openInNewWindow(ticket.threadID, model: model, title: ticket.title)
+          }
+        }
+      }
+    }
+  }
+}
+
+private struct TicketListRow: View {
+  let model: AppModel
+  let ticket: Ticket
+  @State private var hovering = false
+
+  var body: some View {
+    Button {
+      model.route = .thread(id: ticket.threadID)
+    } label: {
+      HStack(spacing: z(8)) {
+        Text(ticket.title.isEmpty ? "Untitled" : ticket.title)
+          .font(.omni(size: 14))
+          .foregroundStyle(Tok.fg)
+          .lineLimit(1)
+          .truncationMode(.tail)
+        if !ticket.ref.isEmpty { Chip(text: ticket.ref, tone: .outline) }
+        StagePill(text: ticket.stageLabel, phase: ticket.phase)
+        Spacer(minLength: z(8))
+        if let updated = ticket.updated {
+          TimelineView(.everyMinute) { _ in
+            Text(Format.relTime(updated))
+              .font(.omni(size: 11))
+              .monospacedDigit()
+              .foregroundStyle(Tok.fg4)
+          }
+        }
+      }
+      .padding(.horizontal, z(10))
+      .padding(.vertical, z(10))
+      .contentShape(Rectangle())
+      .background(hovering ? Tok.surface : .clear, in: RoundedRectangle(cornerRadius: z(18), style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(ticket.title.isEmpty ? "Untitled" : ticket.title), \(ticket.ref), \(ticket.stageLabel)")
   }
 }
 

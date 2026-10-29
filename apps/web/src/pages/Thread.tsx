@@ -17,7 +17,8 @@ import { HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx
 import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { HeaderActions } from '../components/thread/HeaderActions.tsx';
-import { RouteCard } from '../components/thread/RouteCard.tsx';
+import { RouteCard, useTicket } from '../components/thread/RouteCard.tsx';
+import { StagePill } from '../components/StagePill.tsx';
 import { ContinueCrumbs } from '../components/ContinueLinks.tsx';
 import { Avatar, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, Segmented } from '../components/ui.tsx';
 import { href } from '../router.ts';
@@ -107,6 +108,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
     release();
     clearReveal();
   });
+  const [ticket, setTicket] = useTicket(thread, events.length);
   const handoffTargets = useHandoffTargets(thread, blocked, handoff);
   const note = blockedNote(blocked, handoff, thread?.status);
   const known = useMemo(() => [...children, ...team], [children, team]);
@@ -337,9 +339,12 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
               {thread.task_id && <span className="ml-1 shrink-0 font-num text-[10.5px] text-fg-4">{thread.task_id}</span>}
               <ContinueCrumbs links={links} />
             </div>
-            <h1 className="mt-0.5 truncate font-display text-[16px] leading-snug md:text-[18px]" title={thread.title}>
-              {thread.title}
-            </h1>
+            <div className="mt-0.5 flex min-w-0 items-center gap-2">
+              <h1 className="min-w-0 truncate font-display text-[16px] leading-snug md:text-[18px]" title={thread.title}>
+                {thread.title}
+              </h1>
+              {ticket && <StagePill ticket={ticket} />}
+            </div>
             {modLines.length > 0 && <ModStatusLines lines={modLines} />}
           </div>
           <HeaderActions
@@ -371,7 +376,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
         </div>
 
         <div className="shrink-0 px-3 md:px-6">
-          <RouteCard thread={thread} version={events.length} className="mx-auto mb-1 max-w-4xl" />
+          <RouteCard ticket={ticket} onTicket={setTicket} className="mx-auto mb-1 max-w-4xl" />
         </div>
 
         {/* transcript */}

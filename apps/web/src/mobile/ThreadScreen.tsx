@@ -8,7 +8,8 @@ import { PRWakeList } from '../components/thread/PRWatch.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { CloudAgentCard } from '../components/thread/CloudAgentCard.tsx';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
-import { RouteCard } from '../components/thread/RouteCard.tsx';
+import { RouteCard, useTicket } from '../components/thread/RouteCard.tsx';
+import { StagePill } from '../components/StagePill.tsx';
 import { ClippedNote, HistoryCtx, HistoryEdgeRow } from '../components/thread/HistoryEdgeRow.tsx';
 import { useReveal } from '../pages/useReveal.ts';
 import { useScrollAnchor } from '../pages/useScrollAnchor.ts';
@@ -465,6 +466,7 @@ export function ThreadScreen() {
   const view = useMemo(() => (thread ? threadView({ events, spans, thread, artifacts: files, children }) : null), [events, spans, thread, files, children]);
   const edges = useMemo(() => historyEdges({ spans }, view?.turns.map((t) => t.key) ?? []), [spans, view]);
   const changes = useBranchChanges(thread, slotBusy);
+  const [ticket, setTicket] = useTicket(thread, events.length);
   const pr = useThreadPR(thread, slotBusy, true);
   // Outcome first: open on the newest turn, its prompt at the top, and again when a new turn starts. Earlier turns
   // loading above keep the reading position instead, and a search hit opens on the turn that holds it.
@@ -577,7 +579,16 @@ export function ThreadScreen() {
     <>
       <MoHeader
         onBack={shell.back}
-        title={thread.title || 'Untitled'}
+        title={
+          ticket ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate">{thread.title || 'Untitled'}</span>
+              <StagePill ticket={ticket} />
+            </span>
+          ) : (
+            thread.title || 'Untitled'
+          )
+        }
         sub={parent ? <span>{sub} · <a href={href.thread(parent.id)} className="text-fg-2 hover:text-fg" title={`Delegated from ${parent.title}`}>Parent: {parent.title}</a></span> : sub}
         right={
           <>
@@ -586,7 +597,7 @@ export function ThreadScreen() {
           </>
         }
       />
-      <RouteCard thread={thread} version={events.length} className="mx-4 mt-1 mb-1 shrink-0" />
+      <RouteCard ticket={ticket} onTicket={setTicket} className="mx-4 mt-1 mb-1 shrink-0" />
       <div ref={scroll} className="mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 [overflow-anchor:none]">
         <HistoryCtx.Provider value={history}>
           <div className="flex flex-col gap-4">

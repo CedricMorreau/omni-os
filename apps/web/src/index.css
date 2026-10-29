@@ -37,6 +37,14 @@
   --done-edge: light-dark(var(--ink), transparent);
   /* Amber for "getting full" (the context meter from 70%). Darker in light mode so it reads on white. */
   --warn: light-dark(#b45309, #f5b544);
+  --phase-intake: light-dark(#6b7280, #9ca3af);
+  --phase-plan: light-dark(#2563eb, #60a5fa);
+  --phase-build: light-dark(#7c3aed, #a78bfa);
+  --phase-manual: light-dark(#ea580c, #fb923c);
+  --phase-client: light-dark(#b45309, #fbbf24);
+  --phase-deploy: light-dark(#dc2626, #f87171);
+  --phase-closing: light-dark(#16a34a, #4ade80);
+  --phase-closed: var(--phase-intake);
   --scrim: light-dark(rgb(23 24 26 / 0.22), rgb(0 0 0 / 0.5));
   --bubble: var(--surface-2);
   --code-bg: var(--surface);

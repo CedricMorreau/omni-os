@@ -1,11 +1,20 @@
 import OmniKit
 import SwiftUI
 
+@MainActor @Observable
+final class ThreadTicket {
+  var ticket: Ticket?
+}
+
 struct TicketRouteCard: View {
   let client: OmniClient
   let store: ThreadStore
+  let holder: ThreadTicket
 
-  @State private var ticket: Ticket?
+  private var ticket: Ticket? {
+    get { holder.ticket }
+    nonmutating set { holder.ticket = newValue }
+  }
   @State private var draft: TicketRouteDraft?
   @State private var saving = false
   @State private var error: String?
@@ -310,6 +319,23 @@ struct TicketRouteCard: View {
   }
 }
 
+struct StagePill: View {
+  let text: String
+  let phase: TicketPhase
+
+  var body: some View {
+    Text(text)
+      .font(.omni(size: 11, weight: .medium).monospacedDigit())
+      .lineLimit(1)
+      .foregroundStyle(Tok.phase(phase))
+      .padding(.horizontal, z(8))
+      .frame(height: z(20))
+      .background(Tok.phase(phase).opacity(0.14), in: Capsule())
+      .fixedSize()
+      .accessibilityLabel("Stage: \(text)")
+  }
+}
+
 private struct StageChip: View {
   let stage: TicketStage
   let state: TicketRoute.StageState
@@ -323,7 +349,10 @@ private struct StageChip: View {
       .padding(.horizontal, z(8))
       .frame(minWidth: z(22), minHeight: z(20))
       .background(bg, in: Capsule())
-      .overlay { if state == .off { Capsule().strokeBorder(Tok.line) } }
+      .overlay {
+        if state == .off { Capsule().strokeBorder(Tok.line) }
+        if state == .ahead { Capsule().strokeBorder(color.opacity(0.4)) }
+      }
       .help(stage.name)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel("Stage \(stage.number), \(stage.name), \(label)")
@@ -338,21 +367,22 @@ private struct StageChip: View {
     }
   }
 
+  private var color: Color { Tok.phase(.of(stage: stage.number)) }
+
   private var fg: Color {
     switch state {
-    case .done: Tok.ink
+    case .done: color
     case .current: Tok.onLive
-    case .ahead: Tok.fg2
+    case .ahead: color
     case .off: Tok.fg4
     }
   }
 
   private var bg: Color {
     switch state {
-    case .done: Tok.done
-    case .current: Tok.live
-    case .ahead: Tok.surface2
-    case .off: .clear
+    case .done: color.opacity(0.16)
+    case .current: color
+    case .ahead, .off: .clear
     }
   }
 }

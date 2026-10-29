@@ -41,6 +41,7 @@ private struct ThreadView: View {
   let store: ThreadStore
   @State private var ui = TranscriptUI()
   @State private var markdown = MarkdownCache<Int>()
+  @State private var ticket = ThreadTicket()
 
   var body: some View {
     switch store.loadState {
@@ -67,8 +68,8 @@ private struct ThreadView: View {
     case .loaded:
       if let thread = store.thread {
         VStack(spacing: 0) {
-          ThreadHeader(model: model, store: store, thread: thread)
-          TicketRouteCard(client: model.client, store: store)
+          ThreadHeader(model: model, store: store, thread: thread, ticket: ticket)
+          TicketRouteCard(client: model.client, store: store, holder: ticket)
           TranscriptView(model: model, store: store, ui: ui, markdown: markdown)
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
           ReplyComposerHost(model: model, store: store, thread: thread)
@@ -104,6 +105,7 @@ private struct ThreadHeader: View {
   let model: AppModel
   let store: ThreadStore
   let thread: OmniThread
+  let ticket: ThreadTicket
   @State private var restoring = false
   @State private var sendingGrok = false
   @State private var grokNote = ""
@@ -138,13 +140,18 @@ private struct ThreadHeader: View {
         }
         .font(.omni(size: 12))
         .foregroundStyle(Tok.fg3)
-        Text(thread.title)
-          .font(.omni(size: 17, weight: .medium))
-          .foregroundStyle(Tok.fg)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .help(thread.title)
-          .textSelection(.enabled)
+        HStack(spacing: z(8)) {
+          Text(thread.title)
+            .font(.omni(size: 17, weight: .medium))
+            .foregroundStyle(Tok.fg)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(thread.title)
+            .textSelection(.enabled)
+          if let t = ticket.ticket {
+            StagePill(text: t.stageLabel, phase: t.phase)
+          }
+        }
         ModStatusLines(mods: model.store.mods.filter { $0.threadID == thread.id })
         ContinueLinks(model: model, from: store.continuedFrom, continuedIn: store.continuedIn)
       }
