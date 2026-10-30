@@ -58,6 +58,7 @@
     0 0 0 0.5px light-dark(rgb(23 24 26 / 0.08), rgb(255 255 255 / 0.08)),
     0 2px 4px light-dark(rgb(23 24 26 / 0.04), rgb(0 0 0 / 0.3)),
     0 18px 44px -10px light-dark(rgb(23 24 26 / 0.2), rgb(0 0 0 / 0.65));
+  --shadow-panel: 0 2px 8px light-dark(rgb(23 24 26 / 0.05), rgb(0 0 0 / 0.25));
   --shadow-card: 0 0 0 0.5px var(--pane-edge), 0 1px 2px light-dark(rgb(23 24 26 / 0.05), rgb(0 0 0 / 0.4));
   --shadow-thumb: 0 1px 2px light-dark(rgb(23 24 26 / 0.09), rgb(0 0 0 / 0.3)), 0 0 0 0.5px light-dark(rgb(23 24 26 / 0.05), rgb(255 255 255 / 0.06));
   /* Bencho motion: spring overshoot, settle, stretch, a soft ease-out; fluid drives the mark. */

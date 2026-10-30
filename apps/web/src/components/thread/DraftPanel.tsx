@@ -54,7 +54,7 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
       aria-controls={panelId}
       aria-label={unseen ? `${label}, changed` : label}
       title={label}
-      className={`pointer-events-auto absolute top-1/2 right-full flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-[18px] border border-r-0 border-line-strong bg-surface text-fg-2 shadow-[var(--shadow-menu)] hover:text-fg ${mobile ? 'w-7 px-1 py-2.5' : 'w-9 px-1.5 py-3'}`}
+      className={`pointer-events-auto absolute top-1/2 right-full flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-lg border border-r-0 border-line-strong bg-surface text-fg-2 shadow-[var(--shadow-panel)] hover:text-fg ${mobile ? 'w-7 px-1 py-2.5' : 'w-9 px-1.5 py-3'}`}
     >
       <Icon name="file" size={mobile ? 13 : 15} />
       <span className={`font-medium whitespace-nowrap [writing-mode:vertical-rl] rotate-180 ${mobile ? 'text-[11px]' : 'text-[12px]'}`}>{label}</span>
@@ -82,7 +82,7 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
           aria-label={label}
           aria-hidden={!open}
           inert={!open}
-          className={`pointer-events-auto flex h-full flex-col bg-bg ${mobile ? '' : 'rounded-l-[18px] border border-r-0 border-line-strong shadow-[var(--shadow-menu)]'}`}
+          className={`pointer-events-auto flex h-full flex-col bg-bg ${mobile ? '' : 'rounded-l-[18px] border border-r-0 border-line-strong shadow-[var(--shadow-panel)]'}`}
           style={
             mobile
               ? {

@@ -57,8 +57,8 @@ enum Tok {
     }
   }
 
-  static let panelShadow = dyn(0x000000, 0x000000, alpha: 0.14, darkAlpha: 0.5)
-  static let panelShadowNear = dyn(0x000000, 0x000000, alpha: 0.05, darkAlpha: 0.3)
+  static let panelShadow = dyn(0x000000, 0x000000, alpha: 0.05, darkAlpha: 0.25)
+  static let panelShadowNear = dyn(0x000000, 0x000000, alpha: 0.04, darkAlpha: 0.2)
   static let panelRadius: CGFloat = 18
 
   static let diffAdd = Color(hex: 0xc6f52b).opacity(0.22)
@@ -110,8 +110,8 @@ extension View {
   func floatingPanel<S: InsettableShape>(_ shape: S, edge: Color = Tok.lineStrong) -> some View {
     background(Tok.elev, in: shape)
       .overlay(shape.strokeBorder(edge, lineWidth: 1))
-      .shadow(color: Tok.panelShadowNear, radius: 2, y: 1)
-      .shadow(color: Tok.panelShadow, radius: 24, y: 8)
+      .shadow(color: Tok.panelShadowNear, radius: 1, y: 1)
+      .shadow(color: Tok.panelShadow, radius: 8, y: 2)
   }
 
   /// `.caption`: sentence case, 12pt medium, fg-3. No caps, no mono.

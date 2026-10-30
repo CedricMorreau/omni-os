@@ -96,13 +96,15 @@ function RouteEditor({ ticket, proposal, onSaved, onCancel }: { ticket: TicketVi
           const reason = !on ? skipReason(ticket, n) : null;
           return (
             <div key={n} className="flex items-start gap-2.5 py-1">
-              <input id={id} type="checkbox" checked={on} disabled={busy} onChange={() => setTicks((t) => toggleStage(t, n))} className="mt-[3px] h-4 w-4 shrink-0 accent-[var(--fg)]" />
-              <label htmlFor={id} className="min-w-0 flex-1 text-[13px] leading-[1.4]">
+              <span className="flex h-5 shrink-0 items-center">
+                <input id={id} type="checkbox" checked={on} disabled={busy} onChange={() => setTicks((t) => toggleStage(t, n))} className="m-0 h-4 w-4 accent-[var(--fg)]" />
+              </span>
+              <label htmlFor={id} className="min-w-0 flex-1 text-[13px] leading-5">
                 <span className={on ? 'text-fg' : 'text-fg-3'}>
                   <span className="mr-1.5 tabular-nums text-fg-4">{n}</span>
                   {STAGES[n - 1]}
                 </span>
-                {reason && <span className="block text-[12px] text-fg-3 sm:ml-2 sm:inline">{reason}</span>}
+                {reason && <span className="block text-[12px] leading-[1.4] text-fg-3 sm:ml-2 sm:inline sm:leading-5">{reason}</span>}
               </label>
             </div>
           );

@@ -249,7 +249,6 @@ private struct ReplyComposerView: View {
   private var footer: some View {
     ComposerFooterLayout {
       AttachButton(disabled: reply.sending) { picking = true }
-      ForkButton(model: model, thread: thread, disabled: reply.sending)
       DictateButton { focusTick += 1 }
       runPickers
       if thread.branch != nil {

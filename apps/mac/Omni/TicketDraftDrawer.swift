@@ -51,7 +51,7 @@ struct TicketDraftDrawer: View {
       .foregroundStyle(open ? Tok.fg : Tok.fg2)
       .padding(.vertical, z(12))
       .frame(width: z(30))
-      .floatingPanel(UnevenRoundedRectangle(topLeadingRadius: z(Tok.panelRadius), bottomLeadingRadius: z(Tok.panelRadius), style: .continuous))
+      .floatingPanel(UnevenRoundedRectangle(topLeadingRadius: z(8), bottomLeadingRadius: z(8), style: .continuous))
       .overlay(alignment: .topLeading) {
         if unseen {
           Circle().fill(Tok.needs).frame(width: z(8), height: z(8)).offset(x: z(4), y: z(4))

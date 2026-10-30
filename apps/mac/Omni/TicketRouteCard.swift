@@ -115,7 +115,7 @@ struct TicketRouteCard: View {
     .padding(.horizontal, z(16))
     .padding(.vertical, z(12))
     .floatingPanel(
-      UnevenRoundedRectangle(bottomLeadingRadius: z(Tok.panelRadius), bottomTrailingRadius: z(Tok.panelRadius), style: .continuous),
+      RoundedRectangle(cornerRadius: z(Tok.panelRadius), style: .continuous),
       edge: deciding ? Tok.needs.opacity(0.7) : Tok.lineStrong)
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Ticket route")
@@ -202,6 +202,7 @@ struct TicketRouteCard: View {
           }
           .toggleStyle(.omni)
           .disabled(saving)
+          .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + z(4) }
           .accessibilityLabel("Stage \(stage.number), \(stage.name)")
           Text("\(stage.number)  \(stage.name)")
             .font(.omni(size: 13))

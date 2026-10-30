@@ -25,6 +25,7 @@ struct TicketRouteDrawer: View {
             TicketRouteCard(client: client, store: store, holder: holder)
               .frame(maxWidth: ThreadStyle.thread)
               .padding(.horizontal, z(24))
+              .padding(.top, z(8))
               .transition(reduceMotion ? .opacity : .move(edge: .top))
           }
           if open {

@@ -97,9 +97,9 @@ export function RoutePanel({
           aria-label={`Ticket ${ticket.ref} route`}
           aria-hidden={!open}
           inert={!open}
-          className={`scroll-thin min-h-0 overflow-y-auto ${mobile ? 'px-3 pt-1 pb-8' : 'px-4 pt-1 pb-10 md:px-6'}`}
+          className={`scroll-thin min-h-0 overflow-y-auto ${mobile ? 'px-3 pt-2 pb-4' : 'px-4 pt-2.5 pb-5 md:px-6'}`}
         >
-          <div className="pointer-events-auto mx-auto max-w-4xl rounded-[18px] shadow-[var(--shadow-menu)]">
+          <div className="pointer-events-auto mx-auto max-w-4xl rounded-[18px] shadow-[var(--shadow-panel)]">
             <RouteCard ticket={ticket} onTicket={onTicket} className="rounded-[18px]! border border-line-strong" />
           </div>
         </div>
