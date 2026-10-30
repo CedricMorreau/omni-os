@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -203,5 +204,26 @@ describe('tickets from the composer and from existing threads', () => {
     const { thread_id: id } = await local();
     T.proposeRoute(id, [3, 4], {}, 'Product specifications');
     expect(T.ticketView(T.tickets.get(id)!).title).toBe('Product specifications');
+  });
+});
+
+describe('branch names', () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-C', cwd, ...args], { encoding: 'utf8' }).trim();
+
+  it('renames the omni worktree branch to the proposed name when the route is confirmed', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'omni-branch-repo-'));
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'commit', '-q', '--allow-empty', '-m', 'start');
+    const wt = join(mkdtempSync(join(tmpdir(), 'omni-branch-wt-')), 'wt');
+    git(repo, 'worktree', 'add', '-q', '-b', 'omni/abc12345', wt);
+    const { thread_id: id } = await T.createTicket({ channel: 'acme', source: 'local' }, async ({ id }) =>
+      db.threads.create({ id, channel_id: 'acme', title: 'x', status: 'done', role: 'ticket', model: null, session_id: id, cwd: wt, branch: 'omni/abc12345', parent_id: null, task_id: null, source: 'manual', automation: null }),
+    );
+    expect(() => T.proposeRoute(id, [3, 4], {}, undefined, 'omni/bad')).toThrow(/feat\/, fix\//);
+    T.proposeRoute(id, [3, 4], {}, 'Size guide', 'feat/1060-size-guide');
+    T.setRoute(id, [3, 4]);
+    expect(git(wt, 'branch', '--show-current')).toBe('feat/1060-size-guide');
+    expect(db.threads.get(id)?.branch).toBe('feat/1060-size-guide');
+    expect(T.ticketView(T.tickets.get(id)!).branch).toBe('feat/1060-size-guide');
   });
 });

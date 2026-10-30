@@ -35,9 +35,10 @@ server.registerTool(
       stages: z.array(z.number().int().min(1).max(10)).min(1),
       reasons: z.record(z.string(), z.string()).optional(),
       title: z.string().max(120).optional().describe('The ticket title: the Productive task name, or a short name for Slack or local work. It replaces the thread title.'),
+      branch: z.string().optional().describe('The branch name: feat/<ticket number>-<short-slug> for a feature, fix/<ticket number>-<short-slug> for a bug, like feat/1053-product-specifications. Lowercase, dashes. Omni renames the worktree branch to it when the user confirms the route. Leave it out when the ticket continues on an existing branch.'),
     },
   },
-  async ({ stages, reasons, title }) => text(await post('/route-proposal', { stages, reasons: reasons ?? {}, title })),
+  async ({ stages, reasons, title, branch }) => text(await post('/route-proposal', { stages, reasons: reasons ?? {}, title, branch })),
 );
 
 server.registerTool(

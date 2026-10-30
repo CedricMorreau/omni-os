@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { db, needsYou, threads, type NeedsYouBlocker, type Thread } from './db.ts';
 import { now } from './db/connection.ts';
@@ -45,7 +46,10 @@ export interface Ticket {
 export interface RouteProposal {
   stages: number[];
   reasons: Record<string, string>;
+  branch?: string;
 }
+
+export const BRANCH_NAME = /^(feat|fix|chore|release)\/[a-z0-9][a-z0-9._-]{0,60}$/;
 
 export class TicketError extends Error {
   constructor(
@@ -125,17 +129,28 @@ const checkStages = (stages: number[]) => {
 
 const unrouted = (route: number[]) => STAGES.map((_, i) => i + 1).filter((n) => !route.includes(n));
 
-export function proposeRoute(threadId: string, stages: number[], reasons: Record<string, string> = {}, title?: string) {
+export function proposeRoute(threadId: string, stages: number[], reasons: Record<string, string> = {}, title?: string, branch?: string) {
   open(threadId);
+  if (branch && !BRANCH_NAME.test(branch)) throw new TicketError('a branch is feat/, fix/, chore/ or release/ plus the ticket number and a short slug, like feat/1053-product-specifications');
   if (title?.trim()) threads.update(threadId, { title: title.trim().slice(0, 120) });
-  return tickets.update(threadId, { route_proposal: { stages: checkStages(stages), reasons } });
+  return tickets.update(threadId, { route_proposal: { stages: checkStages(stages), reasons, ...(branch && { branch }) } });
 }
 
 export function setRoute(threadId: string, stages: number[]) {
   const t = open(threadId);
   const route = checkStages(stages);
   const start = t.stage === 0 ? { stage: route[0], stage_at: now() } : {};
+  if (t.route_proposal?.branch) renameBranch(threadId, t.route_proposal.branch);
   return tickets.update(threadId, { route, route_proposal: null, skipped: unrouted(route), ...start });
+}
+
+function renameBranch(threadId: string, branch: string) {
+  const thread = threads.get(threadId);
+  if (!thread?.branch?.startsWith('omni/') || !thread.cwd) return;
+  try {
+    execFileSync('git', ['-C', thread.cwd, 'branch', '-m', thread.branch, branch], { stdio: 'ignore' });
+    threads.update(threadId, { branch });
+  } catch {}
 }
 
 export function recordGate(threadId: string, gate: Gate, words: string) {
@@ -197,6 +212,7 @@ export function ticketView(t: Ticket, thread = threads.get(t.thread_id), blocker
     gates: { plan: t.plan_ok, client: t.client_ok, go: t.go_ok },
     draft: t.draft ? { kind: t.draft_kind, text: t.draft } : null,
     role: t.role,
+    branch: thread?.branch ?? null,
     route: t.route,
     route_proposal: t.route_proposal,
     thread_status: thread?.status ?? null,

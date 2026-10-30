@@ -98,10 +98,10 @@ ticketsApi.post('/:id/role', async (c) => {
 const stagesSchema = z.array(z.number().int().min(1).max(10)).min(1).max(10);
 
 ticketsApi.post('/:id/route-proposal', async (c) => {
-  const { stages, reasons, title } = z
-    .object({ stages: stagesSchema, reasons: z.record(z.string(), z.string().max(300)).default({}), title: z.string().max(120).optional() })
+  const { stages, reasons, title, branch } = z
+    .object({ stages: stagesSchema, reasons: z.record(z.string(), z.string().max(300)).default({}), title: z.string().max(120).optional(), branch: z.string().optional() })
     .parse(await c.req.json());
-  return c.json(view(proposeRoute(c.req.param('id'), stages, reasons, title)));
+  return c.json(view(proposeRoute(c.req.param('id'), stages, reasons, title, branch)));
 });
 
 ticketsApi.post('/:id/route', async (c) => {
