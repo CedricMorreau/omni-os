@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, ApiError, errorText, type Thread } from '../../api.ts';
 import { STAGES } from '../../roles.ts';
-import { ALL_STAGES, canClose, draftLabel, initialTicks, phaseColor, routeMode, routeSummary, skipReason, stagePhase, stageState, toggleStage, type StageState, type TicketView } from '../../ticket-route.ts';
+import { ALL_STAGES, canClose, initialTicks, phaseColor, routeMode, routeSummary, skipReason, stagePhase, stageState, toggleStage, type Phase, type StageState, type TicketView } from '../../ticket-route.ts';
 import { phaseStyle, StagePill } from '../StagePill.tsx';
-import { Button, CopyButton, ErrorNote, StatusDot } from '../ui.tsx';
+import { Button, ErrorNote, StatusDot } from '../ui.tsx';
 
 const ticketPath = (id: string) => `/tickets/${encodeURIComponent(id)}`;
 
@@ -35,12 +35,13 @@ export function useTicket(thread: Pick<Thread, 'id' | 'role' | 'status'> | null,
   return [enabled ? ticket : null, setTicket] as const;
 }
 
-const CHIP: Record<StageState, string> = {
-  done: 'bg-surface-2 text-fg-2',
-  current: 'font-semibold',
-  next: 'bg-bg text-fg-2 shadow-[inset_0_0_0_1px_var(--line-strong)]',
-  off: 'text-fg-4 line-through decoration-fg-4',
-};
+function chipStyle(state: StageState, phase: Phase): CSSProperties | undefined {
+  const color = phaseColor(phase);
+  if (state === 'current') return { backgroundColor: color, color: 'var(--on-ink)' };
+  if (state === 'done') return phaseStyle(phase);
+  if (state === 'next') return { color, boxShadow: `inset 0 0 0 1px ${color}` };
+  return undefined;
+}
 
 const STATE_LABEL: Record<StageState, string> = { done: 'done', current: 'current stage', next: 'on the route', off: 'not on the route' };
 
@@ -55,13 +56,10 @@ function StageChips({ ticket }: { ticket: TicketView }) {
             key={name}
             title={`${i + 1} ${name}: ${STATE_LABEL[state]}`}
             aria-current={state === 'current' ? 'step' : undefined}
-            style={state === 'current' ? { ...phaseStyle(phase), boxShadow: `inset 0 0 0 1.5px ${phaseColor(phase)}` } : undefined}
-            className={`inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap ${CHIP[state]}`}
+            style={chipStyle(state, phase)}
+            className={`inline-flex h-6 items-center rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap tabular-nums ${state === 'current' ? 'font-semibold' : ''} ${state === 'off' ? 'text-fg-4 line-through decoration-fg-4' : ''}`}
           >
-            <span className="tabular-nums" style={state === 'off' ? undefined : { color: phaseColor(phase) }}>
-              {i + 1}
-            </span>
-            {name}
+            {i + 1} {name}
             <span className="sr-only">, {STATE_LABEL[state]}</span>
           </li>
         );
@@ -124,24 +122,6 @@ function RouteEditor({ ticket, proposal, onSaved, onCancel }: { ticket: TicketVi
         <span className="ml-auto text-[12px] text-fg-3 tabular-nums">{routeSummary(ticks) ?? 'No stages'}</span>
       </div>
     </form>
-  );
-}
-
-function DraftBox({ ticket }: { ticket: TicketView }) {
-  if (!ticket.draft) return null;
-  const id = `route-${ticket.thread_id}-draft`;
-  return (
-    <div className="flex flex-col gap-1.5 rounded-xl bg-bg px-3 py-2 shadow-[inset_0_0_0_1px_var(--line)]">
-      <div className="flex items-center gap-2">
-        <span id={`${id}-label`} className="text-[12px] font-medium text-fg-2">
-          {draftLabel(ticket.draft.kind)}
-        </span>
-        <CopyButton text={ticket.draft.text} className="-my-0.5 ml-auto" />
-      </div>
-      <div id={id} aria-labelledby={`${id}-label`} className="scroll-thin max-h-48 overflow-y-auto text-[13px] leading-[1.5] break-words whitespace-pre-wrap text-fg">
-        {ticket.draft.text}
-      </div>
-    </div>
   );
 }
 
@@ -221,7 +201,6 @@ export function RouteCard({ ticket, onTicket: setTicket, className = '' }: { tic
           </Button>
         )}
       </div>
-      <DraftBox ticket={ticket} />
       {!closed && mode === 'proposal' && (
         <>
           <div className="flex items-center gap-2 text-[13.5px] font-medium text-fg">

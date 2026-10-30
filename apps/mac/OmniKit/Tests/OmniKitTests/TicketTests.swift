@@ -183,4 +183,13 @@ private let proposedJSON = """
     #expect(t.requests[0].url?.path == "/api/tickets")
     #expect(t.requests[0].url?.query == "channel=acme")
   }
+  @Test func marksADraftUnseenUntilItsTextIsSeen() {
+    var seen = DraftSeen()
+    #expect(seen.isUnseen("Hi", in: "t1"))
+    seen.markSeen("Hi", in: "t1")
+    #expect(!seen.isUnseen("Hi", in: "t1"))
+    #expect(seen.isUnseen("Hi", in: "t2"))
+    #expect(seen.isUnseen("Hi again", in: "t1"))
+    #expect(!seen.isUnseen("", in: "t3"))
+  }
 }

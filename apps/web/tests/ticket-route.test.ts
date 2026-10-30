@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_STAGES, canClose, defaultRoleFor, draftLabel, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
+import { ALL_STAGES, canClose, defaultRoleFor, draftLabel, draftSeenKey, draftStamp, draftUnseen, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
 
 const proposal = { stages: [3, 4, 9, 10], reasons: { '1': 'tiny copy fix', '2': ' no plan needed ' } };
 
@@ -153,5 +153,34 @@ describe('defaultRoleFor', () => {
     expect(defaultRoleFor({ id: 'me', kind: 'personal' }, crew)).toBe('');
     expect(defaultRoleFor(undefined, crew)).toBe('');
     expect(defaultRoleFor({ id: 'acme', kind: 'client' }, [])).toBe('');
+  });
+});
+
+describe('draftUnseen', () => {
+  const qa = { kind: 'qa', text: 'Check the cart on mobile.' };
+
+  it('marks a draft the user has not opened yet', () => {
+    expect(draftUnseen(qa, null)).toBe(true);
+  });
+
+  it('clears once the user opened this exact draft', () => {
+    expect(draftUnseen(qa, draftStamp(qa))).toBe(false);
+    expect(draftUnseen({ ...qa }, draftStamp(qa))).toBe(false);
+  });
+
+  it('marks the draft again when its text or kind changes', () => {
+    const seen = draftStamp(qa);
+    expect(draftUnseen({ ...qa, text: 'Check the cart on desktop.' }, seen)).toBe(true);
+    expect(draftUnseen({ ...qa, kind: 'answer' }, seen)).toBe(true);
+  });
+
+  it('marks nothing when there is no draft', () => {
+    expect(draftUnseen(null, null)).toBe(false);
+    expect(draftUnseen(undefined, 'x')).toBe(false);
+  });
+
+  it('keeps one storage key per thread', () => {
+    expect(draftSeenKey('t1')).toBe('omni:ticket-draft-seen:t1');
+    expect(draftSeenKey('t1')).not.toBe(draftSeenKey('t2'));
   });
 });

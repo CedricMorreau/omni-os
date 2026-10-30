@@ -19,6 +19,7 @@ import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { HeaderActions } from '../components/thread/HeaderActions.tsx';
 import { RouteCard, useTicket } from '../components/thread/RouteCard.tsx';
 import { StagePill } from '../components/StagePill.tsx';
+import { DraftPanel } from '../components/thread/DraftPanel.tsx';
 import { ContinueCrumbs } from '../components/ContinueLinks.tsx';
 import { Avatar, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, Segmented } from '../components/ui.tsx';
 import { href } from '../router.ts';
@@ -317,7 +318,8 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
 
   return (
     <div ref={rootRef} className="flex h-full min-h-0">
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <DraftPanel ticket={ticket} />
         {/* header */}
         <div className="@container flex shrink-0 items-center gap-3 px-3 pt-3 pb-2 md:px-6 md:pt-4">
           <span className="hidden sm:block @max-3xl:hidden">

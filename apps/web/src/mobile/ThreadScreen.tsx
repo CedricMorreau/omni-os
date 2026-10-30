@@ -10,6 +10,7 @@ import { CloudAgentCard } from '../components/thread/CloudAgentCard.tsx';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
 import { RouteCard, useTicket } from '../components/thread/RouteCard.tsx';
 import { StagePill } from '../components/StagePill.tsx';
+import { DraftPanel } from '../components/thread/DraftPanel.tsx';
 import { ClippedNote, HistoryCtx, HistoryEdgeRow } from '../components/thread/HistoryEdgeRow.tsx';
 import { useReveal } from '../pages/useReveal.ts';
 import { useScrollAnchor } from '../pages/useScrollAnchor.ts';
@@ -686,6 +687,7 @@ export function ThreadScreen() {
         onSwitched={(t) => applyThread(t)}
         onFork={() => shell.sheet({ name: 'continue', source: thread })}
       />
+      <DraftPanel ticket={ticket} mobile />
       {menu && <MenuSheet thread={thread} prLabel={pr?.pr ? `PR #${pr.pr.number} · ${plural(changes?.files.length ?? 0, 'file')}` : null} onClose={() => setMenu(false)} />}
     </>
   );

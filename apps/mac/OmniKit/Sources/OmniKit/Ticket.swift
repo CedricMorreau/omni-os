@@ -273,3 +273,17 @@ extension OmniClient {
     try await send("POST", "/api/tickets/\(uriComponent(threadID))/close", body: CloseBody(by: "user"))
   }
 }
+
+public struct DraftSeen: Hashable, Sendable {
+  private var seen: [String: String] = [:]
+
+  public init() {}
+
+  public func isUnseen(_ text: String, in thread: String) -> Bool {
+    !text.isEmpty && seen[thread] != text
+  }
+
+  public mutating func markSeen(_ text: String, in thread: String) {
+    seen[thread] = text
+  }
+}

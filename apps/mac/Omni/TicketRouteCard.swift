@@ -19,7 +19,6 @@ struct TicketRouteCard: View {
   @State private var saving = false
   @State private var error: String?
   @State private var confirmingClose = false
-  @State private var copied = false
 
   private struct Watch: Hashable {
     let id: String
@@ -54,9 +53,6 @@ struct TicketRouteCard: View {
     let deciding = ticket.closedAt == nil && ticket.routeProposal != nil
     VStack(alignment: .leading, spacing: z(10)) {
       header(ticket, mode: mode, deciding: deciding)
-      if let note = ticket.draft, !note.text.isEmpty {
-        draftBox(note)
-      }
       switch mode {
       case .reading:
         HStack(spacing: z(8)) {
@@ -156,46 +152,6 @@ struct TicketRouteCard: View {
       }
     }
     .accessibilityElement(children: .contain)
-  }
-
-  private func draftBox(_ note: Ticket.Draft) -> some View {
-    VStack(alignment: .leading, spacing: z(6)) {
-      HStack(spacing: z(8)) {
-        Text(note.label).omniCaption()
-        Spacer(minLength: z(8))
-        Button {
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.setString(note.text, forType: .string)
-          copied = true
-          Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            copied = false
-          }
-        } label: {
-          HStack(spacing: z(6)) {
-            OmniIcon(name: copied ? "check" : "copy", size: 12)
-            Text(copied ? "Copied" : "Copy")
-          }
-        }
-        .buttonStyle(.pill(.ghost, height: 24))
-        .accessibilityLabel(copied ? "Copied \(note.label)" : "Copy \(note.label)")
-      }
-      ScrollView {
-        Text(note.text)
-          .font(.omni(size: 12.5))
-          .foregroundStyle(Tok.fg)
-          .textSelection(.enabled)
-          .fixedSize(horizontal: false, vertical: true)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .frame(maxHeight: z(170))
-      .fixedSize(horizontal: false, vertical: true)
-      .accessibilityLabel(note.label)
-    }
-    .padding(.horizontal, z(12))
-    .padding(.vertical, z(10))
-    .background(Tok.bg, in: RoundedRectangle(cornerRadius: z(12), style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: z(12), style: .continuous).strokeBorder(Tok.line))
   }
 
   private var closeConfirmation: some View {
@@ -341,7 +297,7 @@ private struct StageChip: View {
   let state: TicketRoute.StageState
 
   var body: some View {
-    Text(state == .current ? "\(stage.number)  \(stage.name)" : "\(stage.number)")
+    Text("\(stage.number)  \(stage.name)")
       .font(.omni(size: 11, weight: state == .current ? .medium : .regular).monospacedDigit())
       .strikethrough(state == .off, color: Tok.fg4)
       .lineLimit(1)

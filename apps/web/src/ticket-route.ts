@@ -93,3 +93,15 @@ export function defaultRoleFor(channel: { id: string; kind?: string } | undefine
   if (channel?.kind === 'client') return has('ticket') ? 'ticket' : '';
   return '';
 }
+
+export const draftSeenKey = (threadId: string) => `omni:ticket-draft-seen:${threadId}`;
+
+export function draftStamp(draft: { kind: string | null; text: string }) {
+  let h = 5381;
+  for (let i = 0; i < draft.text.length; i++) h = ((h << 5) + h + draft.text.charCodeAt(i)) | 0;
+  return `${draft.kind ?? ''}:${draft.text.length}:${(h >>> 0).toString(36)}`;
+}
+
+export function draftUnseen(draft: { kind: string | null; text: string } | null | undefined, seen: string | null) {
+  return !!draft && draftStamp(draft) !== seen;
+}

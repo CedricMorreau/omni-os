@@ -72,6 +72,7 @@ private struct ThreadView: View {
           TicketRouteCard(client: model.client, store: store, holder: ticket)
           TranscriptView(model: model, store: store, ui: ui, markdown: markdown)
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
+            .overlay(alignment: .trailing) { TicketDraftDrawer(threadID: store.id, holder: ticket) }
           ReplyComposerHost(model: model, store: store, thread: thread)
         }
         .readsShownResult(model: model, threadID: thread.id, status: thread.status)
