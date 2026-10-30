@@ -199,8 +199,7 @@ private struct NewThreadBox: View {
         .accessibilityLabel("In folder \(folder.name). Remove")
       }
       DictateButton { focusTick += 1 }
-      HStack(spacing: z(10)) {
-        ComposerHints()
+      ComposerTail {
         SendButton(title: "Start", armed: composer.canSend, sending: composer.sending) { start() }
       }
     }

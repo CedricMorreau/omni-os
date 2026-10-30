@@ -56,8 +56,8 @@ struct InterruptButton: View {
   }
 }
 
-/// Open PR until the branch has a PR, then that PR and whether it merged: `ThreadPR` in Thread.tsx.
-/// It opens a menu of every PR from the branch, with Open PR there while none is open.
+/// Empty until the branch has a PR, then that PR and whether it merged: `ThreadPR` in Thread.tsx.
+/// It opens a menu of every PR from the branch, with Open a new PR there while none is open.
 private struct ThreadPRSlot: View {
   let model: AppModel
   let thread: OmniThread
@@ -66,13 +66,12 @@ private struct ThreadPRSlot: View {
   let open: () -> Void
   /// nil until the first answer, so the button does not flash before the PR shows.
   @State private var prs: ThreadPullRequests?
-  @State private var failed = false
   @State private var watch: PRWatch?
   @State private var watchError: String?
 
   var body: some View {
     // A ZStack, not a Group: a Group spreads its modifiers over its children, and before the first
-    // answer it has none, so the .task below never ran and Open PR never showed.
+    // answer it has none, so the .task below never ran and the PR chip never showed.
     ZStack {
       if let pr = prs?.pr, let prs {
         Menu {
@@ -109,8 +108,6 @@ private struct ThreadPRSlot: View {
         #if DEBUG
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { QAPRProbe.button = $0 }
         #endif
-      } else if prs != nil || failed {
-        openButton
       } else {
         Color.clear.frame(width: 0, height: 0)
       }
@@ -125,24 +122,8 @@ private struct ThreadPRSlot: View {
     }
   }
 
-  private var openButton: some View {
-    Button(action: open) {
-      HStack(spacing: z(6)) {
-        if opening { Loader(size: 13) } else { OmniIcon(name: "pr", size: 14) }
-        Text("Open PR")
-      }
-    }
-    .buttonStyle(.pill(.ghost, height: 28))
-    .disabled(opening)
-    .help(ReplyComposerModel.openPRPrompt)
-  }
-
   private func load() async {
-    do {
-      prs = try await model.client.pullRequests(forThread: thread.id)
-    } catch {
-      failed = true
-    }
+    if let list = try? await model.client.pullRequests(forThread: thread.id) { prs = list }
     guard prs?.pr != nil else { return }
     do {
       watch = try await model.client.prWatch(forThread: thread.id)
@@ -274,8 +255,7 @@ private struct ReplyComposerView: View {
       if thread.branch != nil {
         ThreadPRSlot(model: model, thread: thread, busy: busyThread, opening: reply.openingPR) { Task { await openPR() } }
       }
-      HStack(spacing: z(10)) {
-        ComposerHints(tab: suggestion != nil)
+      ComposerTail(tab: suggestion != nil) {
         if let omni = menu.reply, omni.action != .send {
           SendButton(title: omni.label ?? "Send", armed: omni.armed, sending: omniBusy) { runOmni() }
         } else if busyThread {

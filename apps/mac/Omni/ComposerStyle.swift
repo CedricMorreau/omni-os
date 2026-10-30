@@ -128,20 +128,22 @@ struct PillAvatar<Content: View>: View {
 struct ComposerFooterLayout: Layout {
   var spacing: CGFloat = 6
   var lineSpacing: CGFloat = 6
+  var tailGap: CGFloat = 16
 
   func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
     let width = proposal.width ?? .infinity
-    let rows = arrange(width: width, subviews: subviews)
-    let height = rows.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(0, rows.count - 1))
-    return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0, height: height)
+    let plan = arrange(width: width, subviews: subviews)
+    let height = plan.rows.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(0, plan.rows.count - 1))
+    return CGSize(width: proposal.width ?? plan.rows.map(\.width).max() ?? 0, height: height)
   }
 
   func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let plan = arrange(width: bounds.width, subviews: subviews)
     var y = bounds.minY
-    for row in arrange(width: bounds.width, subviews: subviews) {
+    for row in plan.rows {
       var x = bounds.minX
       for i in row.items {
-        let size = subviews[i].sizeThatFits(.unspecified)
+        let size = i == subviews.count - 1 ? plan.tail : subviews[i].sizeThatFits(.unspecified)
         if i == subviews.count - 1 { x = max(x, bounds.maxX - size.width) }
         subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
         x += size.width + spacing
@@ -156,19 +158,48 @@ struct ComposerFooterLayout: Layout {
     var height: CGFloat = 0
   }
 
-  private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+  private struct Plan {
+    var rows: [Row]
+    var tail: CGSize
+  }
+
+  private func arrange(width: CGFloat, subviews: Subviews) -> Plan {
+    guard let last = subviews.indices.last else { return Plan(rows: [Row()], tail: .zero) }
+    let sizes = subviews.indices.dropLast().map { subviews[$0].sizeThatFits(.unspecified) }
+    let full = subviews[last].sizeThatFits(.unspecified)
+    let controls = sizes.map(\.width).reduce(0, +) + spacing * CGFloat(max(0, sizes.count - 1))
+    if sizes.isEmpty || controls + tailGap + full.width <= width {
+      let row = Row(
+        items: Array(subviews.indices), width: controls + (sizes.isEmpty ? 0 : tailGap) + full.width,
+        height: max(sizes.map(\.height).max() ?? 0, full.height))
+      return Plan(rows: [row], tail: full)
+    }
     var rows = [Row()]
-    for i in subviews.indices {
-      let size = subviews[i].sizeThatFits(.unspecified)
+    for (i, size) in sizes.enumerated() {
       let gap = rows[rows.count - 1].items.isEmpty ? 0 : spacing
-      // The tail keeps a little air from the pills before it.
-      let need = size.width + gap + (i == subviews.count - 1 && !rows[rows.count - 1].items.isEmpty ? 16 : 0)
-      if !rows[rows.count - 1].items.isEmpty, rows[rows.count - 1].width + need > width { rows.append(Row()) }
+      if !rows[rows.count - 1].items.isEmpty, rows[rows.count - 1].width + gap + size.width > width { rows.append(Row()) }
       let g = rows[rows.count - 1].items.isEmpty ? 0 : spacing
       rows[rows.count - 1].items.append(i)
       rows[rows.count - 1].width += size.width + g
       rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
     }
-    return rows
+    let tail = subviews[last].sizeThatFits(ProposedViewSize(width: width.isFinite ? width : nil, height: nil))
+    rows.append(Row(items: [last], width: tail.width, height: tail.height))
+    return Plan(rows: rows, tail: tail)
+  }
+}
+
+struct ComposerTail<Send: View>: View {
+  var tab = false
+  @ViewBuilder let send: () -> Send
+
+  var body: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: z(10)) {
+        ComposerHints(tab: tab)
+        send()
+      }
+      send()
+    }
   }
 }

@@ -48,7 +48,7 @@ export function useThreadPR(thread: Pick<Thread, 'id' | 'branch'> | null, slotBu
 }
 
 /**
- * The composer's PR slot: Open PR until the branch has a PR, then that PR and whether it merged.
+ * The composer's PR slot: empty until the branch has a PR, then that PR and whether it merged.
  * It opens a list of every PR from the branch, and offers Open PR there while none is open.
  */
 export function ThreadPR({ thread, slotBusy, busy, onOpen }: { thread: Thread; slotBusy: boolean; busy: boolean; onOpen: () => void }) {
@@ -71,12 +71,7 @@ export function ThreadPR({ thread, slotBusy, busy, onOpen }: { thread: Thread; s
 
   if (!data) return null;
   const { pr, prs } = data;
-  if (!pr)
-    return (
-      <Button size="sm" variant="ghost" icon="pr" onClick={onOpen} busy={busy} title={OPEN_PR_PROMPT}>
-        Open PR
-      </Button>
-    );
+  if (!pr) return null;
   const badge = prBadge(pr);
   const canOpen = !prs.some((p) => (p.state ?? 'OPEN') === 'OPEN');
   return (

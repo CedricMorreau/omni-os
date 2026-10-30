@@ -217,7 +217,7 @@ function SendButton({ armed, busy, onClick, children }: { armed: boolean; busy: 
 
 function Hint({ tab = false }: { tab?: boolean }) {
   return (
-    <span className="hidden items-center gap-3.5 pr-1 text-[11.5px] text-fg-4 sm:inline-flex">
+    <span className="hidden items-center gap-2.5 text-[11.5px] whitespace-nowrap text-fg-4 @sm/composer:inline-flex">
       {tab && <span>⇥ use suggestion</span>}
       <span>↵ send</span>
       <span>{isMac ? '⌘↵' : 'Ctrl ↵'} newline</span>
@@ -549,7 +549,7 @@ export function NewThreadComposer({
         placeholder={placeholder ?? (channel === 'conductor' ? 'Ask the Conductor anything. It delegates to the crew.' : 'Describe the task')}
         className={`block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-1 leading-[1.8] outline-none placeholder:text-fg-4 ${big ? 'min-h-[96px] text-[16px]' : 'min-h-[60px] text-[14.5px]'}`}
       />
-      <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
+      <div className="@container/composer flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         {!channelId && <Picker label="Channel" value={channel} options={channelOptions} onChange={onChannel} />}
         <Picker label="Role" value={role} options={roleOptions} onChange={onRole} />
         {harnesses && (
@@ -752,7 +752,7 @@ function ThreadRunPills({ thread, onSwitched, onError }: { thread: Thread; onSwi
   const busy = thread.status === 'running' || thread.status === 'queued';
   const ring = queued ? 'rounded-full ring-1 ring-live' : '';
   return (
-    <span title={busy && !queued ? 'A pick now applies when this turn ends' : (shown.auto_reason ?? undefined)} className="inline-flex max-w-full items-center gap-1.5">
+    <span title={busy && !queued ? 'A pick now applies when this turn ends' : (shown.auto_reason ?? undefined)} className="inline-flex max-w-full flex-wrap items-center gap-1.5">
       {queued && (
         <button
           type="button"
@@ -961,7 +961,7 @@ export function ReplyComposer({
         placeholder={!busyThread ? (suggestion ?? 'Reply') : steers ? 'Steer the agent. It reads this at its next step.' : 'Queue a message. It runs after this turn.'}
         className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-4"
       />
-      <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
+      <div className="@container/composer flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         {extra}
         <AttachButton onPick={att.add} disabled={busy} />
         <ForkThreadButton thread={thread} disabled={busy} />
