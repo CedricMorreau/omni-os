@@ -54,7 +54,7 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
       aria-controls={panelId}
       aria-label={unseen ? `${label}, changed` : label}
       title={label}
-      className={`pointer-events-auto absolute top-1/2 right-full flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-xl border border-r-0 border-line bg-surface text-fg-2 shadow-[var(--shadow-card)] hover:text-fg ${mobile ? 'w-7 px-1 py-2.5' : 'w-9 px-1.5 py-3'}`}
+      className={`pointer-events-auto absolute top-1/2 right-full flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-[18px] border border-r-0 border-line-strong bg-surface text-fg-2 shadow-[var(--shadow-menu)] hover:text-fg ${mobile ? 'w-7 px-1 py-2.5' : 'w-9 px-1.5 py-3'}`}
     >
       <Icon name="file" size={mobile ? 13 : 15} />
       <span className={`font-medium whitespace-nowrap [writing-mode:vertical-rl] rotate-180 ${mobile ? 'text-[11px]' : 'text-[12px]'}`}>{label}</span>
@@ -67,12 +67,12 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
       className={
         mobile
           ? 'pointer-events-none fixed inset-0 z-40 overflow-hidden'
-          : 'pointer-events-none absolute inset-y-0 right-0 z-[6] w-[min(420px,100%)] overflow-hidden'
+          : 'pointer-events-none absolute inset-y-0 right-0 z-[6] w-[min(436px,100%)] overflow-hidden'
       }
     >
       <div
         className={`absolute inset-y-0 right-0 transition-transform duration-300 [transition-timing-function:var(--ease-out)] motion-reduce:transition-none ${
-          mobile ? 'w-full' : 'w-[calc(100%-2.5rem)]'
+          mobile ? 'w-full' : 'w-[calc(100%-3.5rem)]'
         } ${open ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {!(mobile && open) && tab}
@@ -82,7 +82,7 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
           aria-label={label}
           aria-hidden={!open}
           inert={!open}
-          className={`pointer-events-auto flex h-full flex-col bg-bg ${mobile ? '' : 'border-l border-line shadow-[-18px_0_44px_-12px_rgb(0_0_0/0.22)]'}`}
+          className={`pointer-events-auto flex h-full flex-col bg-bg ${mobile ? '' : 'rounded-l-[18px] border border-r-0 border-line-strong shadow-[var(--shadow-menu)]'}`}
           style={
             mobile
               ? {

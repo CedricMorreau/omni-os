@@ -26,6 +26,8 @@ struct TicketDraftDrawer: View {
         }
       }
       .frame(maxHeight: .infinity)
+      .padding(.leading, z(40))
+      .clipped()
       .onChange(of: note.text) { _, text in
         if open { DraftSeenStore.shared.seen.markSeen(text, in: threadID) }
       }
@@ -49,13 +51,12 @@ struct TicketDraftDrawer: View {
       .foregroundStyle(open ? Tok.fg : Tok.fg2)
       .padding(.vertical, z(12))
       .frame(width: z(30))
-      .background(Tok.elev, in: UnevenRoundedRectangle(topLeadingRadius: z(12), bottomLeadingRadius: z(12), style: .continuous))
+      .floatingPanel(UnevenRoundedRectangle(topLeadingRadius: z(Tok.panelRadius), bottomLeadingRadius: z(Tok.panelRadius), style: .continuous))
       .overlay(alignment: .topLeading) {
         if unseen {
           Circle().fill(Tok.needs).frame(width: z(8), height: z(8)).offset(x: z(4), y: z(4))
         }
       }
-      .menuShadow(12)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -109,8 +110,7 @@ struct TicketDraftDrawer: View {
     .padding(z(16))
     .frame(width: z(380))
     .frame(maxHeight: .infinity, alignment: .top)
-    .background(Tok.elev)
-    .menuShadow(24)
+    .floatingPanel(UnevenRoundedRectangle(topLeadingRadius: z(Tok.panelRadius), bottomLeadingRadius: z(Tok.panelRadius), style: .continuous))
     .accessibilityElement(children: .contain)
     .accessibilityLabel(note.label)
   }

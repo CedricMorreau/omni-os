@@ -114,12 +114,9 @@ struct TicketRouteCard: View {
     }
     .padding(.horizontal, z(16))
     .padding(.vertical, z(12))
-    .background(Tok.elev, in: RoundedRectangle(cornerRadius: z(18), style: .continuous))
-    .overlay {
-      if deciding {
-        RoundedRectangle(cornerRadius: z(18), style: .continuous).strokeBorder(Tok.needs.opacity(0.7))
-      }
-    }
+    .floatingPanel(
+      UnevenRoundedRectangle(bottomLeadingRadius: z(Tok.panelRadius), bottomTrailingRadius: z(Tok.panelRadius), style: .continuous),
+      edge: deciding ? Tok.needs.opacity(0.7) : Tok.lineStrong)
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Ticket route")
   }

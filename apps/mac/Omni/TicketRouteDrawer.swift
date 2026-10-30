@@ -23,10 +23,8 @@ struct TicketRouteDrawer: View {
         VStack(spacing: 0) {
           if open {
             TicketRouteCard(client: client, store: store, holder: holder)
-              .menuShadow(24)
               .frame(maxWidth: ThreadStyle.thread)
               .padding(.horizontal, z(24))
-              .padding(.top, z(8))
               .transition(reduceMotion ? .opacity : .move(edge: .top))
           }
           if open {
