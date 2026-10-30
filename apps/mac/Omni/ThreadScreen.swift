@@ -42,6 +42,7 @@ private struct ThreadView: View {
   @State private var ui = TranscriptUI()
   @State private var markdown = MarkdownCache<Int>()
   @State private var ticket = ThreadTicket()
+  @State private var panels = ThreadPanelsModel()
 
   var body: some View {
     switch store.loadState {
@@ -68,11 +69,12 @@ private struct ThreadView: View {
     case .loaded:
       if let thread = store.thread {
         VStack(spacing: 0) {
-          ThreadHeader(model: model, store: store, thread: thread, ticket: ticket)
-          TicketRouteCard(client: model.client, store: store, holder: ticket)
+          ThreadHeader(model: model, store: store, thread: thread, ticket: ticket, panels: panels)
+          TicketWatcher(client: model.client, store: store, holder: ticket)
           TranscriptView(model: model, store: store, ui: ui, markdown: markdown)
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
-            .overlay(alignment: .trailing) { TicketDraftDrawer(threadID: store.id, holder: ticket) }
+            .overlay(alignment: .trailing) { TicketDraftDrawer(threadID: store.id, holder: ticket, panels: panels) }
+            .overlay(alignment: .top) { TicketRouteDrawer(client: model.client, store: store, holder: ticket, panels: panels) }
           ReplyComposerHost(model: model, store: store, thread: thread)
         }
         .readsShownResult(model: model, threadID: thread.id, status: thread.status)
@@ -107,6 +109,9 @@ private struct ThreadHeader: View {
   let store: ThreadStore
   let thread: OmniThread
   let ticket: ThreadTicket
+  let panels: ThreadPanelsModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var pillHover = false
   @State private var restoring = false
   @State private var sendingGrok = false
   @State private var grokNote = ""
@@ -150,7 +155,20 @@ private struct ThreadHeader: View {
             .help(thread.title)
             .textSelection(.enabled)
           if let t = ticket.ticket {
-            StagePill(text: t.stageLabel, phase: t.phase)
+            let open = panels.state.isOpen(.route)
+            Button {
+              withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : Motion.settle) { panels.state.toggle(.route) }
+            } label: {
+              StagePill(text: t.stageLabel, phase: t.phase)
+                .overlay { if pillHover || open { Capsule().strokeBorder(Tok.phase(t.phase).opacity(0.5)) } }
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .pointerStyle(.link)
+            .onHover { pillHover = $0 }
+            .help(open ? "Hide stages" : "Show stages")
+            .accessibilityLabel(open ? "Hide stages" : "Show stages")
+            .accessibilityValue(t.stageLabel)
           }
         }
         ModStatusLines(mods: model.store.mods.filter { $0.threadID == thread.id })

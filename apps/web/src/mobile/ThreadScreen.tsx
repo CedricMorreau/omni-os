@@ -8,8 +8,9 @@ import { PRWakeList } from '../components/thread/PRWatch.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { CloudAgentCard } from '../components/thread/CloudAgentCard.tsx';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
-import { RouteCard, useTicket } from '../components/thread/RouteCard.tsx';
-import { StagePill } from '../components/StagePill.tsx';
+import { useTicket } from '../components/thread/RouteCard.tsx';
+import { RoutePanel, useTicketPanels } from '../components/thread/TicketPanels.tsx';
+import { StagePillButton } from '../components/StagePill.tsx';
 import { DraftPanel } from '../components/thread/DraftPanel.tsx';
 import { ClippedNote, HistoryCtx, HistoryEdgeRow } from '../components/thread/HistoryEdgeRow.tsx';
 import { useReveal } from '../pages/useReveal.ts';
@@ -468,6 +469,7 @@ export function ThreadScreen() {
   const edges = useMemo(() => historyEdges({ spans }, view?.turns.map((t) => t.key) ?? []), [spans, view]);
   const changes = useBranchChanges(thread, slotBusy);
   const [ticket, setTicket] = useTicket(thread, events.length);
+  const panels = useTicketPanels(ticket);
   const pr = useThreadPR(thread, slotBusy, true);
   // Outcome first: open on the newest turn, its prompt at the top, and again when a new turn starts. Earlier turns
   // loading above keep the reading position instead, and a search hit opens on the turn that holds it.
@@ -584,7 +586,7 @@ export function ThreadScreen() {
           ticket ? (
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 truncate">{thread.title || 'Untitled'}</span>
-              <StagePill ticket={ticket} />
+              <StagePillButton ticket={ticket} expanded={panels.open === 'route'} onClick={() => panels.toggle('route')} />
             </span>
           ) : (
             thread.title || 'Untitled'
@@ -598,8 +600,9 @@ export function ThreadScreen() {
           </>
         }
       />
-      <RouteCard ticket={ticket} onTicket={setTicket} className="mx-4 mt-1 mb-1 shrink-0" />
-      <div ref={scroll} className="mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 [overflow-anchor:none]">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onToggle={() => panels.toggle('route')} onClose={panels.closeRoute} mobile />
+        <div ref={scroll} className={`mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pb-4 [overflow-anchor:none] ${ticket ? 'pt-10' : 'pt-2'}`}>
         <HistoryCtx.Provider value={history}>
           <div className="flex flex-col gap-4">
             <MoContinueLinks links={s.links} onOpen={(id) => shell.open(href.thread(id))} />
@@ -679,6 +682,7 @@ export function ThreadScreen() {
           </div>
         </HistoryCtx.Provider>
       </div>
+      </div>
       <MoComposer
         thread={thread}
         chips={chips}
@@ -687,7 +691,7 @@ export function ThreadScreen() {
         onSwitched={(t) => applyThread(t)}
         onFork={() => shell.sheet({ name: 'continue', source: thread })}
       />
-      <DraftPanel ticket={ticket} mobile />
+      <DraftPanel ticket={ticket} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} mobile />
       {menu && <MenuSheet thread={thread} prLabel={pr?.pr ? `PR #${pr.pr.number} · ${plural(changes?.files.length ?? 0, 'file')}` : null} onClose={() => setMenu(false)} />}
     </>
   );

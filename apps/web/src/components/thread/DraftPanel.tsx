@@ -19,14 +19,12 @@ function writeSeen(threadId: string, stamp: string) {
   }
 }
 
-export function DraftPanel({ ticket, mobile = false }: { ticket: TicketView | null; mobile?: boolean }) {
+export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: { ticket: TicketView | null; open: boolean; onToggle: () => void; onClose: () => void; mobile?: boolean }) {
   const threadId = ticket?.thread_id ?? '';
   const draft = ticket?.draft ?? null;
-  const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<string | null>(null);
 
   useEffect(() => {
-    setOpen(false);
     setSeen(threadId ? readSeen(threadId) : null);
   }, [threadId]);
 
@@ -38,10 +36,10 @@ export function DraftPanel({ ticket, mobile = false }: { ticket: TicketView | nu
   }, [open, draft, threadId]);
 
   useEffect(() => {
-    if (!draft) setOpen(false);
-  }, [draft]);
+    if (!draft && open) onClose();
+  }, [draft, open, onClose]);
 
-  useDismissable(open, () => setOpen(false), { outside: false });
+  useDismissable(open, onClose, { outside: false });
 
   if (!ticket || !draft) return null;
   const label = draftLabel(draft.kind);
@@ -51,7 +49,7 @@ export function DraftPanel({ ticket, mobile = false }: { ticket: TicketView | nu
   const tab = (
     <button
       type="button"
-      onClick={() => setOpen((o) => !o)}
+      onClick={onToggle}
       aria-expanded={open}
       aria-controls={panelId}
       aria-label={unseen ? `${label}, changed` : label}
@@ -100,7 +98,7 @@ export function DraftPanel({ ticket, mobile = false }: { ticket: TicketView | nu
             <Icon name="file" size={15} className="text-fg-3" />
             <h2 className="min-w-0 flex-1 truncate text-[14px] font-medium text-fg">{label}</h2>
             <span className="text-[12px] text-fg-4 font-num">{ticket.ref}</span>
-            <IconButton icon="x" label={`Close ${label.toLowerCase()}`} onClick={() => setOpen(false)} />
+            <IconButton icon="x" label={`Close ${label.toLowerCase()}`} onClick={onClose} />
           </div>
           <div id={`${panelId}-text`} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-3 text-[14px] leading-[1.55] break-words whitespace-pre-wrap text-fg">
             {draft.text}

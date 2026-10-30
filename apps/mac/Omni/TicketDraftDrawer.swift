@@ -10,8 +10,9 @@ final class DraftSeenStore {
 struct TicketDraftDrawer: View {
   let threadID: String
   let holder: ThreadTicket
+  let panels: ThreadPanelsModel
 
-  @State private var open = false
+  private var open: Bool { panels.state.isOpen(.draft) }
   @State private var copied = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -115,8 +116,7 @@ struct TicketDraftDrawer: View {
   }
 
   private func toggle(_ note: Ticket.Draft) {
-    let next = !open
-    if next { DraftSeenStore.shared.seen.markSeen(note.text, in: threadID) }
-    withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : Motion.settle) { open = next }
+    if !open { DraftSeenStore.shared.seen.markSeen(note.text, in: threadID) }
+    withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : Motion.settle) { panels.state.toggle(.draft) }
   }
 }

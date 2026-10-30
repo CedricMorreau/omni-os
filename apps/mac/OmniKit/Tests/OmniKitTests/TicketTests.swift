@@ -192,4 +192,33 @@ private let proposedJSON = """
     #expect(seen.isUnseen("Hi again", in: "t1"))
     #expect(!seen.isUnseen("", in: "t3"))
   }
+  @Test func keepsOnePanelOpenAtATime() {
+    var panels = ThreadPanels()
+    #expect(panels.shown == nil)
+    panels.open(.route)
+    #expect(panels.isOpen(.route))
+    panels.open(.draft)
+    #expect(panels.isOpen(.draft) && !panels.isOpen(.route))
+    panels.toggle(.draft)
+    #expect(panels.shown == nil)
+    panels.toggle(.route)
+    #expect(panels.shown == .route)
+    panels.close()
+    #expect(panels.shown == nil)
+  }
+
+  @Test func opensTheRoutePanelOnceWhenAProposalAppears() {
+    var panels = ThreadPanels()
+    panels.proposalChanged(nil)
+    #expect(panels.shown == nil)
+    let proposal = Ticket.RouteProposal(stages: [1, 3])
+    panels.proposalChanged(proposal)
+    #expect(panels.shown == .route)
+    panels.close()
+    panels.proposalChanged(proposal)
+    #expect(panels.shown == nil)
+    panels.proposalChanged(nil)
+    panels.proposalChanged(Ticket.RouteProposal(stages: [2]))
+    #expect(panels.shown == .route)
+  }
 }

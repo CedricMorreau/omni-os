@@ -105,3 +105,20 @@ export function draftStamp(draft: { kind: string | null; text: string }) {
 export function draftUnseen(draft: { kind: string | null; text: string } | null | undefined, seen: string | null) {
   return !!draft && draftStamp(draft) !== seen;
 }
+
+export type TicketPanel = 'route' | 'draft' | null;
+
+export const togglePanel = (open: TicketPanel, which: Exclude<TicketPanel, null>): TicketPanel => (open === which ? null : which);
+
+export const proposalSeenKey = (threadId: string) => `omni:ticket-proposal-seen:${threadId}`;
+
+export function proposalStamp(p: { stages: number[]; reasons: Record<string, string> }) {
+  const reasons = Object.keys(p.reasons)
+    .sort()
+    .map((k) => [k, p.reasons[k]]);
+  return JSON.stringify([[...p.stages].sort((a, b) => a - b), reasons]);
+}
+
+export function autoOpenProposal(p: { stages: number[]; reasons: Record<string, string> } | null | undefined, seen: string | null) {
+  return !!p && proposalStamp(p) !== seen;
+}

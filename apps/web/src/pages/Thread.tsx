@@ -17,8 +17,9 @@ import { HandoffCard, useHandoffTargets } from '../components/thread/Handoff.tsx
 import { OPEN_PR_PROMPT, ThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { HeaderActions } from '../components/thread/HeaderActions.tsx';
-import { RouteCard, useTicket } from '../components/thread/RouteCard.tsx';
-import { StagePill } from '../components/StagePill.tsx';
+import { useTicket } from '../components/thread/RouteCard.tsx';
+import { RoutePanel, useTicketPanels } from '../components/thread/TicketPanels.tsx';
+import { StagePillButton } from '../components/StagePill.tsx';
 import { DraftPanel } from '../components/thread/DraftPanel.tsx';
 import { ContinueCrumbs } from '../components/ContinueLinks.tsx';
 import { Avatar, Empty, ErrorNote, Icon, IconButton, LinkButton, Loading, Segmented } from '../components/ui.tsx';
@@ -110,6 +111,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
     clearReveal();
   });
   const [ticket, setTicket] = useTicket(thread, events.length);
+  const panels = useTicketPanels(ticket);
   const handoffTargets = useHandoffTargets(thread, blocked, handoff);
   const note = blockedNote(blocked, handoff, thread?.status);
   const known = useMemo(() => [...children, ...team], [children, team]);
@@ -318,8 +320,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
 
   return (
     <div ref={rootRef} className="flex h-full min-h-0">
-      <div className="relative flex min-w-0 flex-1 flex-col">
-        <DraftPanel ticket={ticket} />
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
         <div className="@container flex shrink-0 items-center gap-3 px-3 pt-3 pb-2 md:px-6 md:pt-4">
           <span className="hidden sm:block @max-3xl:hidden">
@@ -345,7 +346,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
               <h1 className="min-w-0 truncate font-display text-[16px] leading-snug md:text-[18px]" title={thread.title}>
                 {thread.title}
               </h1>
-              {ticket && <StagePill ticket={ticket} />}
+              {ticket && <StagePillButton ticket={ticket} expanded={panels.open === 'route'} onClick={() => panels.toggle('route')} />}
             </div>
             {modLines.length > 0 && <ModStatusLines lines={modLines} />}
           </div>
@@ -377,86 +378,86 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
           />
         </div>
 
-        <div className="shrink-0 px-3 md:px-6">
-          <RouteCard ticket={ticket} onTicket={setTicket} className="mx-auto mb-1 max-w-4xl" />
-        </div>
-
-        {/* transcript */}
-        <div className="relative min-h-0 flex-1">
-          <div ref={scrollRef} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
-            <div ref={contentRef} className="mx-auto max-w-4xl px-4 pt-4 pb-10 md:px-6">
-              {/* Queued means waiting for a slot: nothing is working yet. */}
-              <LinkChannel.Provider value={thread.channel_id}>
-                <ThreadIdCtx.Provider value={id}>
-                  <Transcript threadId={id} events={events} running={turnInProgress} cwd={init?.cwd || thread.cwd} known={known} team={members} artifacts={files} reports={reports} history={history} />
-                </ThreadIdCtx.Provider>
-              </LinkChannel.Provider>
-              <SetupCard
-                thread={thread}
-                onRetried={(t, pending) => {
-                  // Retry keeps updated_at, so it must win a tie, like a rename.
-                  applyThread(t);
-                  setQueued(pending);
-                }}
-              />
-              <LimitCard
-                thread={thread}
-                onChanged={(t, pending) => {
-                  // Scheduling keeps updated_at, so it must win a tie, like Retry.
-                  applyThread(t);
-                  setQueued(pending);
-                }}
-              />
-              <HandoffCard
-                thread={thread}
-                handoff={handoff}
-                onChanged={(a) => {
-                  applyThread(a.thread, true);
-                  setHandoff(a.handoff);
-                }}
-              />
-              <QueuedMessages items={queued} starting={betweenTurns} threadId={id} onPending={setQueued} setup={thread.setup} canSteer={canSteer(thread.harness, harnesses)} />
-              {!queued.length && (
-                <NextThreadCard
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <DraftPanel ticket={ticket} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} />
+          {/* transcript */}
+          <div className="relative min-h-0 flex-1">
+            <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onToggle={() => panels.toggle('route')} onClose={panels.closeRoute} />
+            <div ref={scrollRef} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
+              <div ref={contentRef} className={`mx-auto max-w-4xl px-4 pb-10 md:px-6 ${ticket ? 'pt-11' : 'pt-4'}`}>
+                {/* Queued means waiting for a slot: nothing is working yet. */}
+                <LinkChannel.Provider value={thread.channel_id}>
+                  <ThreadIdCtx.Provider value={id}>
+                    <Transcript threadId={id} events={events} running={turnInProgress} cwd={init?.cwd || thread.cwd} known={known} team={members} artifacts={files} reports={reports} history={history} />
+                  </ThreadIdCtx.Provider>
+                </LinkChannel.Provider>
+                <SetupCard
                   thread={thread}
-                  onThread={(t, reply) => {
-                    applyThread(t, reply);
-                    if (reply) pin();
+                  onRetried={(t, pending) => {
+                    // Retry keeps updated_at, so it must win a tie, like a rename.
+                    applyThread(t);
+                    setQueued(pending);
                   }}
                 />
-              )}
+                <LimitCard
+                  thread={thread}
+                  onChanged={(t, pending) => {
+                    // Scheduling keeps updated_at, so it must win a tie, like Retry.
+                    applyThread(t);
+                    setQueued(pending);
+                  }}
+                />
+                <HandoffCard
+                  thread={thread}
+                  handoff={handoff}
+                  onChanged={(a) => {
+                    applyThread(a.thread, true);
+                    setHandoff(a.handoff);
+                  }}
+                />
+                <QueuedMessages items={queued} starting={betweenTurns} threadId={id} onPending={setQueued} setup={thread.setup} canSteer={canSteer(thread.harness, harnesses)} />
+                {!queued.length && (
+                  <NextThreadCard
+                    thread={thread}
+                    onThread={(t, reply) => {
+                      applyThread(t, reply);
+                      if (reply) pin();
+                    }}
+                  />
+                )}
+              </div>
             </div>
+            {showJump && (
+              <button
+                type="button"
+                onClick={jump}
+                className="float pop-in press absolute bottom-4 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-medium"
+              >
+                <Icon name="chevronDown" size={13} /> New activity
+              </button>
+            )}
           </div>
-          {showJump && (
-            <button
-              type="button"
-              onClick={jump}
-              className="float pop-in press absolute bottom-4 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-medium"
-            >
-              <Icon name="chevronDown" size={13} /> New activity
-            </button>
-          )}
-        </div>
 
-        {/* composer */}
-        <div className="relative shrink-0 bg-bg px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-4">
-          <div className="mx-auto max-w-4xl">
-            {actionError && <ErrorNote className="mb-2">{actionError}</ErrorNote>}
-            {/* The setup card above says why while the worktree is not ready. */}
-            {note && !thread.setup && <ErrorNote className="mb-2">{note}</ErrorNote>}
-            <ReplyComposer
-              thread={thread}
-              canSteer={canSteer(thread.harness, harnesses)}
-              onSent={(t) => {
-                applyThread(t, true);
-                pin();
-              }}
-              // A rename keeps updated_at, so it has to win a tie.
-              onChanged={(t) => applyThread(t)}
-              extra={
-                thread.branch ? <ThreadPR thread={thread} slotBusy={slotBusy} busy={prBusy} onOpen={openPR} /> : undefined
-              }
-            />
+          {/* composer */}
+          <div className="relative shrink-0 bg-bg px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-4">
+            <div className="mx-auto max-w-4xl">
+              {actionError && <ErrorNote className="mb-2">{actionError}</ErrorNote>}
+              {/* The setup card above says why while the worktree is not ready. */}
+              {note && !thread.setup && <ErrorNote className="mb-2">{note}</ErrorNote>}
+              <ReplyComposer
+                thread={thread}
+                canSteer={canSteer(thread.harness, harnesses)}
+                onSent={(t) => {
+                  applyThread(t, true);
+                  pin();
+                }}
+                // A rename keeps updated_at, so it has to win a tie.
+                onChanged={(t) => applyThread(t)}
+                extra={
+                  thread.branch ? <ThreadPR thread={thread} slotBusy={slotBusy} busy={prBusy} onOpen={openPR} /> : undefined
+                }
+              />
+            </div>
           </div>
         </div>
       </div>

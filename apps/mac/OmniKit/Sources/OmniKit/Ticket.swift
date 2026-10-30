@@ -287,3 +287,34 @@ public struct DraftSeen: Hashable, Sendable {
     seen[thread] = text
   }
 }
+
+public struct ThreadPanels: Hashable, Sendable {
+  public enum Panel: Hashable, Sendable {
+    case route, draft
+  }
+
+  public private(set) var shown: Panel?
+  private var proposalOpened = false
+
+  public init() {}
+
+  public func isOpen(_ panel: Panel) -> Bool { shown == panel }
+
+  public mutating func open(_ panel: Panel) { shown = panel }
+
+  public mutating func close() { shown = nil }
+
+  public mutating func toggle(_ panel: Panel) {
+    shown = shown == panel ? nil : panel
+  }
+
+  public mutating func proposalChanged(_ proposal: Ticket.RouteProposal?) {
+    guard proposal != nil else {
+      proposalOpened = false
+      return
+    }
+    guard !proposalOpened else { return }
+    proposalOpened = true
+    shown = .route
+  }
+}

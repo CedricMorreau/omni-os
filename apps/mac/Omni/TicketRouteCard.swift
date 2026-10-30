@@ -4,6 +4,44 @@ import SwiftUI
 @MainActor @Observable
 final class ThreadTicket {
   var ticket: Ticket?
+
+  func load(_ client: OmniClient, threadID: String) async {
+    do {
+      ticket = try await client.ticket(threadID: threadID)
+    } catch {
+      return
+    }
+  }
+}
+
+@MainActor @Observable
+final class ThreadPanelsModel {
+  var state = ThreadPanels()
+}
+
+struct TicketWatcher: View {
+  let client: OmniClient
+  let store: ThreadStore
+  let holder: ThreadTicket
+
+  private struct Watch: Hashable {
+    let id: String
+    let status: ThreadStatus?
+    let tail: Int
+  }
+
+  var body: some View {
+    Color.clear
+      .frame(height: 0)
+      .task(id: Watch(id: store.id, status: store.thread?.status, tail: store.history.tailID)) {
+        if holder.ticket != nil {
+          try? await Task.sleep(for: .milliseconds(400))
+          guard !Task.isCancelled else { return }
+        }
+        await holder.load(client, threadID: store.id)
+      }
+      .accessibilityHidden(true)
+  }
 }
 
 struct TicketRouteCard: View {
@@ -20,32 +58,11 @@ struct TicketRouteCard: View {
   @State private var error: String?
   @State private var confirmingClose = false
 
-  private struct Watch: Hashable {
-    let id: String
-    let status: ThreadStatus?
-    let tail: Int
-  }
-
   var body: some View {
-    Group {
-      if let ticket {
-        card(ticket)
-          .frame(maxWidth: ThreadStyle.thread)
-          .padding(.horizontal, z(24))
-          .padding(.bottom, z(4))
-          .frame(maxWidth: .infinity)
-      } else {
-        Color.clear.frame(height: 0)
-      }
+    if let ticket {
+      card(ticket)
+        .onChange(of: ticket.routeProposal) { _, _ in draft = nil }
     }
-    .task(id: Watch(id: store.id, status: store.thread?.status, tail: store.history.tailID)) {
-      if ticket != nil {
-        try? await Task.sleep(for: .milliseconds(400))
-        guard !Task.isCancelled else { return }
-      }
-      await load()
-    }
-    .onChange(of: ticket?.routeProposal) { _, _ in draft = nil }
   }
 
   @ViewBuilder private func card(_ ticket: Ticket) -> some View {
@@ -97,7 +114,7 @@ struct TicketRouteCard: View {
     }
     .padding(.horizontal, z(16))
     .padding(.vertical, z(12))
-    .background(Tok.surface, in: RoundedRectangle(cornerRadius: z(18), style: .continuous))
+    .background(Tok.elev, in: RoundedRectangle(cornerRadius: z(18), style: .continuous))
     .overlay {
       if deciding {
         RoundedRectangle(cornerRadius: z(18), style: .continuous).strokeBorder(Tok.needs.opacity(0.7))
@@ -239,11 +256,7 @@ struct TicketRouteCard: View {
   }
 
   private func load() async {
-    do {
-      ticket = try await client.ticket(threadID: store.id)
-    } catch {
-      return
-    }
+    await holder.load(client, threadID: store.id)
   }
 
   private func close() async {

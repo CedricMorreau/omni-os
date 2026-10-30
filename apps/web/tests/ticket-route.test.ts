@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_STAGES, canClose, defaultRoleFor, draftLabel, draftSeenKey, draftStamp, draftUnseen, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
+import { ALL_STAGES, autoOpenProposal, canClose, proposalSeenKey, proposalStamp, togglePanel, defaultRoleFor, draftLabel, draftSeenKey, draftStamp, draftUnseen, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
 
 const proposal = { stages: [3, 4, 9, 10], reasons: { '1': 'tiny copy fix', '2': ' no plan needed ' } };
 
@@ -182,5 +182,44 @@ describe('draftUnseen', () => {
   it('keeps one storage key per thread', () => {
     expect(draftSeenKey('t1')).toBe('omni:ticket-draft-seen:t1');
     expect(draftSeenKey('t1')).not.toBe(draftSeenKey('t2'));
+  });
+});
+
+describe('togglePanel', () => {
+  it('opens one panel at a time', () => {
+    expect(togglePanel(null, 'route')).toBe('route');
+    expect(togglePanel('draft', 'route')).toBe('route');
+    expect(togglePanel('route', 'draft')).toBe('draft');
+  });
+
+  it('closes the panel that is open when its tab is used again', () => {
+    expect(togglePanel('route', 'route')).toBeNull();
+    expect(togglePanel('draft', 'draft')).toBeNull();
+  });
+});
+
+describe('autoOpenProposal', () => {
+  const p = { stages: [9, 3, 4], reasons: { '2': 'no plan needed', '1': 'tiny copy fix' } };
+
+  it('opens the route panel for a proposal the user has not seen', () => {
+    expect(autoOpenProposal(p, null)).toBe(true);
+  });
+
+  it('opens it only once for the same proposal, in any order', () => {
+    const seen = proposalStamp(p);
+    expect(autoOpenProposal({ stages: [3, 4, 9], reasons: { '1': 'tiny copy fix', '2': 'no plan needed' } }, seen)).toBe(false);
+  });
+
+  it('opens it again for a new proposal', () => {
+    expect(autoOpenProposal({ ...p, stages: [3, 9] }, proposalStamp(p))).toBe(true);
+    expect(autoOpenProposal({ ...p, reasons: { '1': 'other' } }, proposalStamp(p))).toBe(true);
+  });
+
+  it('does nothing without a proposal', () => {
+    expect(autoOpenProposal(null, null)).toBe(false);
+  });
+
+  it('keeps one storage key per thread', () => {
+    expect(proposalSeenKey('t1')).toBe('omni:ticket-proposal-seen:t1');
   });
 });
