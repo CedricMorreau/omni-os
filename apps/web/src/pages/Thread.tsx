@@ -112,6 +112,7 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
   });
   const [ticket, setTicket] = useTicket(thread, events.length);
   const panels = useTicketPanels(ticket);
+  const headerRef = useRef<HTMLDivElement>(null);
   const handoffTargets = useHandoffTargets(thread, blocked, handoff);
   const note = blockedNote(blocked, handoff, thread?.status);
   const known = useMemo(() => [...children, ...team], [children, team]);
@@ -320,9 +321,10 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
 
   return (
     <div ref={rootRef} className="flex h-full min-h-0">
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onClose={panels.closeRoute} header={headerRef} />
         {/* header */}
-        <div className="@container flex shrink-0 items-center gap-3 px-3 pt-3 pb-2 md:px-6 md:pt-4">
+        <div ref={headerRef} className="@container relative z-[8] flex shrink-0 items-center gap-3 bg-bg px-3 pt-3 pb-2 md:px-6 md:pt-4">
           <span className="hidden sm:block @max-3xl:hidden">
             <Avatar name={channel?.name ?? thread.channel_id} channelIcon={channel?.icon} icon={thread.channel_id === 'conductor' ? 'target' : undefined} size={34} />
           </span>
@@ -382,9 +384,8 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
           <DraftPanel ticket={ticket} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} />
           {/* transcript */}
           <div className="relative min-h-0 flex-1">
-            <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onToggle={() => panels.toggle('route')} onClose={panels.closeRoute} />
             <div ref={scrollRef} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
-              <div ref={contentRef} className={`mx-auto max-w-4xl px-4 pb-10 md:px-6 ${ticket ? 'pt-11' : 'pt-4'}`}>
+              <div ref={contentRef} className="mx-auto max-w-4xl px-4 pt-4 pb-10 md:px-6">
                 {/* Queued means waiting for a slot: nothing is working yet. */}
                 <LinkChannel.Provider value={thread.channel_id}>
                   <ThreadIdCtx.Provider value={id}>

@@ -70,6 +70,8 @@ private struct ThreadView: View {
       if let thread = store.thread {
         VStack(spacing: 0) {
           ThreadHeader(model: model, store: store, thread: thread, ticket: ticket, panels: panels)
+            .background(Tok.bg)
+            .zIndex(1)
           TicketWatcher(client: model.client, store: store, holder: ticket)
           TranscriptView(model: model, store: store, ui: ui, markdown: markdown)
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
@@ -159,15 +161,20 @@ private struct ThreadHeader: View {
             Button {
               withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : Motion.settle) { panels.state.toggle(.route) }
             } label: {
-              StagePill(text: t.stageLabel, phase: t.phase)
+              StagePill(text: t.stageLabel, phase: t.phase, open: open)
                 .overlay { if pillHover || open { Capsule().strokeBorder(Tok.phase(t.phase).opacity(0.5)) } }
+                .overlay(alignment: .topTrailing) {
+                  if t.closedAt == nil, t.routeProposal != nil {
+                    Circle().fill(Tok.needs).frame(width: z(8), height: z(8)).offset(x: z(2), y: z(-2))
+                  }
+                }
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .pointerStyle(.link)
             .onHover { pillHover = $0 }
             .help(open ? "Hide stages" : "Show stages")
-            .accessibilityLabel(open ? "Hide stages" : "Show stages")
+            .accessibilityLabel(open ? "Hide stages" : t.closedAt == nil && t.routeProposal != nil ? "Show stages, a route waits for your decision" : "Show stages")
             .accessibilityValue(t.stageLabel)
           }
         }

@@ -291,14 +291,21 @@ struct TicketRouteCard: View {
 struct StagePill: View {
   let text: String
   let phase: TicketPhase
+  var open: Bool?
 
   var body: some View {
-    Text(text)
-      .font(.omni(size: 11, weight: .medium).monospacedDigit())
-      .lineLimit(1)
+    HStack(spacing: z(5)) {
+      Text(text)
+        .font(.omni(size: 11, weight: .medium).monospacedDigit())
+        .lineLimit(1)
+      if let open {
+        OmniIcon(name: "chevronDown", size: 10)
+          .rotationEffect(.degrees(open ? 180 : 0))
+      }
+    }
       .foregroundStyle(Tok.phase(phase))
-      .padding(.horizontal, z(8))
-      .frame(height: z(20))
+      .padding(.horizontal, z(open == nil ? 8 : 11))
+      .frame(height: z(open == nil ? 20 : 22))
       .background(Tok.phase(phase).opacity(0.14), in: Capsule())
       .fixedSize()
       .accessibilityLabel("Stage: \(text)")

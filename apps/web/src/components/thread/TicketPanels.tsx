@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { autoOpenProposal, proposalSeenKey, proposalStamp, togglePanel, type TicketPanel, type TicketView } from '../../ticket-route.ts';
-import { StagePill } from '../StagePill.tsx';
 import { useDismissable } from '../ui/use-dismissable.ts';
-import { Icon, StatusDot } from '../ui.tsx';
 import { RouteCard } from './RouteCard.tsx';
 
 function readStamp(key: string) {
@@ -49,18 +47,28 @@ export function RoutePanel({
   ticket,
   onTicket,
   open,
-  onToggle,
   onClose,
+  header,
   mobile = false,
 }: {
   ticket: TicketView | null;
   onTicket: (t: TicketView) => void;
   open: boolean;
-  onToggle: () => void;
   onClose: () => void;
+  header: RefObject<HTMLElement | null>;
   mobile?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(0);
+  useLayoutEffect(() => {
+    const el = header.current;
+    if (!el) return;
+    setTop(el.offsetHeight);
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setTop(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [header, ticket?.thread_id]);
   useDismissable(open, onClose, { outside: false });
   useEffect(() => {
     if (!open) return;
@@ -75,13 +83,13 @@ export function RoutePanel({
 
   if (!ticket) return null;
   const panelId = `route-panel-${ticket.thread_id}`;
-  const waiting = !!ticket.route_proposal;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[7] overflow-hidden">
       <div
         ref={box}
-        className={`absolute inset-x-0 top-0 max-h-[calc(100%-2.5rem)] transition-transform duration-300 [transition-timing-function:var(--ease-out)] motion-reduce:transition-none ${open ? 'translate-y-0' : '-translate-y-full'}`}
+        style={{ paddingTop: top }}
+        className={`absolute inset-x-0 top-0 flex max-h-full flex-col transition-transform duration-300 [transition-timing-function:var(--ease-out)] motion-reduce:transition-none ${open ? 'translate-y-0' : '-translate-y-full'}`}
       >
         <div
           id={panelId}
@@ -89,24 +97,10 @@ export function RoutePanel({
           aria-label={`Ticket ${ticket.ref} route`}
           aria-hidden={!open}
           inert={!open}
-          className={`scroll-thin pointer-events-auto max-h-full overflow-y-auto ${mobile ? 'px-3 pt-1 pb-2' : 'px-4 pt-1 pb-2 md:px-6'}`}
+          className={`scroll-thin pointer-events-auto min-h-0 overflow-y-auto ${mobile ? 'px-3 pt-1 pb-2' : 'px-4 pt-1 pb-2 md:px-6'}`}
         >
           <RouteCard ticket={ticket} onTicket={onTicket} className="mx-auto max-w-4xl shadow-[var(--shadow-menu)]" />
         </div>
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-controls={panelId}
-          aria-label={`Ticket ${ticket.ref} route${waiting ? ', a proposed route waits for you' : ''}`}
-          className={`pointer-events-auto absolute top-full left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-b-xl border border-t-0 border-line bg-surface text-fg-2 shadow-[var(--shadow-card)] whitespace-nowrap hover:text-fg ${mobile ? 'h-7 px-2.5 text-[11.5px]' : 'h-8 px-3 text-[12px]'}`}
-        >
-          {waiting && <StatusDot status="needs" size={7} />}
-          <span className="font-num font-medium text-fg">{ticket.ref}</span>
-          <span className="text-fg-4">·</span>
-          <StagePill ticket={ticket} />
-          <Icon name="chevronDown" size={13} className={`text-fg-3 transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} />
-        </button>
       </div>
     </div>
   );

@@ -470,6 +470,7 @@ export function ThreadScreen() {
   const changes = useBranchChanges(thread, slotBusy);
   const [ticket, setTicket] = useTicket(thread, events.length);
   const panels = useTicketPanels(ticket);
+  const headerRef = useRef<HTMLDivElement>(null);
   const pr = useThreadPR(thread, slotBusy, true);
   // Outcome first: open on the newest turn, its prompt at the top, and again when a new turn starts. Earlier turns
   // loading above keep the reading position instead, and a search hit opens on the turn that holds it.
@@ -580,108 +581,112 @@ export function ThreadScreen() {
 
   return (
     <>
-      <MoHeader
-        onBack={shell.back}
-        title={
-          ticket ? (
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 truncate">{thread.title || 'Untitled'}</span>
-              <StagePillButton ticket={ticket} expanded={panels.open === 'route'} onClick={() => panels.toggle('route')} />
-            </span>
-          ) : (
-            thread.title || 'Untitled'
-          )
-        }
-        sub={parent ? <span>{sub} · <a href={href.thread(parent.id)} className="text-fg-2 hover:text-fg" title={`Delegated from ${parent.title}`}>Parent: {parent.title}</a></span> : sub}
-        right={
-          <>
-            <StatusPill status={view.asking || needs ? 'needs' : thread.status} label={view.asking ? ASKING_LABEL : needs ? 'Needs you' : undefined} />
-            <MoRound icon="more" label="Thread options" onClick={() => setMenu(true)} />
-          </>
-        }
-      />
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onToggle={() => panels.toggle('route')} onClose={panels.closeRoute} mobile />
-        <div ref={scroll} className={`mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pb-4 [overflow-anchor:none] ${ticket ? 'pt-10' : 'pt-2'}`}>
-        <HistoryCtx.Provider value={history}>
-          <div className="flex flex-col gap-4">
-            <MoContinueLinks links={s.links} onOpen={(id) => shell.open(href.thread(id))} />
-            {view.turns.map((t, i) => {
-              const last = i === view.turns.length - 1;
-              const edge = edges.get(t.key);
-              return (
-                <Fragment key={t.key}>
-                  {edge && <HistoryEdgeRow edge={edge} history={history} touch />}
-                  <div data-key={t.key} ref={last ? newest : undefined} className="flex flex-col gap-4">
-                    {t.prompts.map((p, k) => (
-                      <Fragment key={k}>
-                        <MoBubble
-                          caption={
-                            p.source === 'pr-watch'
-                              ? 'PR watch'
-                              : i === 0 && k === 0 && thread.parent_id && atStart(history.history)
-                                ? `Delegated by the Conductor${thread.task_id ? ` · ${thread.task_id}` : ''}`
-                                : k > 0
-                                  ? 'Sent while it ran'
-                                  : undefined
-                          }
-                          above={<ContextChips records={p.context} align="end" className="w-full max-w-[86%]" />}
-                        >
-                          {p.text || p.attachments?.length || !hasContext(p.context) ? (
-                            <>
-                              {p.text}
-                              {p.attachments?.length ? <span className="text-fg-3"> · {plural(p.attachments.length, 'file')}</span> : null}
-                            </>
-                          ) : null}
-                          {p.items?.length ? <PRWakeList items={p.items} more={p.more} /> : null}
-                        </MoBubble>
-                        <ClippedNote event={p.key} clipped={p.clipped} className="-mt-2.5 justify-end" />
-                      </Fragment>
-                    ))}
-                    {t.reports.map((r, k) => (
-                      <Report key={k} role={r.role} taskId={r.task_id} text={r.text} />
-                    ))}
-                    {t.questions.map((q) => (
-                      <QuestionCard key={q.id} threadId={thread.id} q={q} touch />
-                    ))}
-                    {turnBody(t, last)}
-                    {t.switches.map((it) => (
-                      <SwitchLine key={it.key} it={it} running={thread.status === 'running'} />
-                    ))}
-                  </div>
-                </Fragment>
-              );
-            })}
-            {edges.get(-1) && <HistoryEdgeRow edge={edges.get(-1)!} history={history} touch />}
-            <HandoffCard
-              thread={thread}
-              handoff={handoff}
-              mobile
-              onChanged={(a) => {
-                applyThread(a.thread, true);
-                setHandoff(a.handoff);
-              }}
-            />
-            {!view.turns.length && !thread.setup && <MoEmpty>Nothing here yet.</MoEmpty>}
-            <SetupCard
-              thread={thread}
-              mobile
-              onRetried={(t, pending) => {
-                // Retry keeps updated_at, so it must win a tie.
-                applyThread(t);
-                setQueued(pending);
-              }}
-            />
-            {/* A question's card above is where Ben answers it, and the setup card is where he retries setup. */}
-            {card && card.kind !== 'question' && card.kind !== 'setup' && <NeedsCardView card={card} inThread onRecovered={(r) => {
-                  applyThread(r.thread, true);
-                  setQueued(r.pending);
-                }} />}
-            {queued.length > 0 && <Pending thread={thread} items={queued} onPending={setQueued} />}
-            {actionError && <ErrorNote>{actionError}</ErrorNote>}
-          </div>
-        </HistoryCtx.Provider>
-      </div>
+        <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onClose={panels.closeRoute} header={headerRef} mobile />
+        <div ref={headerRef} className="relative z-[8] shrink-0 bg-bg">
+          <MoHeader
+            onBack={shell.back}
+            title={
+              ticket ? (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 truncate">{thread.title || 'Untitled'}</span>
+                  <StagePillButton ticket={ticket} expanded={panels.open === 'route'} onClick={() => panels.toggle('route')} />
+                </span>
+              ) : (
+                thread.title || 'Untitled'
+              )
+            }
+            sub={parent ? <span>{sub} · <a href={href.thread(parent.id)} className="text-fg-2 hover:text-fg" title={`Delegated from ${parent.title}`}>Parent: {parent.title}</a></span> : sub}
+            right={
+              <>
+                <StatusPill status={view.asking || needs ? 'needs' : thread.status} label={view.asking ? ASKING_LABEL : needs ? 'Needs you' : undefined} />
+                <MoRound icon="more" label="Thread options" onClick={() => setMenu(true)} />
+              </>
+            }
+          />
+        </div>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div ref={scroll} className="mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 [overflow-anchor:none]">
+          <HistoryCtx.Provider value={history}>
+            <div className="flex flex-col gap-4">
+              <MoContinueLinks links={s.links} onOpen={(id) => shell.open(href.thread(id))} />
+              {view.turns.map((t, i) => {
+                const last = i === view.turns.length - 1;
+                const edge = edges.get(t.key);
+                return (
+                  <Fragment key={t.key}>
+                    {edge && <HistoryEdgeRow edge={edge} history={history} touch />}
+                    <div data-key={t.key} ref={last ? newest : undefined} className="flex flex-col gap-4">
+                      {t.prompts.map((p, k) => (
+                        <Fragment key={k}>
+                          <MoBubble
+                            caption={
+                              p.source === 'pr-watch'
+                                ? 'PR watch'
+                                : i === 0 && k === 0 && thread.parent_id && atStart(history.history)
+                                  ? `Delegated by the Conductor${thread.task_id ? ` · ${thread.task_id}` : ''}`
+                                  : k > 0
+                                    ? 'Sent while it ran'
+                                    : undefined
+                            }
+                            above={<ContextChips records={p.context} align="end" className="w-full max-w-[86%]" />}
+                          >
+                            {p.text || p.attachments?.length || !hasContext(p.context) ? (
+                              <>
+                                {p.text}
+                                {p.attachments?.length ? <span className="text-fg-3"> · {plural(p.attachments.length, 'file')}</span> : null}
+                              </>
+                            ) : null}
+                            {p.items?.length ? <PRWakeList items={p.items} more={p.more} /> : null}
+                          </MoBubble>
+                          <ClippedNote event={p.key} clipped={p.clipped} className="-mt-2.5 justify-end" />
+                        </Fragment>
+                      ))}
+                      {t.reports.map((r, k) => (
+                        <Report key={k} role={r.role} taskId={r.task_id} text={r.text} />
+                      ))}
+                      {t.questions.map((q) => (
+                        <QuestionCard key={q.id} threadId={thread.id} q={q} touch />
+                      ))}
+                      {turnBody(t, last)}
+                      {t.switches.map((it) => (
+                        <SwitchLine key={it.key} it={it} running={thread.status === 'running'} />
+                      ))}
+                    </div>
+                  </Fragment>
+                );
+              })}
+              {edges.get(-1) && <HistoryEdgeRow edge={edges.get(-1)!} history={history} touch />}
+              <HandoffCard
+                thread={thread}
+                handoff={handoff}
+                mobile
+                onChanged={(a) => {
+                  applyThread(a.thread, true);
+                  setHandoff(a.handoff);
+                }}
+              />
+              {!view.turns.length && !thread.setup && <MoEmpty>Nothing here yet.</MoEmpty>}
+              <SetupCard
+                thread={thread}
+                mobile
+                onRetried={(t, pending) => {
+                  // Retry keeps updated_at, so it must win a tie.
+                  applyThread(t);
+                  setQueued(pending);
+                }}
+              />
+              {/* A question's card above is where Ben answers it, and the setup card is where he retries setup. */}
+              {card && card.kind !== 'question' && card.kind !== 'setup' && <NeedsCardView card={card} inThread onRecovered={(r) => {
+                    applyThread(r.thread, true);
+                    setQueued(r.pending);
+                  }} />}
+              {queued.length > 0 && <Pending thread={thread} items={queued} onPending={setQueued} />}
+              {actionError && <ErrorNote>{actionError}</ErrorNote>}
+            </div>
+          </HistoryCtx.Provider>
+        </div>
+        </div>
       </div>
       <MoComposer
         thread={thread}
