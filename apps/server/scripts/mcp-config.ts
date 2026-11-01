@@ -72,16 +72,17 @@ ${
 
   claude.ai: Settings > Connectors > Add custom connector, then Connect
   ChatGPT:   Settings > Apps > Developer mode > Create, with OAuth
+  Grok:      grok.com/connectors > New Connector > Custom
   Claude Code, Cursor or Codex elsewhere: add it as an HTTP server`
     : `Google sign-in is off: link a Google account in Settings > Machines to let claude.ai and ChatGPT sign in
 with it. Until then they use the MCP token in the URL.`
 }
 
-A client without OAuth: the MCP token in the URL, where only a URL fits (claude.ai or ChatGPT without OAuth):
+A client without OAuth: the MCP token in the URL, where only a URL fits (claude.ai, ChatGPT or a Grok connector without OAuth):
 
   ${base}/mcp/${shown}
 
-or as a header (Grok, the xAI API, any client that sends headers):
+or as a header (the xAI API, any client that sends headers):
 
   URL     ${base}/mcp
   Header  Authorization: Bearer ${shown}
