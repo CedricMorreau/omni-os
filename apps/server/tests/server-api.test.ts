@@ -121,6 +121,13 @@ describe('the Web UI', () => {
     expect(await call('/apiary')).toMatchObject({ status: 200, text: INDEX });
   });
 
+  it('makes the browser revalidate index.html, so a rebuild shows on the next load', async () => {
+    for (const path of ['/', '/index.html', '/c/inbox']) {
+      expect((await app.request(path)).headers.get('cache-control'), path).toBe('no-cache');
+    }
+    expect((await app.request('/assets/app.js')).headers.get('cache-control')).toBeNull();
+  });
+
   it('needs no token, and never sets or carries one', async () => {
     const TOKEN = process.env.OMNI_TOKEN!;
     for (const path of ['/', '/assets/app.js', '/c/inbox']) {

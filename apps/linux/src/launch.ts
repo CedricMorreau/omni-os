@@ -130,6 +130,8 @@ export type Probe =
   | { kind: 'free' }
   | { kind: 'omni' }
   | { kind: 'not-omni'; detail: string }
+  /** Something holds the port but did not answer within the probe's timeout: often Omni itself, busy or just restarted. */
+  | { kind: 'slow' }
   | { kind: 'not-this-install' }
   | { kind: 'no-token' };
 
@@ -162,7 +164,7 @@ export async function probePort(port: number, token: string | null, fetchImpl: t
   } catch (err) {
     if (errnoOf(err) === 'ECONNREFUSED') return { kind: 'free' };
     const name = err instanceof Error ? err.name : '';
-    if (name === 'TimeoutError' || name === 'AbortError') return { kind: 'not-omni', detail: 'it did not answer in time' };
+    if (name === 'TimeoutError' || name === 'AbortError') return { kind: 'slow' };
     return { kind: 'not-omni', detail: 'nothing answered as HTTP' };
   }
   const body = await response.text();
@@ -186,6 +188,8 @@ export function decide(probe: Probe, port: number): Decision {
       return { action: 'attach' };
     case 'not-omni':
       return { action: 'fail', message: `Port ${port} answers, but not as an Omni server. ${sentence(probe.detail)} Stop that program, or pick another port.` };
+    case 'slow':
+      return { action: 'fail', message: `Port ${port} is taken, but did not answer within 30 seconds. If it is Omni, check its log; otherwise stop that program, or pick another port.` };
     case 'not-this-install':
       return { action: 'fail', message: `Port ${port} answers, but not as this install's Omni. It does not know the token in data/api-token. Restart the server from this checkout, or pick another port.` };
     case 'no-token':
@@ -225,6 +229,19 @@ export function tokenFile(repo: string, env: NodeJS.ProcessEnv): string {
 
 export function serverArgs(): string[] {
   return ['--import', 'tsx', 'apps/server/index.ts'];
+}
+
+/**
+ * Probes until the answer is not `slow`: a server that was just restarted, or is stalled on disk, can take several
+ * seconds to answer. Gives up after `attempts` probes and returns the last answer.
+ */
+export async function settleProbe(probe: () => Promise<Probe>, sleep: (ms: number) => Promise<void>, attempts = 15): Promise<Probe> {
+  let last = await probe();
+  for (let i = 1; i < attempts && last.kind === 'slow'; i++) {
+    await sleep(250);
+    last = await probe();
+  }
+  return last;
 }
 
 export interface WaitInput {
