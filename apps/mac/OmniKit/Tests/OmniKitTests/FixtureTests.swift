@@ -120,6 +120,9 @@ private struct DeliveryRefusal: Decodable {
     "browser-inspect-unavailable.json": { _ = try decodeFixture(ElementInspectReply.self, "browser-inspect-unavailable.json") },
     // Hand-made: apps/server/tests/sync-setup.test.ts checks the server still sends its keys and types.
     "sync-status.json": { _ = try decodeFixture(SyncStatus.self, "sync-status.json") },
+    // Hand-made: apps/server/tests/google-auth.test.ts checks the server still sends their keys and types.
+    "auth-account.json": { _ = try decodeFixture(AuthAccount.self, "auth-account.json") },
+    "auth-devices.json": { _ = try decodeFixture([String: [SignedInDevice]].self, "auth-devices.json") },
     // Request bodies the app sends. SecretsTests compares them with what the client encodes.
     "secret-set-request.json": { _ = try decodeFixture([String: String].self, "secret-set-request.json") },
     "secret-delete-request.json": { _ = try decodeFixture([String: String].self, "secret-delete-request.json") },

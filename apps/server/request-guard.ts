@@ -1,14 +1,15 @@
 // The gate in front of every /api route. Two jobs:
 // - Only Omni's own clients get in: every request carries this install's token (apps/server/api-token.ts), as
-//   `Authorization: Bearer` or the cookie a paired browser holds. Through tailscale serve, the Tailscale login must
-//   also be the owner's when the user config names one.
+//   `Authorization: Bearer` or the cookie a paired browser holds, or a session a device got by signing in with Google
+//   as the install's owner (apps/server/google-auth.ts). Through tailscale serve, the Tailscale login must also be the
+//   owner's when the user config names one.
 // - A web page in a browser that holds the cookie cannot use it: a cross-site POST /api/threads would run a prompt
 //   with bypassPermissions, and a DNS-rebinding domain could read the responses as well.
 import type { IncomingMessage } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { cookieName, tokenMatches } from './api-token.ts';
+import { cookieName, sessionCookieName, tokenMatches } from './api-token.ts';
 import { config } from './config.ts';
 import { resolved } from './user-config.ts';
 
@@ -52,6 +53,29 @@ export const DESKTOP_PAIR_PATH = '/api/auth/desktop-pair';
 
 /** GitHub's webhook posts (apps/server/github-webhook-api.ts) take no token either: each proves itself with its signature. */
 export const isWebhookPost = (c: Context) => c.req.method === 'POST' && /^\/api\/hooks\/github\/[\w.-]+$/.test(c.req.path);
+
+/** The Google sign-in routes a device without the token calls: whether sign-in is on, and the device-code flow. */
+export const SIGN_IN_ROUTES: readonly (readonly [string, string])[] = [
+  ['GET', '/api/auth/methods'],
+  ['POST', '/api/auth/google/start'],
+  ['POST', '/api/auth/google/poll'],
+];
+const isSignInRoute = (c: Context) => SIGN_IN_ROUTES.some(([m, p]) => c.req.method === m && c.req.path === p);
+
+/** How a request proved itself: the install's token, a signed-in device's session, or neither (the open routes). */
+export type OmniAuth = { via: 'token' } | { via: 'session'; session: string } | { via: 'none' };
+
+declare module 'hono' {
+  interface ContextVariableMap {
+    omniAuth: OmniAuth;
+  }
+}
+
+/** Looks a session token up (google-auth.ts sessionFor). app.ts sets it, so this module and its tests never open the db. */
+let sessionCheck: (token: string) => { id: string } | null = () => null;
+export const useSessionCheck = (fn: typeof sessionCheck) => {
+  sessionCheck = fn;
+};
 
 const bearer = (c: Context) => c.req.header('authorization')?.match(/^Bearer\s+(\S+)\s*$/i)?.[1];
 
@@ -106,8 +130,9 @@ const SIMPLE_TYPES = ['text/plain', 'application/x-www-form-urlencoded'];
  * - Sec-Fetch-Site: cross-site (any request a page on another site made);
  * - an Origin, `null` included, that is not the Host the request came in on;
  * - a text/plain or form-urlencoded body, the content types that skip the preflight;
- * - no token, or the wrong one (401), in the Authorization header or the paired browser's cookie, except on the
- *   proof route, a GitHub webhook post (its own signature), and GET desktop-pair from this machine;
+ * - no token, or the wrong one (401), in the Authorization header or the paired browser's cookie, and no live
+ *   device session in either, except on the proof route, a GitHub webhook post (its own signature), GET desktop-pair
+ *   from this machine, and the Google sign-in routes;
  * - through tailscale serve (a tailnet Host, or any proxy header), a Tailscale-User-Login that is not in
  *   `integrations.tailscaleLogin`, when that is set.
  * The Mac app, apps/mcp/omni.ts, scripts and curl send no Origin or Sec-Fetch-Site, so the Host and token checks apply to them.
@@ -132,9 +157,16 @@ export const requestGuard: MiddlewareHandler = async (c, next) => {
   if (SIMPLE_TYPES.includes(type)) return refuse('send JSON', 415);
   const desktop = c.req.method === 'GET' && c.req.path === DESKTOP_PAIR_PATH;
   if (desktop && !desktopPairAllowed(c)) return refuse('desktop pairing is only from this machine');
-  if (!desktop && !(c.req.method === 'GET' && c.req.path === PROOF_PATH) && !isWebhookPost(c)) {
-    if (!tokenMatches(bearer(c) ?? getCookie(c, cookieName()))) return refuse("Unauthorized: send this install's token (data/api-token), or pair this browser", 401);
+  const open = desktop || (c.req.method === 'GET' && c.req.path === PROOF_PATH) || isWebhookPost(c) || isSignInRoute(c);
+  const given = bearer(c);
+  let auth: OmniAuth = { via: 'none' };
+  if (tokenMatches(given ?? getCookie(c, cookieName()))) auth = { via: 'token' };
+  else {
+    const session = sessionCheck(given ?? getCookie(c, sessionCookieName()) ?? '');
+    if (session) auth = { via: 'session', session: session.id };
   }
+  if (auth.via === 'none' && !open) return refuse("Unauthorized: send this install's token (data/api-token), pair this browser, or sign in with Google", 401);
+  c.set('omniAuth', auth);
   const owners = resolved.tailscaleLogins();
   if (owners.length && cameThroughProxy(c, host) && !owners.includes((c.req.header('tailscale-user-login') ?? '').trim().toLowerCase())) {
     return refuse('this Tailscale login is not the owner');

@@ -15,7 +15,7 @@ Then pair the phone once. On the Mac, print a pairing link with the `.ts.net` ad
 OMNI_URL=https://<your-mac>.<tailnet>.ts.net scripts/omni.sh --pair
 ```
 
-Open that link on the phone (AirDrop it, or paste it). Or open the `.ts.net` address and paste the token from `data/api-token` into the pairing screen. The server itself stays on loopback; Tailscale is the door. The Mac has to be awake: `scripts/install-launchd.sh` keeps it from idle-sleeping while the server runs.
+Open that link on the phone (AirDrop it, or paste it). Or open the `.ts.net` address and paste the token from `data/api-token` into the pairing screen. Once a Google account is linked (below), the pairing screen also offers Sign in with Google, so a new device needs no token at all. The server itself stays on loopback; Tailscale is the door. The Mac has to be awake: `scripts/install-launchd.sh` keeps it from idle-sleeping while the server runs.
 
 Every client names the Mac its Omni runs on: the desktop sidebar's footer, the phone's Channels and Settings headers, and the Mac app's server line. A browser on another device gets a Remote chip, and its tab title starts with that Mac's name.
 
@@ -34,9 +34,23 @@ A thread shows each prompt and answer before its folded steps; tap the step coun
 
 Links and reloads return to the same screen. Back uses the parent screen when there is no in-app history. Home-screen setup does not add iOS Live Activities or a lock-screen view.
 
+## Sign in with Google
+
+Link the Google account that owns this Omni once, and new devices sign in with it instead of the token. Each one gets a session of its own that you can see and revoke. Sign-in goes through Clerk ([ADR 0007](../adr/0007-google-sign-in-through-clerk.md)). Anyone with a Google account can make a Clerk account, but only the one linked to this install gets in.
+
+1. On a device that already holds the token (the Mac app, or a paired browser), open Settings, Machines, Google account, and choose Link Google account.
+2. Omni shows a code and opens Clerk's sign-in page. Sign in with Google there, check the page shows the same code, and approve.
+3. On a new device, open Omni and choose Sign in with Google on the pairing screen. Approve the code the same way, with the same account.
+
+- Signed-in devices are listed under the account, with when each was last used. Revoke ends one; Sign out on the device you are using ends its own. A session unused for 90 days stops working.
+- Only a device holding the token can link, change or unlink the account. Linking another account, or unlinking, signs every device out. Paired devices keep the token and are not affected.
+- Signing in needs Clerk and the network. A device that already signed in keeps working offline.
+- Omni uses a shared Clerk instance by default. `integrations.clerkPublishableKey` and `integrations.clerkClientId` in `data/omni.config.json` (or `OMNI_CLERK_PUBLISHABLE_KEY` and `OMNI_CLERK_CLIENT_ID`) point it at your own. Its OAuth application must be public, with the device authorization grant turned on. Both values are public; Omni holds no Clerk secret key.
+- The Conductor lists signed-in devices with `signed_in_devices` and revokes one with `revoke_signed_in_device`.
+
 ## Who can call the API
 
-Every `/api` request needs this install's token. The server makes it on first start: 32 random bytes in `data/api-token`, mode 0600, so only your macOS account can read it (`OMNI_TOKEN` in the server's environment replaces it, for tests and throwaway servers). A file rather than the Keychain: the Mac app and shell scripts read it without a Keychain prompt, and the Keychain would guard it from the same account the file mode already lets in. Delete the file and restart the server to rotate it; every browser then pairs again.
+Every `/api` request needs this install's token, or the session of a device that signed in with Google (above). The server makes it on first start: 32 random bytes in `data/api-token`, mode 0600, so only your macOS account can read it (`OMNI_TOKEN` in the server's environment replaces it, for tests and throwaway servers). A file rather than the Keychain: the Mac app and shell scripts read it without a Keychain prompt, and the Keychain would guard it from the same account the file mode already lets in. Delete the file and restart the server to rotate it; every browser then pairs again.
 
 | Client | How it sends the token |
 | --- | --- |
@@ -44,7 +58,7 @@ Every `/api` request needs this install's token. The server makes it on first st
 | `scripts/omni.sh`, `npm run setup` | `OMNI_TOKEN`, else `data/api-token` |
 | Threads | `OMNI_TOKEN` in their environment, next to `OMNI_URL`. Omni's MCP servers (`apps/mcp/omni.ts`, `apps/mcp/ask.ts`) get `OMNI_TOKEN_FILE`, a path, so no token is written into `mcp.json` |
 | Linux app | Opens `http://127.0.0.1:<port>/api/auth/desktop-pair` in its window. The server sets the same cookie as `/pair` and redirects to `/`. The token is not in the URL. A request through Tailscale or any proxy header is refused, so a phone still pairs with the token |
-| Web UI | Pairs once (below), then holds the token in a cookie |
+| Web UI | Pairs once (below), then holds the token in a cookie. Or signs in with Google and holds its own session in an `HttpOnly` cookie, `omni_session_<port>` |
 | MCP clients outside Omni | On this Mac, `apps/mcp/external/stdio.ts` reads `data/api-token`. Over HTTP, `/mcp` takes its own token, `data/mcp-token`, as a header or in the URL. See [Omni as an MCP server](external-mcp.md) |
 
 The Web UI and its assets are served without the token and never contain it, so opening the page gets you only the pairing screen. Pairing sends the token once to `POST /api/auth/pair`, which answers with an `HttpOnly`, `SameSite=Strict` cookie on `/api` (`Secure` behind HTTPS). Page scripts never see it, and `EventSource` streams and images carry it. The token gets to a browser one of two ways:
@@ -60,4 +74,4 @@ The token stops other macOS accounts, other tailnet devices and anything else th
 - `Sec-Fetch-Site: cross-site`, and any `Origin` (`null` included) that is not the host the request came in on.
 - `text/plain` and form-urlencoded bodies (415), the types a page can send without a CORS preflight.
 
-The Mac app, the Linux app, `apps/mcp/omni.ts`, `scripts/omni.sh` and curl send no `Origin`, so the `Host` and token checks apply to them. Without the token every route answers 401, except `GET /api/auth/proof`, `GET /api/auth/desktop-pair` from this machine (a proxy or another machine is refused), and `POST /api/hooks/github/<automation>`, which proves itself with GitHub's signature instead (see [GitHub webhooks](automations.md#github-webhooks)). HTML and SVG artifacts are served with `Content-Security-Policy: sandbox`, so a page opened in its own tab does not run on Omni's origin.
+The Mac app, the Linux app, `apps/mcp/omni.ts`, `scripts/omni.sh` and curl send no `Origin`, so the `Host` and token checks apply to them. Without the token or a session every route answers 401, except `GET /api/auth/proof`, `GET /api/auth/desktop-pair` from this machine (a proxy or another machine is refused), the Google sign-in routes (`GET /api/auth/methods`, `POST /api/auth/google/start` and `POST /api/auth/google/poll`, which still get every other check above), and `POST /api/hooks/github/<automation>`, which proves itself with GitHub's signature instead (see [GitHub webhooks](automations.md#github-webhooks)). HTML and SVG artifacts are served with `Content-Security-Policy: sandbox`, so a page opened in its own tab does not run on Omni's origin.

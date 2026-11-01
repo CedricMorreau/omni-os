@@ -1,11 +1,14 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError, UNPAIRED, errorText, isPaired, pairBrowser } from '../api.ts';
 import { OmniMark } from './brand.tsx';
+import { GoogleSignIn } from './GoogleSignIn.tsx';
 import { Button, ErrorNote, Label } from './ui.tsx';
 
 // The server takes only requests that carry this install's token (apps/server/request-guard.ts), and serves this
 // page without it. A browser pairs once: the token, pasted here or arriving as `?pair=` in a link from
 // `scripts/omni.sh --pair`, goes to POST /api/auth/pair, which answers with an HttpOnly cookie. The page keeps nothing.
+// Once an owner's Google account is linked (Settings, Machines), the screen also offers Google sign-in, which gets
+// this browser a session of its own, also in an HttpOnly cookie (GoogleSignIn.tsx).
 
 /** `#/t/abc?pair=TOKEN` gives TOKEN and leaves `#/t/abc` in the address bar and in history. */
 function takePairParam(): string | null {
@@ -61,7 +64,25 @@ export function PairGate({ children }: { children: ReactNode }) {
   return <PairScreen key={state} offline={state === 'offline'} onPaired={() => setState('paired')} />;
 }
 
+/** Whether the server offers Google sign-in: GET /api/auth/methods, which takes no token. */
+function useGoogleOffered(offline: boolean) {
+  const [offered, setOffered] = useState(false);
+  useEffect(() => {
+    if (offline) return;
+    let alive = true;
+    fetch('/api/auth/methods')
+      .then((r) => (r.ok ? (r.json() as Promise<{ google?: boolean }>) : {}))
+      .then((m) => alive && setOffered(!!(m as { google?: boolean }).google))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [offline]);
+  return offered;
+}
+
 function PairScreen({ offline, onPaired }: { offline: boolean; onPaired: () => void }) {
+  const google = useGoogleOffered(offline);
   const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(offline ? 'Cannot reach the Omni server. Is it running?' : null);
   const [busy, setBusy] = useState(false);
@@ -89,8 +110,15 @@ function PairScreen({ offline, onPaired }: { offline: boolean; onPaired: () => v
           Pair this browser
         </h1>
         <p className="mt-2 text-[13.5px] text-fg-2">
-          Omni only answers its own clients. Paste the token once and this browser keeps it in a cookie its pages cannot read.
+          {google
+            ? 'Omni only answers its own clients. Sign in with the Google account that owns this Omni, or paste the token. Either way this browser keeps a cookie its pages cannot read.'
+            : 'Omni only answers its own clients. Paste the token once and this browser keeps it in a cookie its pages cannot read.'}
         </p>
+        {google && (
+          <div className="mt-5 border-b border-line pb-5">
+            <GoogleSignIn mode="device" label="Sign in with Google" onDone={onPaired} />
+          </div>
+        )}
         <div className="mt-5">
           <Label htmlFor="pair-token" hint={<>On the Mac that runs Omni: <code className="font-mono">cat data/api-token</code>, or <code className="font-mono">scripts/omni.sh --pair</code> for a link.</>}>
             Token

@@ -15,7 +15,9 @@
   "integrations": {
     "hermesUrl": "",
     "centralBrainDir": "",
-    "tailscaleLogin": "ada@example.com"
+    "tailscaleLogin": "ada@example.com",
+    "clerkPublishableKey": "",
+    "clerkClientId": ""
   },
   "automations": {
     "weekly-review": { "enabled": true },

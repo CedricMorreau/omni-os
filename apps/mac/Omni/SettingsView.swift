@@ -52,7 +52,8 @@ struct GeneralSettingsPage: View {
   }
 }
 
-/// The Machines tab: this Mac's name (the sidebar footer's before #405) and where new threads run, then Sync and
+/// The Machines tab: this Mac's name (the sidebar footer's before #405), where new threads run and the Google account
+/// that signs new devices in, then Sync and
 /// Storage, which were tabs of their own. Advanced holds the developer items: this Mac's server (port, repo, Node),
 /// its status and log, and the sync path map. The model follows the settings, so a change applies at once: a new
 /// port reconnects, and any change checks the server again.
@@ -63,6 +64,7 @@ struct MachinesSettingsPage: View {
   var body: some View {
     SettingsPage {
       RunOnCard(model: model)
+      GoogleAccountSettings(model: model)
 
       SettingsPart(title: "Sync", note: "History across your Macs, relayed through your own Supabase project.")
       SyncSettings(model: model)
