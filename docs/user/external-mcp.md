@@ -19,7 +19,7 @@ A thread started here has no parent, so its reply does not come back as a `[crew
 
 ## Let an agent install it
 
-Each harness below has its own prompt. Paste it into that harness, and it sets up Omni for itself. On the machine Omni runs on it uses the stdio server; on any other machine it uses the public URL from [From anywhere else](#from-anywhere-else-http), so swap `https://omni.example.com` for your `mcpPublicUrl` first.
+Each harness below has its own prompt. Paste it into that harness, and it sets up Omni for itself. On the machine Omni runs on it uses the stdio server; on any other machine it uses the token URL `https://mcp.omni-os.app/mcp/<mcp-token>` (see [From anywhere else](#from-anywhere-else-http)). Before you paste a prompt on another machine, replace `<mcp-token>` with the contents of `data/mcp-token` on Omni's machine (`npm run mcp:config -- --show-token` there prints the full URL). Anyone with that URL can start threads on your machine, so treat it like a password.
 
 Every prompt finds Omni's checkout from the server running on port 4747, not from a fixed path: a machine can hold several checkouts, and only the one serving :4747 has the right data dir. Grok Bot, claude.ai and ChatGPT run on their own servers and can't follow a prompt: for Grok Bot see [Connect Grok Bot](#connect-grok-bot), for the other two [From anywhere else](#from-anywhere-else-http).
 
@@ -33,8 +33,8 @@ Add Omni's MCP server to Claude Code, for my user (all projects).
    of data/api-token or data/mcp-token, and don't pass --show-token.
 3. If `claude mcp get omni` finds one, remove it with `claude mcp remove omni --scope user`. Then run the
    `claude mcp add --scope user omni ...` line it printed, exactly. Go to step 5.
-4. Run `claude mcp add --scope user --transport http omni https://omni.example.com/mcp`.
-   Tell me to run /mcp, pick omni and sign in with the Google account linked to Omni.
+4. Run `claude mcp add --scope user --transport http omni https://mcp.omni-os.app/mcp/<mcp-token>`.
+   The URL holds a secret: don't repeat it back to me or write it anywhere else.
 5. Run `claude mcp get omni` and confirm it connects. Tell me to restart Claude Code so new sessions load
    the omni tools.
 ```
@@ -49,8 +49,8 @@ Add Omni's MCP server to Codex.
    of data/api-token or data/mcp-token, and don't pass --show-token.
 3. If `codex mcp get omni` finds one, remove it with `codex mcp remove omni`. Then run the
    `codex mcp add omni ...` line it printed, exactly. Go to step 5.
-4. Run `codex mcp add omni --url https://omni.example.com/mcp`, then `codex mcp login omni`, and tell me
-   to sign in with the Google account linked to Omni in the browser it opens.
+4. Run `codex mcp add omni --url https://mcp.omni-os.app/mcp/<mcp-token>`. The URL holds a secret: don't
+   repeat it back to me or write it anywhere else.
 5. Run `codex mcp list` and confirm omni is there and enabled. Tell me to start a new Codex session to
    load the omni tools.
 ```
@@ -67,9 +67,9 @@ Add Omni's MCP server to Cursor (cursor-agent and the editor share ~/.cursor/mcp
    of data/api-token or data/mcp-token, and don't pass --show-token.
 3. Merge the "omni" entry from the "mcpServers" block it printed into ~/.cursor/mcp.json. Keep every other
    server, replace only an existing "omni", and create the file if it is missing. Go to step 5.
-4. Merge "omni": { "url": "https://omni.example.com/mcp" } into the "mcpServers" of ~/.cursor/mcp.json
-   the same way, then run `cursor-agent mcp login omni` and tell me to sign in with the Google account
-   linked to Omni.
+4. Merge "omni": { "url": "https://mcp.omni-os.app/mcp/<mcp-token>" } into the "mcpServers" of
+   ~/.cursor/mcp.json the same way. The URL holds a secret: don't repeat it back to me or write it
+   anywhere else.
 5. Run `cursor-agent mcp enable omni`, then `cursor-agent mcp list-tools omni` and confirm list_channels
    is there. Tell me to restart the Cursor editor if it is open.
 ```
@@ -88,8 +88,9 @@ Add Omni's MCP server to Hermes.
    the "mcpServers" block it printed: `echo Y | hermes mcp add omni --command <its command> --args <its args>`,
    with any env it lists passed as --env KEY=value before --args (the Y answers "Enable all tools?").
    Go to step 5.
-4. Run `echo Y | hermes mcp add omni --url https://omni.example.com/mcp --auth oauth`, then `hermes mcp login omni`,
-   and tell me to sign in with the Google account linked to Omni at the URL it shows.
+4. Run `printf 'n\nY\n' | hermes mcp add omni --url https://mcp.omni-os.app/mcp/<mcp-token>` (n: the token
+   is in the URL, so no other auth; Y: enable all tools). The URL holds a secret: don't repeat it back to me
+   or write it anywhere else.
 5. Run `hermes mcp test omni` and confirm it lists the omni tools.
 ```
 
@@ -133,7 +134,7 @@ The server has to be running (`npm start`, `npm run dev` or the Mac app). The st
 
 ### From anywhere else (HTTP)
 
-Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai, ChatGPT and Grok call it from their own servers, so it has to be on the internet. Put `/mcp` and the sign-in metadata, and nothing else, behind a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/) on a domain whose DNS is on Cloudflare. `omni.example.com` stands for that name below.
+Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai, ChatGPT and Grok call it from their own servers, so it has to be on the internet. Put `/mcp` and the sign-in metadata, and nothing else, behind a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/) on a domain whose DNS is on Cloudflare. This install uses `mcp.omni-os.app`; swap in your own name if you run another.
 
 1. Install `cloudflared`, then run `cloudflared tunnel login` and `cloudflared tunnel create omni`. The second prints the tunnel id and writes its credentials file.
 2. Put this in `~/.cloudflared/config.yml` (`npm run mcp:config` prints it filled in):
@@ -142,30 +143,31 @@ Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai, ChatGPT an
    tunnel: <tunnel-id>
    credentials-file: <your home>/.cloudflared/<tunnel-id>.json
    ingress:
-     - hostname: omni.example.com
+     - hostname: mcp.omni-os.app
        path: ^/(mcp|\.well-known)(/.*)?$
        service: http://127.0.0.1:4747
      - service: http_status:404
    ```
 
-3. Run `cloudflared tunnel route dns omni omni.example.com`, then keep `cloudflared tunnel run omni` running (or install it as a service).
+3. Run `cloudflared tunnel route dns omni mcp.omni-os.app`, then keep `cloudflared tunnel run omni` running (or install it as a service).
 4. Set the name in `data/omni.config.json`, and Omni picks it up without a restart:
 
    ```json
-   "integrations": { "mcpPublicUrl": "https://omni.example.com" }
+   "integrations": { "mcpPublicUrl": "https://mcp.omni-os.app" }
    ```
 
    Until it is set, `/mcp` refuses the tunnel's name. `OMNI_MCP_PUBLIC_URL` overrides it.
 
 Leave Cloudflare Access off for this hostname: claude.ai, ChatGPT and Grok can't get past its login. Omni's own checks below are the gate.
 
-With a Google account linked (Settings, Machines, Google account; see [Sign in with Google](remote-access.md#sign-in-with-google)), clients sign in with Google through Clerk and hold no Omni token:
+Clients connect with the token URL, `https://mcp.omni-os.app/mcp/<mcp-token>`. `npm run mcp:config -- --show-token` prints it with the token from `data/mcp-token` filled in:
 
-- **claude.ai** (also reaches Claude Desktop and the Claude phone app): Settings, Connectors, Add custom connector, with `https://omni.example.com/mcp`. Choose Connect and sign in with the linked Google account.
-- **ChatGPT**: turn on developer mode, then create a connector (app) with the same URL and OAuth authentication.
-- **Claude Code, Cursor or Codex on another machine**: add `https://omni.example.com/mcp` as an HTTP server. They sign in the same way on first use.
+- **claude.ai** (also reaches Claude Desktop and the Claude phone app): Settings, Connectors, Add custom connector, with the token URL.
+- **ChatGPT**: turn on developer mode, then create a connector (app) with the token URL and no authentication.
+- **Claude Code, Cursor, Codex or Hermes on another machine**: add the token URL as an HTTP server (the prompts in [Let an agent install it](#let-an-agent-install-it) do this).
+- **A client that sends headers** (the xAI API, for example): `https://mcp.omni-os.app/mcp` with `Authorization: Bearer <mcp-token>`.
 
-A client that cannot do OAuth uses the MCP token that `npm run mcp:config -- --show-token` prints instead: `https://omni.example.com/mcp/<mcp-token>` where only a URL fits, or `/mcp` with the header `Authorization: Bearer <mcp-token>` (the xAI API, or any client that sends headers).
+With a Google account linked (Settings, Machines, Google account; see [Sign in with Google](remote-access.md#sign-in-with-google)), clients can instead use `https://mcp.omni-os.app/mcp` without the token and sign in with that Google account through Clerk, so they hold no Omni token.
 
 The Mac has to be awake for any of these to answer.
 
@@ -180,11 +182,11 @@ Grok Bot runs on xAI's servers. It can't run commands on your Mac, so it can't f
 **1. Open `/mcp` and get the URL.** Paste this into Claude Code, Codex or Cursor on the machine Omni runs on:
 
 ```text
-Get Omni's MCP server ready for a Grok custom connector. Omni is checked out at ~/omni-os and its server
-runs on this machine.
+Get Omni's MCP server ready for a Grok custom connector. Omni's server runs on this machine.
 1. Run `cloudflared tunnel list` and check a tunnel for Omni exists. If not, stop and tell me to set one up
    (docs/user/external-mcp.md, "From anywhere else").
-2. Run `cd ~/omni-os && npm run -s mcp:config`. Note the remote /mcp URL and whether it says Google sign-in
+2. Find Omni's checkout (the working directory of the process listening on 127.0.0.1:4747) and run
+   `npm run -s mcp:config` there. Note the remote /mcp URL and whether it says Google sign-in
    is on. If it says to set mcpPublicUrl, tell me instead of going on. Never print or paste the contents of data/mcp-token or data/api-token, and don't pass --show-token.
 3. Check it from outside: `curl -s -o /dev/null -w '%{http_code}' -X POST <that URL>` should print 401
    (reachable, no token). Anything else, tell me what you saw.
@@ -193,8 +195,8 @@ runs on this machine.
 
 **2. Add the connector in Grok.** At [grok.com/connectors](https://grok.com/connectors), choose New Connector, then Custom, and enter the MCP server URL:
 
-- **Google sign-in on** (a Google account linked in Settings, Machines, and dynamic client registration turned on in Clerk, see [What the Clerk instance needs](#what-the-clerk-instance-needs)): enter `https://omni.example.com/mcp` and sign in with the linked Google account when Grok asks.
-- **Otherwise**: enter `https://omni.example.com/mcp/<mcp-token>`, with the token you copy yourself from `data/mcp-token`. Anyone with that URL can start threads on your Mac, so treat it like a password.
+- **Google sign-in on** (a Google account linked in Settings, Machines, and dynamic client registration turned on in Clerk, see [What the Clerk instance needs](#what-the-clerk-instance-needs)): enter `https://mcp.omni-os.app/mcp` and sign in with the linked Google account when Grok asks.
+- **Otherwise**: enter `https://mcp.omni-os.app/mcp/<mcp-token>`, with the token you copy yourself from `data/mcp-token`. Anyone with that URL can start threads on your Mac, so treat it like a password.
 
 On Grok Business or Enterprise, a team admin has to allow the connector in xAI's cloud console first.
 
