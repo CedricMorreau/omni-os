@@ -88,7 +88,7 @@ extension OmniClient {
   }
 }
 
-/// The Google account card of the Machines tab, like the Web UI's Settings, Machines, Google account: the linked
+/// The Google account card of the Sharing & access section, like the Web UI's Settings, Sharing & access, Google account: the linked
 /// account, linking one through Clerk's device-code page, the signed-in devices, revoking one, and unlinking.
 @MainActor @Observable
 public final class GoogleAccountModel {

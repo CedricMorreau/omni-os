@@ -15,7 +15,7 @@ import { Button, Chip, ConfirmDialog, ErrorNote, Icon, Loading, Picker, StatusDo
 import { plural, relTime } from '../format.ts';
 import { href } from '../router.ts';
 
-// Settings, Machines, Storage: the worktrees Omni made in data/worktrees, what each uses on disk, why each must stay
+// Settings, Worktrees: the worktrees Omni made in data/worktrees, what each uses on disk, why each must stay
 // or may go, and the cleanup that removes the ones that may: reviewed here, or on a schedule with this Mac's
 // retention policy. The scan and a cleanup run on the server; this section starts them and polls while either runs.
 // The Mac app's Machines tab (apps/mac/Omni/StorageSettingsView.swift) shows the same.

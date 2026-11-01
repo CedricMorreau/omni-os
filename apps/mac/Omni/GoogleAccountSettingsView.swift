@@ -2,7 +2,7 @@ import AppKit
 import OmniKit
 import SwiftUI
 
-/// The Google account card of the Machines tab, like the Web UI's Settings, Machines, Google account: the Google
+/// The Google account card of the Sharing & access section, like the Web UI's Settings, Sharing & access, Google account: the Google
 /// account that owns this Omni (apps/server/google-auth.ts) and the devices that signed in with it. The app holds the
 /// token, so it can link and unlink the account; a device that signed in with Google cannot.
 struct GoogleAccountSettings: View {

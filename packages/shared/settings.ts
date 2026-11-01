@@ -42,16 +42,27 @@ export interface SettingField {
   required?: string;
   /** The browser's autofill hint. */
   autoComplete?: string;
+  /**
+   * The environment variable that wins over the saved value (apps/server/user-config.ts `resolved`). `emptyWins`: set
+   * but empty still wins (read with ??), else only a non-empty one does (read with ||).
+   */
+  env?: { name: string; emptyWins?: boolean };
+  /** Shown, not edited: only the file or its env var sets it. */
+  readonly?: boolean;
 }
 
-export type SettingPage = 'general' | 'workspace';
+/** The Settings sections that show config fields (packages/shared/settings-catalog.ts). */
+export type SettingPage = 'general' | 'workspace' | 'integrations' | 'access';
 
-/** How each Settings section frames its fields: the card's title, and the Advanced fold's summary and note. */
-export const SETTING_PAGES: Record<SettingPage, { title: string; advanced?: { summary: string; note: string } }> = {
+/** How each Settings section frames its fields: the card's title and note, and the Advanced fold's summary and note. */
+export const SETTING_PAGES: Record<SettingPage, { title: string; note?: string; advanced?: { summary: string; note: string } }> = {
   general: { title: 'You' },
-  workspace: {
-    title: 'Workspace',
-    advanced: { summary: 'Hermes URL and central brain folder', note: 'Optional integrations. Leave a field empty to turn it off.' },
+  workspace: { title: 'Folders' },
+  integrations: { title: 'Integrations', note: 'Optional. Leave a field empty to turn it off.' },
+  access: {
+    title: 'Network access',
+    note: 'Set in data/omni.config.json or its environment variable, so a page cannot open this Omni wider.',
+    advanced: { summary: 'Clerk instance for Google sign-in', note: 'Empty uses the shared instance Omni ships with.' },
   },
 };
 
@@ -81,6 +92,7 @@ export const SETTING_FIELDS = [
     hint: "Empty uses the server's: {fallback}.",
     fallback: 'timezone',
     default: '',
+    env: { name: 'OMNI_TZ' },
   },
   { section: 'user', key: 'email', label: 'Email', input: 'email', page: 'general', placeholder: 'you@example.com', autoComplete: 'email', default: '', max: 200 },
   {
@@ -93,6 +105,7 @@ export const SETTING_FIELDS = [
     fallback: 'workspaceRoot',
     default: '',
     max: 1024,
+    env: { name: 'OMNI_BRAIN_DIR' },
   },
   { section: 'workspace', key: 'reposDir', label: 'Repos folder', input: 'folder', page: 'workspace', fallback: 'reposDir', default: '', max: 1024 },
   { section: 'workspace', key: 'githubOwner', label: 'GitHub owner', input: 'owner', page: 'workspace', hint: 'Your GitHub user or org.', placeholder: 'octocat', default: '' },
@@ -101,23 +114,23 @@ export const SETTING_FIELDS = [
     key: 'hermesUrl',
     label: 'Hermes URL',
     input: 'url',
-    page: 'workspace',
-    advanced: true,
+    page: 'integrations',
     hint: 'A Hermes API server on your tailnet. Its token is the global secret HERMES_API_KEY.',
     placeholder: 'http://100.64.0.1:8642',
     default: '',
+    env: { name: 'OMNI_HERMES_URL', emptyWins: true },
   },
   {
     section: 'integrations',
     key: 'centralBrainDir',
     label: 'Central brain folder',
     input: 'folder',
-    page: 'workspace',
-    advanced: true,
+    page: 'integrations',
     hint: 'A git repo of notes that the brain-nightly automation exports thread digests into.',
     placeholder: '~/central-brain',
     default: '',
     max: 1024,
+    env: { name: 'OMNI_CENTRAL_BRAIN_DIR' },
   },
   {
     // Tailscale logins allowed in through `tailscale serve`, comma separated, like ada@example.com. Set, a request on
@@ -126,9 +139,12 @@ export const SETTING_FIELDS = [
     key: 'tailscaleLogin',
     label: 'Tailscale logins',
     input: 'text',
-    page: null,
+    page: 'access',
+    readonly: true,
+    hint: 'Logins let in through tailscale serve, comma separated. Empty: any login on your tailnet with the token.',
     default: '',
     max: 500,
+    env: { name: 'OMNI_TAILSCALE_LOGIN', emptyWins: true },
   },
   {
     // The https address a Cloudflare Tunnel forwards /mcp and /.well-known on, like https://omni.example.com. Only those
@@ -137,10 +153,13 @@ export const SETTING_FIELDS = [
     key: 'mcpPublicUrl',
     label: 'Public MCP URL',
     input: 'url',
-    page: null,
+    page: 'access',
+    readonly: true,
+    hint: 'A Cloudflare Tunnel that forwards only /mcp and /.well-known here. /api still refuses it.',
     placeholder: 'https://omni.example.com',
     default: '',
     max: 300,
+    env: { name: 'OMNI_MCP_PUBLIC_URL', emptyWins: true },
   },
   {
     // The Clerk instance Google sign-in goes through (apps/server/clerk.ts), by its publishable key. Empty: the shared
@@ -149,9 +168,12 @@ export const SETTING_FIELDS = [
     key: 'clerkPublishableKey',
     label: 'Clerk publishable key',
     input: 'text',
-    page: null,
+    page: 'access',
+    advanced: true,
+    readonly: true,
     default: '',
     max: 200,
+    env: { name: 'OMNI_CLERK_PUBLISHABLE_KEY', emptyWins: true },
   },
   {
     // The public OAuth application in that instance, by client id. Empty: DEFAULT_CLERK_CLIENT_ID.
@@ -159,9 +181,12 @@ export const SETTING_FIELDS = [
     key: 'clerkClientId',
     label: 'Clerk OAuth client id',
     input: 'text',
-    page: null,
+    page: 'access',
+    advanced: true,
+    readonly: true,
     default: '',
     max: 200,
+    env: { name: 'OMNI_CLERK_CLIENT_ID', emptyWins: true },
   },
 ] as const satisfies readonly SettingField[];
 
@@ -216,8 +241,39 @@ export interface SetupState {
   resolved: { timezone: string; workspaceRoot: string; reposDir: string; centralBrainDir: string; hermesUrl: string };
   fallbacks: Record<SettingFallback, string> & { home: string };
   omniRepo: string | null;
+  /**
+   * The fields an environment variable overrides right now, by `section.key`, with that variable's name. The value
+   * in the file is kept but does nothing until the variable goes.
+   */
+  env: Record<string, string>;
   /** POST /api/setup/complete only: the #conductor thread holding the welcome message, on the first run. */
   threadId?: string | null;
+}
+
+/** A field's id in SetupState.env and in a client's form: `section.key`. */
+export const settingId = (f: Pick<SettingField, 'section' | 'key'>) => `${f.section}.${f.key}`;
+
+// ---------- server options (.env) ----------
+
+/**
+ * One server option from .env or the environment, as GET /api/setup/server lists it: read-only in Settings, since
+ * the server reads it at start. `value` and `default` are display text ("600 s", "On"). Never a secret.
+ */
+export interface ServerOption {
+  /** The environment variable, like OMNI_KEEPALIVE_SECONDS. */
+  env: string;
+  label: string;
+  hint: string;
+  /** The Settings section that shows it. */
+  section: 'models' | 'threads' | 'worktrees' | 'machines';
+  value: string;
+  default: string;
+  /** `env`: the variable is set. `default`: Omni's built-in value. */
+  source: 'env' | 'default';
+}
+
+export interface ServerOptionsState {
+  options: ServerOption[];
 }
 
 // ---------- checks ----------

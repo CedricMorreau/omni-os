@@ -15,7 +15,7 @@ import { outputQuery, type OutputChunk } from '@omni/shared/tool-output.ts';
 export type { Thread, EventRow, Artifact, Attachment, HarnessInfo, ModelEntry, HarnessId, Folder, ContextUsage, ContextView, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult, ArtifactTrigger, WebhookTrigger, DeliveryView, DeliveryPage };
 
 /** A harness in the catalog, plus how many of its threads are running now. */
-export type HarnessWithRunning = HarnessInfo & { running: number };
+export type HarnessWithRunning = HarnessInfo & { running: number; /** How to install it, when it is not available and has a local CLI. */ install?: string };
 
 /** A thread's `/` menu: its harness's commands, and the names Ben used last on that harness, newest first. */
 export type CommandList = HarnessCommands & { recent?: string[] };
@@ -79,7 +79,7 @@ export type { SetupState, UserConfig, UserConfigPatch } from '@omni/shared/setti
 
 export interface Status {
   /** Which server this is. Only the fields the web reads. */
-  server?: { secretStore?: string };
+  server?: { secretStore?: string; version?: string; gitHead?: string | null; startedAt?: string; root?: string; dataDir?: string; port?: number; pid?: number };
   usage: HarnessUsage;
   slots: Partial<Record<HarnessId, HarnessSlot>>;
   running: number;

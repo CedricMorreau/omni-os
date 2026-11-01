@@ -2,7 +2,8 @@
 // (apps/server/scripts/setup.ts) writes the same file from a terminal.
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import type { SetupState } from '@omni/shared/settings.ts';
+import type { ServerOptionsState, SetupState } from '@omni/shared/settings.ts';
+import { serverOptions } from './server-options.ts';
 import { getCrew } from './crew.ts';
 import { channels, threads } from './db.ts';
 import { prepareWorkdir } from './sandbox.ts';
@@ -11,6 +12,7 @@ import {
   checkSettingFields,
   configPath,
   ensureWorkspace,
+  envOverrides,
   fallbacks,
   isOnboarded,
   omniRepo,
@@ -38,6 +40,7 @@ export function setupState(): SetupState {
     },
     fallbacks: { ...fallbacks(), workspaceRoot: tildify(fallbacks().workspaceRoot), reposDir: tildify(fallbacks().reposDir), home: '~' },
     omniRepo: omniRepo(),
+    env: envOverrides(),
   };
 }
 
@@ -50,6 +53,9 @@ const patchInput = userConfigPatch.omit({ automations: true, onboardedAt: true }
 });
 
 setupApi.get('/', (c) => c.json(setupState()));
+
+// The .env options Settings shows read-only beside the config, each with where its value came from.
+setupApi.get('/server', (c) => c.json({ options: serverOptions() } satisfies ServerOptionsState));
 
 // JSON only, as links-api.ts: a page in a browser cannot send that cross-origin without a preflight, so it cannot
 // point the Hermes URL (and with it the secret store token) or the workspace somewhere else.

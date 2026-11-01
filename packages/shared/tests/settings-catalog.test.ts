@@ -1,0 +1,46 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { fixture } from '@omni/test-fixtures';
+import { searchSettings, SETTINGS_ENTRIES, SETTINGS_GROUPS, SETTINGS_SECTION_DEFS, settingsSectionNamed } from '../settings-catalog.ts';
+import { SETTING_FIELDS } from '../settings.ts';
+import { catalogFixture } from './settings-catalog-cases.ts';
+
+describe('settings catalog', () => {
+  it('matches the fixture the Swift port reads (run scripts/settings-catalog-fixture.ts after a change)', () => {
+    expect(JSON.parse(readFileSync(fixture('settings-catalog.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(catalogFixture())));
+  });
+
+  it('lists every section in exactly one group, and every group has one', () => {
+    const groups = new Set(SETTINGS_GROUPS.map((g) => g.id));
+    for (const s of SETTINGS_SECTION_DEFS) expect(groups.has(s.group)).toBe(true);
+    for (const g of SETTINGS_GROUPS) expect(SETTINGS_SECTION_DEFS.some((s) => s.group === g.id)).toBe(true);
+    expect(new Set(SETTINGS_SECTION_DEFS.map((s) => s.id)).size).toBe(SETTINGS_SECTION_DEFS.length);
+  });
+
+  it('gives every entry a unique id in a real section, and every section an entry', () => {
+    expect(new Set(SETTINGS_ENTRIES.map((e) => e.id)).size).toBe(SETTINGS_ENTRIES.length);
+    for (const s of SETTINGS_SECTION_DEFS) expect([s.id, SETTINGS_ENTRIES.some((e) => e.section === s.id)]).toEqual([s.id, true]);
+  });
+
+  it('shows each config field in a section that exists', () => {
+    for (const f of SETTING_FIELDS) if (f.page) expect(settingsSectionNamed(f.page)).toBe(f.page);
+  });
+
+  it('opens old names on the section that holds them now', () => {
+    expect(settingsSectionNamed('storage')).toBe('worktrees');
+    expect(settingsSectionNamed('profile')).toBe('general');
+    expect(settingsSectionNamed('sync')).toBe('sync');
+    expect(settingsSectionNamed('garage')).toBeNull();
+  });
+
+  it('ranks a title match over a keyword, folds accents and needs every word', () => {
+    expect(searchSettings('limit', 'web')[0]?.id).toBe('limits');
+    expect(searchSettings('NOTÍFY', 'web')[0]?.id).toBe('notify');
+    expect(searchSettings('worktree zebra', 'web')).toEqual([]);
+  });
+
+  it('keeps a Mac-only setting out of the web search', () => {
+    expect(searchSettings('quick prompt', 'web')).toEqual([]);
+    expect(searchSettings('quick prompt', 'mac').map((e) => e.id)).toEqual(['quick-prompt']);
+  });
+});

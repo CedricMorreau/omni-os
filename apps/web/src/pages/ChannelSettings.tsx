@@ -155,7 +155,8 @@ function IconPicker({ value, name, onChange }: { value: string; name: string; on
 }
 
 /** The model and effort a new thread in the channel starts on, unless the thread or its role picks. */
-function RunDefaultsField({ channel, value, onChange }: { channel?: string; value: FormState['run']; onChange: (v: FormState['run']) => void }) {
+/** A channel's default model and effort. `noReset`: the caller shows its own Reset (Settings' provenance chip). */
+export function RunDefaultsField({ channel, value, onChange, noReset }: { channel?: string; value: FormState['run']; onChange: (v: FormState['run']) => void; noReset?: boolean }) {
   const { data: harnesses, reload } = useApi<HarnessWithRunning[]>(harnessesPath(channel));
   if (!harnesses) return null;
   const unset = !(value.harness || value.model || value.effort);
@@ -170,7 +171,7 @@ function RunDefaultsField({ channel, value, onChange }: { channel?: string; valu
         onChange={(c) => onChange(asksAuto(c) ? { harness: '', model: AUTO, effort: '' } : { harness: c.harness, model: c.model, effort: '' })}
       />
       <EffortPicker harnesses={harnesses} choice={choice} value={value.effort} onChange={(effort) => onChange({ ...choice, effort })} />
-      {!unset && (
+      {!unset && !noReset && (
         <Button type="button" onClick={() => onChange({ harness: '', model: '', effort: '' })}>
           Reset
         </Button>

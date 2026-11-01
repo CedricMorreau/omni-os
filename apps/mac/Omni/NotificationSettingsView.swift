@@ -1,17 +1,20 @@
 import OmniKit
 import SwiftUI
 
-/// The Notifications cards of the General tab (a tab of its own before #404): this Mac's switch, what macOS allows,
-/// and a switch per channel. Nothing here syncs; the other Mac keeps its own choices.
+/// The Notifications section: this Mac's switch, what macOS allows, and a switch per channel, or only the channel
+/// in Settings' scope. Nothing here syncs; the other Mac keeps its own choices.
 struct NotificationSettingsView: View {
   let model: AppModel
   @Bindable var attention: AttentionCenter
+  /// Settings' channel in scope: its switch alone, out of the fold.
+  var scoped: String? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: z(16)) {
       SettingsCard(
-        title: "Notifications",
-        note: "This Mac can tell you when a thread finishes or fails while you are somewhere else. Click a notification to open its thread. Nothing alerts for the thread you are looking at."
+        title: "Notify on this device",
+        note: "This Mac can tell you when a thread finishes or fails while you are somewhere else. Click a notification to open its thread. Nothing alerts for the thread you are looking at.",
+        trailing: { OriginChip(of: .device, label: "This Mac only") }
       ) {
         SettingsToggle(
           title: "Notify on this Mac",
@@ -39,27 +42,37 @@ struct NotificationSettingsView: View {
         }
       }
 
-      // One switch per channel grows with the sidebar, so the list folds shut, as on the web (#405).
-      AdvancedFold(title: "Channels", summary: "\(channels.filter { attention.settings.alerts(channel: $0.id) }.count) of \(channels.count) notify") {
-        Text("A channel turned off still lists its results in Needs you, without a notification.")
-          .font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
-        if channels.isEmpty {
-          Text("No channels yet.").font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
+      if let c = channels.first(where: { $0.id == scoped }) {
+        SettingsCard(title: "#\(c.name)", note: "A channel turned off still lists its results in Needs you, without a notification.") {
+          channelToggle(c)
+            .disabled(!attention.settings.enabled)
+            .opacity(attention.settings.enabled ? 1 : 0.55)
         }
-        VStack(spacing: z(8)) {
-          ForEach(channels) { c in
-            ChannelAlertToggle(name: c.name, id: c.id, isOn: Binding(
-              get: { attention.settings.alerts(channel: c.id) },
-              set: { attention.settings.setAlerts($0, channel: c.id) }
-            ))
+      } else {
+        // One switch per channel grows with the sidebar, so the list folds shut, as on the web (#405).
+        AdvancedFold(title: "Channels", summary: "\(channels.filter { attention.settings.alerts(channel: $0.id) }.count) of \(channels.count) notify") {
+          Text("A channel turned off still lists its results in Needs you, without a notification.")
+            .font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
+          if channels.isEmpty {
+            Text("No channels yet.").font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
           }
+          VStack(spacing: z(8)) {
+            ForEach(channels) { c in channelToggle(c) }
+          }
+          .disabled(!attention.settings.enabled)
+          .opacity(attention.settings.enabled ? 1 : 0.55)
         }
-        .disabled(!attention.settings.enabled)
-        .opacity(attention.settings.enabled ? 1 : 0.55)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .task { await attention.refreshPermission() }
+  }
+
+  private func channelToggle(_ c: ChannelWithRunning) -> some View {
+    ChannelAlertToggle(name: c.name, id: c.id, isOn: Binding(
+      get: { attention.settings.alerts(channel: c.id) },
+      set: { attention.settings.setAlerts($0, channel: c.id) }
+    ))
   }
 
   private var channels: [ChannelWithRunning] {

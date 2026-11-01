@@ -20,12 +20,14 @@ private let knownGlobalSecrets = [
 /// fresh, and a value typed and not saved goes when the tab or the window closes.
 struct SecretsSettings: View {
   let model: AppModel
+  /// Settings' channel in scope: the list shows what its threads get, and the form saves to it.
+  var scoped: String?
   @State private var secrets: SecretsModel?
 
   var body: some View {
     Group {
       if let secrets {
-        SecretsForm(secrets: secrets, store: model.store.status?.server?.secretStore ?? .keychain, grokBot: model.store.status?.grokBot == true)
+        SecretsForm(secrets: secrets, store: model.store.status?.server?.secretStore ?? .keychain, grokBot: model.store.status?.grokBot == true, scoped: scoped)
       } else {
         Loader(size: 18).frame(maxWidth: .infinity, maxHeight: .infinity).background(Tok.bg)
       }
@@ -33,9 +35,11 @@ struct SecretsSettings: View {
     .task(id: model.client.baseURL) {
       let store = model.store
       let secrets = SecretsModel(client: model.client) { store.channels }
+      if let scoped { secrets.scope = .channel(scoped) }
       self.secrets = secrets
       await secrets.load()
     }
+    .onChange(of: scoped) { _, now in secrets?.scope = now.map(SecretScope.channel) ?? .global }
     .onChange(of: model.store.connection) { _, connection in
       if connection == .open, let secrets { Task { await secrets.load() } }
     }
@@ -49,6 +53,8 @@ struct SecretsForm: View {
   let store: SecretStore
   /// The server has a Grok Bot webhook URL. Without it the form names nothing of Grok Bot.
   var grokBot = false
+  /// Settings' channel in scope, or nil for every scope.
+  var scoped: String?
   @State private var confirming: SecretRow?
   @FocusState private var valueFocused: Bool
 
@@ -150,17 +156,17 @@ struct SecretsForm: View {
       LoadingNote()
     case .failed(let message):
       ErrorNote(text: message) { Task { await secrets.load() } }
-    case .loaded where secrets.groups.isEmpty:
+    case .loaded where secrets.groups(in: scoped).isEmpty:
       EmptyNote(
         symbol: "key",
-        title: "No secrets yet",
+        title: scoped == nil ? "No secrets yet" : "No secrets reach this channel",
         message: "Add a token above, for example a Shopify Admin API token scoped to the client's channel."
       )
     case .loaded:
-      ForEach(secrets.groups) { group in
+      ForEach(secrets.groups(in: scoped)) { group in
         VStack(alignment: .leading, spacing: z(6)) {
           HStack(spacing: z(6)) {
-            Text(secrets.label(for: group.scope))
+            Text(scoped != nil && group.scope == .global ? "Inherited from Global" : secrets.label(for: group.scope))
             Text("\(group.rows.count)").monospacedDigit().foregroundStyle(Tok.fg4)
           }
           .omniCaption()
@@ -169,7 +175,8 @@ struct SecretsForm: View {
             ForEach(group.rows) { row in
               SecretRowView(
                 row: row, deleting: secrets.deleting.contains(row.id),
-                error: secrets.deleteError?.id == row.id ? secrets.deleteError?.message : nil
+                error: secrets.deleteError?.id == row.id ? secrets.deleteError?.message : nil,
+                origin: scoped == nil ? nil : row.scope == .global ? OriginChip(of: .inherited, label: "Global") : OriginChip(of: .channel, label: secrets.overridesGlobal(row) ? "Overrides global" : "Set on this channel")
               ) {
                 confirming = row
               }
@@ -189,6 +196,8 @@ struct SecretRowView: View {
   let row: SecretRow
   let deleting: Bool
   let error: String?
+  /// Where it comes from, in a channel's scope.
+  var origin: OriginChip? = nil
   let delete: () -> Void
 
   var body: some View {
@@ -202,6 +211,7 @@ struct SecretRowView: View {
           .lineLimit(1)
           .truncationMode(.middle)
           .textSelection(.enabled)
+        if let origin { origin }
         Spacer()
         TimelineView(.everyMinute) { context in
           Text(RelTime.label(row.updatedAt, now: context.date))

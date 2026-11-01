@@ -42,7 +42,7 @@ Links and reloads return to the same screen. Back uses the parent screen when th
 
 Link the Google account that owns this Omni once, and new devices sign in with it instead of the token. Each one gets a session of its own that you can see and revoke. Sign-in goes through Clerk ([ADR 0007](../adr/0007-google-sign-in-through-clerk.md)). Anyone with a Google account can make a Clerk account, but only the one linked to this install gets in.
 
-1. On a device that already holds the token (the Mac app, or a paired browser), open Settings, Machines, Google account, and choose Link Google account.
+1. On a device that already holds the token (the Mac app, or a paired browser), open Settings, Sharing & access, Google account, and choose Link Google account.
 2. Omni shows a code and opens Clerk's sign-in page. Sign in with Google there, check the page shows the same code, and approve.
 3. On a new device, open Omni and choose Sign in with Google on the pairing screen. Approve the code the same way, with the same account.
 

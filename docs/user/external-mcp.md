@@ -167,7 +167,7 @@ Clients connect with the token URL, `https://mcp.omni-os.app/mcp/<mcp-token>`. `
 - **Claude Code, Cursor, Codex or Hermes on another machine**: add the token URL as an HTTP server (the prompts in [Let an agent install it](#let-an-agent-install-it) do this).
 - **A client that sends headers** (the xAI API, for example): `https://mcp.omni-os.app/mcp` with `Authorization: Bearer <mcp-token>`.
 
-With a Google account linked (Settings, Machines, Google account; see [Sign in with Google](remote-access.md#sign-in-with-google)), clients can instead use `https://mcp.omni-os.app/mcp` without the token and sign in with that Google account through Clerk, so they hold no Omni token.
+With a Google account linked (Settings, Sharing & access, Google account; see [Sign in with Google](remote-access.md#sign-in-with-google)), clients can instead use `https://mcp.omni-os.app/mcp` without the token and sign in with that Google account through Clerk, so they hold no Omni token.
 
 The Mac has to be awake for any of these to answer.
 
@@ -195,7 +195,7 @@ Get Omni's MCP server ready for a Grok custom connector. Omni's server runs on t
 
 **2. Add the connector in Grok.** At [grok.com/connectors](https://grok.com/connectors), choose New Connector, then Custom, and enter the MCP server URL:
 
-- **Google sign-in on** (a Google account linked in Settings, Machines, and dynamic client registration turned on in Clerk, see [What the Clerk instance needs](#what-the-clerk-instance-needs)): enter `https://mcp.omni-os.app/mcp` and sign in with the linked Google account when Grok asks.
+- **Google sign-in on** (a Google account linked in Settings, Sharing & access, and dynamic client registration turned on in Clerk, see [What the Clerk instance needs](#what-the-clerk-instance-needs)): enter `https://mcp.omni-os.app/mcp` and sign in with the linked Google account when Grok asks.
 - **Otherwise**: enter `https://mcp.omni-os.app/mcp/<mcp-token>`, with the token you copy yourself from `data/mcp-token`. Anyone with that URL can start threads on your Mac, so treat it like a password.
 
 On Grok Business or Enterprise, a team admin has to allow the connector in xAI's cloud console first.

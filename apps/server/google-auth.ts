@@ -197,7 +197,7 @@ export async function startFlow(
 ): Promise<FlowStart> {
   const client = deps.clerk();
   if (!client) throw new SignInError('Google sign-in is not set up on this Omni', 409);
-  if (purpose === 'device' && !owner()) throw new SignInError('No Google account is linked to this Omni yet. Link one in Settings, Machines, on a device that is already paired', 409);
+  if (purpose === 'device' && !owner()) throw new SignInError('No Google account is linked to this Omni yet. Link one in Settings, Sharing & access, on a device that is already paired', 409);
   const at = deps.now();
   prune(at);
   const open = [...flows.values()].filter((f) => !f.outcome).length;
@@ -266,7 +266,7 @@ export async function pollFlow(id: string, secret: string, deps: FlowDeps = defa
   if (f.purpose === 'link') return (f.outcome = { state: 'linked', owner: linkOwner(r.identity) });
   if (!isOwner(r.identity)) {
     const who = r.identity.email ? `${r.identity.email} does not` : 'That Google account does not';
-    return (f.outcome = { state: 'refused', error: `${who} own this Omni. Sign in with the account linked in Settings, Machines` });
+    return (f.outcome = { state: 'refused', error: `${who} own this Omni. Sign in with the account linked in Settings, Sharing & access` });
   }
   return (f.outcome = { state: 'signed_in', kind: f.kind, session: createSession(f.name, f.kind, r.identity.sub) });
 }

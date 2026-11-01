@@ -293,6 +293,23 @@ private func strings(in value: Any, depth: Int = 0) -> [String] {
     #expect(secrets.groups.map { secrets.label(for: $0.scope) } == ["Global", "#Acme", "#beta"])
   }
 
+  /// Settings' channel scope: what that channel's threads get, its own first, a global it overrides left out.
+  @Test func listsWhatAChannelGets() async throws {
+    let list = """
+      [{"scope":"channel:acme","name":"TOKEN","updated_at":"2026-09-28T07:00:00.000Z"},
+       {"scope":"channel:beta","name":"B","updated_at":"2026-09-28T07:00:00.000Z"},
+       {"scope":"global","name":"TOKEN","updated_at":"2026-09-28T07:00:00.000Z"},
+       {"scope":"global","name":"G","updated_at":"2026-09-28T07:00:00.000Z"}]
+      """
+    let secrets = model(SecretsServer(list: list), channels: [try acme()])
+    await secrets.load()
+    let groups = secrets.groups(in: "acme")
+    #expect(groups.map(\.scope) == [.channel("acme"), .global])
+    #expect(groups.map { $0.rows.map(\.name) } == [["TOKEN"], ["G"]])
+    #expect(secrets.overridesGlobal(groups[0].rows[0]))
+    #expect(secrets.groups(in: nil) == secrets.groups)
+  }
+
   @Test func offersGlobalAndEachChannel() throws {
     let secrets = model(SecretsServer(), channels: [try acme()])
     #expect(secrets.scopeOptions.map(\.scope) == [.global, .channel("acme")])

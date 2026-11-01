@@ -567,12 +567,25 @@ server.registerTool(
 );
 
 server.registerTool('worktree_storage', {
-  description: 'Read-only inventory of the worktrees in data/worktrees: size, owning thread and why each is kept or eligible for cleanup, plus what a cleanup or this Mac\'s retention policy would remove and the last cleanup runs. With scan: true, starts a background scan first (it takes a minute); call again without it to read progress and the result. Deletes nothing: only Ben removes worktrees, in Settings > Machines.',
+  description: 'Read-only inventory of the worktrees in data/worktrees: size, owning thread and why each is kept or eligible for cleanup, plus what a cleanup or this Mac\'s retention policy would remove and the last cleanup runs. With scan: true, starts a background scan first (it takes a minute); call again without it to read progress and the result. Deletes nothing: only Ben removes worktrees, in Settings > Worktrees.',
   inputSchema: { scan: z.boolean().optional() },
 }, async ({ scan }) => text(await call('/worktrees/scan', scan ? { method: 'POST' } : undefined)));
 
+server.registerTool('settings', {
+  description:
+    `Read-only: ${USER}'s Omni settings on this machine and where each value comes from. config: data/omni.config.json (you, folders, integrations, ` +
+    'network access, run-on machine, worktree retention). env_overrides: config fields an environment variable overrides now, by section.key. ' +
+    'server_options: the .env options (models, threads, worktrees, port), each with its value, default and source (env or default). ' +
+    `Changes nothing: ${USER} edits these in Settings, and .env needs a server restart. Channel defaults are list_channels; secrets are names only in Settings > Secrets.`,
+  inputSchema: {},
+}, async () => {
+  const [setup, server] = await Promise.all([call('/setup'), call('/setup/server')]);
+  const { automations: _automations, ...config } = setup.config;
+  return text({ path: setup.path, config, resolved: setup.resolved, env_overrides: setup.env, server_options: server.options });
+});
+
 server.registerTool('signed_in_devices', {
-  description: `The Google account linked to this Omni and the devices that signed in with it (browsers, phones, apps), most recently used first. Not the synced machines: those are list_devices. Linking or unlinking the account is ${USER}'s to do in Settings > Machines.`,
+  description: `The Google account linked to this Omni and the devices that signed in with it (browsers, phones, apps), most recently used first. Not the synced machines: those are list_devices. Linking or unlinking the account is ${USER}'s to do in Settings > Sharing & access.`,
   inputSchema: {},
 }, async () => {
   const [account, devices] = await Promise.all([call('/auth/account'), call('/auth/devices')]);

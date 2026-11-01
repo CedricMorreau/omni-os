@@ -1,5 +1,5 @@
 // Where a thread runs: this machine, or another synced one (a Linux box with the CPU to spare), picked per thread in
-// the composer with Settings > Machines' default (user config `runOn.device`). This machine stays the hub Ben talks
+// the composer with Settings > Threads' default (user config `runOn.device`). This machine stays the hub Ben talks
 // to: a thread sent elsewhere is created here, goes out as a fresh handoff offer (handoff.ts sendNewThread), runs on
 // the other machine, and syncs back as it goes. Ben's later messages, Stop, his actions on a usage-limit stop, and
 // the reports of delegated threads that ran here for a parent that runs elsewhere (runner/queue.ts reportToParent)

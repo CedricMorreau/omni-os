@@ -24,7 +24,10 @@ import OmniKit
     #expect(Route.settings(.secrets).settingsTab == .secrets)
     #expect(Route.settings(.general).settingsTab == .general)
     #expect(Route(hash: "#/settings").settingsTab == .general)
-    #expect(Route(hash: "#/sync").settingsTab == .machines)
+    #expect(Route(hash: "#/sync").settingsTab == .sync)
+    #expect(Route(hash: "#/storage").settingsTab == .worktrees)
+    #expect(Route(hash: "#/settings/storage").settingsTab == .worktrees)
+    #expect(Route(hash: "#/settings/threads").settingsTab == .threads)
     for route: Route in [.home, .artifacts, .automations, .newChannel, .channel(id: "acme"), .search(query: "x")] {
       #expect(route.settingsTab == nil, "\(route)")
     }
@@ -48,18 +51,21 @@ import OmniKit
     #expect(model.settingsTab == .general)
   }
 
-  /// The same four tabs as the web's sections, in the same order; ⌘, and the sidebar both start on General.
-  @Test func hasTheWebsFourSections() {
-    #expect(SettingsTab.allCases == [.general, .workspace, .machines, .secrets])
-    #expect(SettingsTab.allCases.map(\.rawValue) == ["general", "workspace", "machines", "secrets"])
+  /// The same sections as the web's nav, in the same order; ⌘, and the sidebar both start on General.
+  @Test func hasTheWebsSections() {
+    #expect(SettingsTab.allCases.map(\.rawValue) == SettingsCatalog.sections.map(\.id))
   }
 
-  /// A QA script written for one of the eight tabs before #404 opens the tab that holds that page now.
+  /// A QA script written for an older tab opens the section that holds that page now.
   @Test func takesTheOldTabNames() {
     #expect(SettingsTab(named: "general") == .general)
     #expect(SettingsTab(named: "machines") == .machines)
-    for old in ["profile", "notifications", "appearance", "quickPrompt"] { #expect(SettingsTab(named: old) == .general, "\(old)") }
-    for old in ["server", "connection", "sync", "storage"] { #expect(SettingsTab(named: old) == .machines, "\(old)") }
+    for old in ["profile", "quickPrompt"] { #expect(SettingsTab(named: old) == .general, "\(old)") }
+    #expect(SettingsTab(named: "notifications") == .notifications)
+    #expect(SettingsTab(named: "appearance") == .appearance)
+    for old in ["server", "connection"] { #expect(SettingsTab(named: old) == .machines, "\(old)") }
+    #expect(SettingsTab(named: "sync") == .sync)
+    #expect(SettingsTab(named: "storage") == .worktrees)
     #expect(SettingsTab(named: "garage") == nil)
   }
 

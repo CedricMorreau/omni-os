@@ -5,7 +5,7 @@ import { Button, Chip, ErrorNote, InlineConfirm } from '../components/ui.tsx';
 import { relTime } from '../format.ts';
 import { Card, InfoRow } from './settings-parts.tsx';
 
-// Settings, Machines, Google sign-in: the Google account that owns this Omni and the devices that signed in with it
+// Settings, Sharing & access, Google sign-in: the Google account that owns this Omni and the devices that signed in with it
 // (apps/server/google-auth.ts). Linking and unlinking take a device paired with the token; one that signed in with
 // Google can revoke devices and sign itself out, but cannot hand the install to another account.
 

@@ -74,7 +74,7 @@ export async function startRelaySignIn(url: string, deps: SetupDeps): Promise<Fl
     throw new SetupError(err.message, err instanceof RelayRefusedError ? 400 : 502);
   });
   const local = deps.clerk();
-  if (!local) throw new SetupError('Google sign-in is not set up on this Omni. Set the Clerk app in Settings, Machines first', 409);
+  if (!local) throw new SetupError('Google sign-in is not set up on this Omni. Set the Clerk app in Settings, Sharing & access first', 409);
   if (!info.issuer || !info.clientId) throw new SetupError('The relay has no Clerk app yet. Run npm run relay:config and set the secrets it prints', 409);
   if (info.issuer !== local.issuer || info.clientId !== local.clientId)
     throw new SetupError(`The relay trusts another Clerk app (${info.issuer}, ${info.clientId}) than this Omni (${local.issuer}, ${local.clientId})`, 409);

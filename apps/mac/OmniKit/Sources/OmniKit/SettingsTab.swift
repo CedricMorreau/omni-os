@@ -1,25 +1,27 @@
 import Foundation
 
-/// A tab of the Settings window: the same four sections, in the same order, as the Web UI's Settings nav and the
-/// phone's Settings list (#404). Automations is a page of the main window, as on the web.
+/// A section of the Settings window: the same sections, groups and order as the Web UI's Settings nav and the
+/// phone's Settings screen (packages/shared/settings-catalog.ts, mirrored in SettingsCatalog.swift). Automations is
+/// a page of the main window, as on the web.
 public enum SettingsTab: String, CaseIterable, Hashable, Sendable {
-  /// You and Run setup again, then this Mac's appearance, notifications and Quick Prompt.
-  case general
-  /// Your folders, GitHub owner and integrations.
-  case workspace
-  /// Where new threads run, this Mac's server, Sync and Storage.
-  case machines
-  case secrets
+  case general, appearance, notifications
+  case models, threads
+  case channels, workspace, worktrees
+  case machines, sync, access, integrations, secrets
+  case about
 
-  /// The tab by name, taking the names of the eight tabs before #404 (and "connection", older still) so a QA
-  /// script written for one of them opens the tab that holds that page now.
+  /// The section by name, taking the names it had before (the eight tabs before #404, the four after it and
+  /// "connection", older still) so a QA script or link written for one opens the section that holds that page now.
   public init?(named name: String) {
-    switch name {
-    case "profile", "notifications", "appearance", "quickPrompt": self = .general
-    case "server", "connection", "sync", "storage": self = .machines
-    default: self.init(rawValue: name)
+    if let tab = SettingsTab(rawValue: name) {
+      self = tab
+      return
     }
+    guard let id = SettingsCatalog.legacy[name], let tab = SettingsTab(rawValue: id) else { return nil }
+    self = tab
   }
+
+  public var section: SettingsCatalog.Section { SettingsCatalog.section(rawValue) }
 }
 
 extension Route {

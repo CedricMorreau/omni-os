@@ -4,7 +4,7 @@ import { api, errorText, useApi } from '../api.ts';
 import { Button, Chip, ErrorNote, Loading, StatusDot } from '../components/ui.tsx';
 import { Card, InfoRow, SwitchRow } from './settings-parts.tsx';
 
-// Settings, Machines, Omni Connect (docs/user/omni-connect.md): turn this machine's Cloudflare tunnel on and off, see
+// Settings, Sharing & access, Omni Connect (docs/user/omni-connect.md): turn this machine's Cloudflare tunnel on and off, see
 // its address and tunnel, and open your other machines. The Mac app's Machines tab
 // (apps/mac/Omni/ConnectSettingsView.swift) shows the same.
 

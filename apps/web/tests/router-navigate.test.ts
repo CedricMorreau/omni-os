@@ -65,8 +65,14 @@ describe('parseHash', () => {
 
   it('keeps the pages Settings replaced reachable at their old hashes', () => {
     expect(parseHash('#/secrets')).toEqual({ name: 'settings', section: 'secrets' });
-    expect(parseHash('#/sync')).toEqual({ name: 'settings', section: 'machines' });
-    expect(parseHash('#/storage')).toEqual({ name: 'settings', section: 'machines' });
+    expect(parseHash('#/sync')).toEqual({ name: 'settings', section: 'sync' });
+    expect(parseHash('#/storage')).toEqual({ name: 'settings', section: 'worktrees' });
+    // The Mac's tab names before the grouped layout open the section that holds them now.
+    expect(parseHash('#/settings/storage')).toEqual({ name: 'settings', section: 'worktrees' });
+    expect(parseHash('#/settings/profile')).toEqual({ name: 'settings', section: 'general' });
+    // A search result carries the setting to scroll to.
+    expect(parseHash('#/settings/threads?focus=limits')).toEqual({ name: 'settings', section: 'threads', focus: 'limits' });
+    expect(href.settingsSection('threads', 'limits')).toBe('#/settings/threads?focus=limits');
     expect(parseHash('#/toString')).toEqual({ name: 'notfound', path: '/toString' });
     expect(href.settingsSection('machines')).toBe('#/settings/machines');
     expect(href.settingsSection('general')).toBe('#/settings/general');
