@@ -17,7 +17,7 @@ An install can link one Google account, through Clerk, as its owner. A device th
 - The three sign-in routes (`GET /api/auth/methods`, `POST /api/auth/google/start`, `POST /api/auth/google/poll`) take no token. The rest of the request guard still applies to them (Host, Origin, Sec-Fetch-Site, JSON only). Starting a sign-in is capped at 10 open and 20 a minute.
 - Google sign-in needs the network and Clerk to be up. Sessions issued earlier keep working offline, since the server checks them itself.
 - The device grant can be phished: someone who can already reach the server starts a sign-in and sends the owner the link. The code is shown on both the device and Clerk's page so the owner can compare them, and only an approval by the owner's own account gives anything.
-- Sync relay auth and MCP OAuth go through the same Clerk instance in later changes.
+- MCP clients sign in to `/mcp` through the same Clerk instance (`apps/server/mcp-oauth.ts`): Omni publishes protected resource metadata naming Clerk, and checks an access token by asking Clerk's `userinfo` endpoint, so it still holds no secret key. Sync relay auth follows in a later change.
 
 ## Options turned down
 

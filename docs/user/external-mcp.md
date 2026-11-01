@@ -33,8 +33,8 @@ Install the Omni MCP server for me. Omni is checked out at ~/omni-os and its ser
 3. Check it: if the omni tools are loaded in this session, call list_channels. Otherwise run
    `claude mcp list` or `codex mcp list` and confirm omni shows as connected.
 4. Tell me which clients you set up, which ones need a restart, and the exact steps for the ones you
-   cannot set up from here: claude.ai and ChatGPT need the remote URL from step 1 with the
-   `tailscale funnel` line run first, and I will paste the token myself.
+   cannot set up from here: claude.ai and ChatGPT need the `tailscale funnel` lines from step 1 run
+   first, then the remote URL, and I sign in with Google there myself.
 ```
 
 ## Set it up by hand
@@ -53,26 +53,37 @@ The server has to be running (`npm start`, `npm run dev` or the Mac app). The st
 
 ### From anywhere else (HTTP)
 
-Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai and ChatGPT call it from their own servers, so your tailnet alone is not enough. Expose only `/mcp` to the internet with Tailscale Funnel:
+Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai and ChatGPT call it from their own servers, so your tailnet alone is not enough. Expose `/mcp` and the sign-in metadata, and nothing else, with Tailscale Funnel:
 
 ```bash
 tailscale funnel --bg --set-path /mcp http://127.0.0.1:4747/mcp
+tailscale funnel --bg --set-path /.well-known http://127.0.0.1:4747/.well-known
 ```
 
-Then add the URL `npm run mcp:config -- --show-token` prints:
+With a Google account linked (Settings, Machines, Google account; see [Sign in with Google](remote-access.md#sign-in-with-google)), clients sign in with Google through Clerk and hold no Omni token:
 
-- **claude.ai** (also reaches Claude Desktop and the Claude phone app): Settings, Connectors, Add custom connector, with `https://<your-mac>.<tailnet>.ts.net/mcp/<mcp-token>`.
-- **ChatGPT**: turn on developer mode, then create a connector (app) with the same URL and no authentication.
-- **Grok, the xAI API, or Cursor and Claude Code on another machine**: `https://<your-mac>.<tailnet>.ts.net/mcp` with the header `Authorization: Bearer <mcp-token>`.
+- **claude.ai** (also reaches Claude Desktop and the Claude phone app): Settings, Connectors, Add custom connector, with `https://<your-mac>.<tailnet>.ts.net/mcp`. Choose Connect and sign in with the linked Google account.
+- **ChatGPT**: turn on developer mode, then create a connector (app) with the same URL and OAuth authentication.
+- **Claude Code, Cursor or Codex on another machine**: add `https://<your-mac>.<tailnet>.ts.net/mcp` as an HTTP server. They sign in the same way on first use.
+
+A client that cannot do OAuth uses the MCP token that `npm run mcp:config -- --show-token` prints instead: `https://<your-mac>.<tailnet>.ts.net/mcp/<mcp-token>` where only a URL fits, or `/mcp` with the header `Authorization: Bearer <mcp-token>` (Grok and the xAI API).
 
 The Mac has to be awake for any of these to answer.
 
+#### What the Clerk instance needs
+
+Google sign-in for devices already needs a public OAuth application with the device grant. For MCP clients, also turn on **dynamic client registration** in the Clerk dashboard (OAuth applications settings): claude.ai, ChatGPT and the other clients register themselves there, as public clients with PKCE. Check it took: `https://<instance>.clerk.accounts.dev/.well-known/oauth-authorization-server` lists a `registration_endpoint` once it is on. Without it, a client asks you for a client id, or fails to connect.
+
 ## Security
 
-`/mcp` takes its own token, `data/mcp-token` (mode 0600, made on first use), apart from the API token. claude.ai and ChatGPT without OAuth only take a URL, so the token goes in the path. The API token is accepted only as a header, never in a URL.
+Three things open `/mcp`, each checked on every request:
 
-Anyone with the URL can start threads on your Mac, and threads run with `bypassPermissions`. Treat the URL like a password. To rotate it, delete `data/mcp-token`, restart Omni and update each client.
+- **A Clerk access token** for the Google account linked to this install, as a `Bearer` header. Omni holds no Clerk secret key: it asks Clerk's `userinfo` endpoint who the token belongs to and caches the answer for a minute, so a token revoked in Clerk can still work for up to that minute. Any other Google account gets a 401, and unlinking the account turns this way in off at once. A token never goes in a URL. If Clerk cannot be reached, `/mcp` answers 503 and the static tokens still work.
+- **`data/mcp-token`** (mode 0600, made on first use), apart from the API token, as a header or in the path for clients that take only a URL. Anyone with that URL can start threads on your Mac, and threads run with `bypassPermissions`, so treat it like a password. To rotate it, delete the file, restart Omni and update each client that uses it.
+- **The API token**, as a header only.
 
-Through Funnel, the `integrations.tailscaleLogin` check that guards `/api` does not apply, since Funnel requests carry no Tailscale login. The token is the only control on `/mcp`. Everything else stays off the internet: `--set-path /mcp` forwards that path only, and the tools reach `/api` in-process through the usual request guard. `/mcp` also refuses a `Host` outside the allowed names and a browser `Origin` from another site, the same DNS-rebinding checks as `/api` (see [Remote access and security](remote-access.md)).
+A 401 from `/mcp` names the protected resource metadata (`/.well-known/oauth-protected-resource/mcp`, RFC 9728), which points clients at Clerk. Omni also serves Clerk's own authorization server metadata at `/.well-known/oauth-authorization-server`, for clients on the older MCP spec. Both answer 404 until a Google account is linked.
 
-The server is stateless: each request gets a fresh MCP server, so a restart drops no session. There is no OAuth, so clients that insist on it cannot connect.
+Through Funnel, the `integrations.tailscaleLogin` check that guards `/api` does not apply, since Funnel requests carry no Tailscale login. Only `/mcp` and `/.well-known` are forwarded, and the tools reach `/api` in-process through the usual request guard. `/mcp` and the metadata also refuse a `Host` outside the allowed names, and `/mcp` refuses a browser `Origin` from another site: the same DNS-rebinding checks as `/api` (see [Remote access and security](remote-access.md)).
+
+The server is stateless: each request gets a fresh MCP server, so a restart drops no session.

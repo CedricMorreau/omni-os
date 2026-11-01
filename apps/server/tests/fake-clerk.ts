@@ -1,6 +1,7 @@
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto';
 
-// A Clerk instance in memory, as a fetch: its OpenID metadata, JWKS, device authorization and token endpoints.
+// A Clerk instance in memory, as a fetch: its OpenID and OAuth metadata, JWKS, device authorization, token and userinfo
+// endpoints. accessToken() hands out an opaque OAuth access token, as an MCP client gets after signing in.
 // Tests approve or deny a pending sign-in by hand. ID tokens are signed with a real RSA key, so ClerkClient's
 // signature check runs for real. Nothing here reaches the network.
 
@@ -19,6 +20,7 @@ export function fakeClerk(opts: { interval?: number; issuer?: string; clientId?:
   const kid = 'key-1';
   const jwk = { ...publicKey.export({ format: 'jwk' }), kid, alg: 'RS256', use: 'sig' };
   const codes = new Map<string, Pending>();
+  const accessTokens = new Map<string, Who>();
   const calls: string[] = [];
 
   /** An RS256 JWT over claims, with this instance's key unless `key` says otherwise. */
@@ -48,6 +50,20 @@ export function fakeClerk(opts: { interval?: number; issuer?: string; clientId?:
           device_authorization_endpoint: `${issuer}/oauth/device_authorization`,
           jwks_uri: `${issuer}/.well-known/jwks.json`,
         });
+      case '/.well-known/oauth-authorization-server':
+        return json({
+          issuer,
+          authorization_endpoint: `${issuer}/oauth/authorize`,
+          token_endpoint: `${issuer}/oauth/token`,
+          registration_endpoint: `${issuer}/oauth/register`,
+          code_challenge_methods_supported: ['S256'],
+        });
+      case '/oauth/userinfo': {
+        const token = new Headers(init?.headers).get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+        const who = accessTokens.get(token);
+        if (!who) return json({ errors: [{ code: 'oauth_fetch_user_error' }] }, 401);
+        return json({ sub: who.sub, email: who.email, name: who.name });
+      }
       case '/.well-known/jwks.json':
         return json({ keys: [jwk] });
       case '/oauth/device_authorization': {
@@ -84,5 +100,13 @@ export function fakeClerk(opts: { interval?: number; issuer?: string; clientId?:
     for (const p of codes.values()) if (p.userCode === userCode) p.state = 'denied';
   };
 
-  return { issuer, clientId, fetch, approve, deny, sign, idToken, calls };
+  /** A new OAuth access token for `who`, opaque like Clerk's. revoke() makes userinfo refuse it. */
+  const accessToken = (who: Who) => {
+    const token = `oat_${randomBytes(16).toString('hex')}`;
+    accessTokens.set(token, who);
+    return token;
+  };
+  const revoke = (token: string) => accessTokens.delete(token);
+
+  return { issuer, clientId, fetch, approve, deny, sign, idToken, accessToken, revoke, calls };
 }
