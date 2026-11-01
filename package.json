@@ -22,6 +22,7 @@
     "sync:backfill": "npm run sync:backfill --workspace @omni/server --",
     "brain-export": "npm run brain-export --workspace @omni/server --",
     "setup": "npm run setup --workspace @omni/server --",
+    "mcp:config": "npm run mcp-config --workspace @omni/server --",
     "unused": "knip",
     "check": "npm run typecheck && npm run unused && npm test"
   },
