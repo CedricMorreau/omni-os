@@ -57,10 +57,25 @@ export async function announceDevice(now = Date.now()): Promise<void> {
   kv.set(PREFIX + self, { id: self, name, tailscale, at: new Date(now).toISOString() } satisfies DeviceRecord);
 }
 
+/**
+ * One record per Tailscale node. A machine whose sync state was reset comes back under a new id and leaves its old
+ * record behind; the newest record for a node is the live one. Records without a node are never merged.
+ */
+export function currentRecords(records: DeviceRecord[]): DeviceRecord[] {
+  const newest = new Map<string, DeviceRecord>();
+  for (const d of records) {
+    const node = d.tailscale?.nodeId;
+    if (!node) continue;
+    const had = newest.get(node);
+    if (!had || d.at > had.at || (d.at === had.at && d.id > had.id)) newest.set(node, d);
+  }
+  return records.filter((d) => !d.tailscale?.nodeId || newest.get(d.tailscale.nodeId) === d);
+}
+
 /** The other synced Macs, never this one, with whether this Mac's Tailscale sees each up. Empty while sync is off. */
 export async function listDevices(): Promise<Device[]> {
   const self = outbox.machineId();
-  const others = self ? deviceRecords().filter((d) => d.id !== self) : [];
+  const others = self ? currentRecords(deviceRecords()).filter((d) => d.id !== self) : [];
   if (!others.length) return [];
   const net = await tailnet();
   return others
