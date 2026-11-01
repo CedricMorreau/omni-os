@@ -58,7 +58,7 @@ Storage, under Settings > Machines, inventories worktrees and explains why each 
 
 ## Grok Bot
 
-Send to Grok Bot posts a thread's title and messages to a webhook. The context is the channel id and the thread id.
+Send to Grok Bot posts a thread's title and messages to a webhook. The context is the channel id and the thread id. That only goes one way. For Grok Bot to read threads and start work in Omni, connect it to Omni's MCP server: see [Connect Grok Bot](external-mcp.md#connect-grok-bot).
 
 The action is in the thread's menu on the Web UI and the Mac app: the ⋯ in the thread header, or a right-click on the thread. On a phone it is in Thread options. The Conductor calls `send_to_grok_bot`.
 
