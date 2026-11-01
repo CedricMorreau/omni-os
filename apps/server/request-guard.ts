@@ -40,8 +40,15 @@ const hostnameOf = (host: string) => {
 const refuse = (reason: string, status = 403) =>
   new Response(JSON.stringify({ error: status === 403 ? `Forbidden: ${reason}` : reason }), { status, headers: { 'content-type': 'application/json' } });
 
-/** The one route that takes no token: the Mac app asks it to prove it is this install before sending the token. */
+/** The Mac app asks this to prove the process on the port is this install, before it sends the token. */
 export const PROOF_PATH = '/api/auth/proof';
+
+/**
+ * The Linux app opens this once, in its own window, and the response sets the pairing cookie.
+ * No token in the URL. Only a request from this machine that did not come through a proxy (so Tailscale
+ * and a forwarded client still have to pair with the token).
+ */
+export const DESKTOP_PAIR_PATH = '/api/auth/desktop-pair';
 
 /** GitHub's webhook posts (apps/server/github-webhook-api.ts) take no token either: each proves itself with its signature. */
 export const isWebhookPost = (c: Context) => c.req.method === 'POST' && /^\/api\/hooks\/github\/[\w.-]+$/.test(c.req.path);
@@ -66,6 +73,12 @@ const PROXY_HEADERS = ['x-forwarded-host', 'x-forwarded-for', 'x-forwarded-proto
 
 /** The request came in through tailscale serve (or another proxy), whatever Host it names. */
 const cameThroughProxy = (c: Context, host: string) => viaTailnet(hostnameOf(host)) || PROXY_HEADERS.some((h) => c.req.header(h) !== undefined);
+
+/** True only for GET desktop-pair from this machine, with no proxy in front. The handler sets the cookie. */
+export function desktopPairAllowed(c: Context): boolean {
+  if (c.req.method !== 'GET' || c.req.path !== DESKTOP_PAIR_PATH) return false;
+  return fromThisMac(c) && !cameThroughProxy(c, requestHost(c));
+}
 
 const requestHost = (c: Context) => c.req.header('host') ?? new URL(c.req.url).host;
 
@@ -94,7 +107,7 @@ const SIMPLE_TYPES = ['text/plain', 'application/x-www-form-urlencoded'];
  * - an Origin, `null` included, that is not the Host the request came in on;
  * - a text/plain or form-urlencoded body, the content types that skip the preflight;
  * - no token, or the wrong one (401), in the Authorization header or the paired browser's cookie, except on the
- *   proof route and a GitHub webhook post, which carries its own signature;
+ *   proof route, a GitHub webhook post (its own signature), and GET desktop-pair from this machine;
  * - through tailscale serve (a tailnet Host, or any proxy header), a Tailscale-User-Login that is not in
  *   `integrations.tailscaleLogin`, when that is set.
  * The Mac app, apps/mcp/omni.ts, scripts and curl send no Origin or Sec-Fetch-Site, so the Host and token checks apply to them.
@@ -117,7 +130,9 @@ export const requestGuard: MiddlewareHandler = async (c, next) => {
   }
   const type = (c.req.header('content-type') ?? '').split(';')[0].trim().toLowerCase();
   if (SIMPLE_TYPES.includes(type)) return refuse('send JSON', 415);
-  if (!(c.req.method === 'GET' && c.req.path === PROOF_PATH) && !isWebhookPost(c)) {
+  const desktop = c.req.method === 'GET' && c.req.path === DESKTOP_PAIR_PATH;
+  if (desktop && !desktopPairAllowed(c)) return refuse('desktop pairing is only from this machine');
+  if (!desktop && !(c.req.method === 'GET' && c.req.path === PROOF_PATH) && !isWebhookPost(c)) {
     if (!tokenMatches(bearer(c) ?? getCookie(c, cookieName()))) return refuse("Unauthorized: send this install's token (data/api-token), or pair this browser", 401);
   }
   const owners = resolved.tailscaleLogins();

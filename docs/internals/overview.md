@@ -51,6 +51,7 @@ The two clients are kept apart so a change to one cannot break the other:
 - `apps/server/tests/mac-fixtures.test.ts` pins the JSON the Mac app reads from the server, so a server change that would break the app fails `npm test`.
 - Some screens copy a Web UI rule (transcript grouping, status line, format helpers). Those are ported to Swift with their own tests, not imported. A Web UI change to one of them should say whether the Mac app needs it too ([ADR 0002](../adr/0002-mac-app-is-a-client.md)).
 - Mac-only details (project layout, the OmniKit files, the QA harness): `apps/mac/NOTES.md`.
+- The Linux app (`apps/linux`) is a launcher around this Web UI, not a third screen to port. It starts the server and opens an app window. See [ADR 0006](../adr/0006-linux-app-is-a-window.md).
 
 ## Layout
 
@@ -64,6 +65,7 @@ apps/server/                @omni/server: Hono API (*-api.ts), runner/, harness/
 apps/mcp/                   @omni/mcp: omni.ts, the conductor tools; ask.ts, ask_user_question for every thread; threads.ts, read_referenced_thread for every thread but the conductor's
 apps/web/                   @omni/web: Web UI (React, Vite)
 apps/mac/                   @omni/mac: SwiftUI app (Omni/), OmniKit package, slash engine entry and bundler
+apps/linux/                 @omni/linux: desktop launcher for Linux. Starts the server and opens the Web UI in an app window
 packages/shared/            @omni/shared: pure TypeScript both clients use (slash grammar, menu, pills)
 packages/test-fixtures/     @omni/test-fixtures: fake CLIs and corpora the TS and Swift tests share
 packages/typescript-config/ @omni/typescript-config: the tsconfig bases every package extends
@@ -72,7 +74,7 @@ automations/                shared automation YAML, cron or events (yours go in 
 prototypes/                 standalone experiments (not npm workspaces; see prototypes/README.md)
 omni.config.example.json    every field of data/omni.config.json
 mods/                       Claude Code mods loaded with OMNI_MODS=1 (omni-progress)
-scripts/                    shell shim, Mac build, QA stack, PR screenshots, launchd install, docs-daily
+scripts/                    shell shim, Mac build, Linux launcher, QA stack, PR screenshots, launchd install, docs-daily
 docs/                       user guides (user/), architecture (internals/), ADRs (adr/), PR screenshot guide
 supabase/                   sync relay migration
 CONTEXT.md                  domain glossary (channel, thread, harness, crew...)
