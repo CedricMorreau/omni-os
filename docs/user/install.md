@@ -96,7 +96,7 @@ Running it again is safe: every answer defaults to what is saved. `npm run setup
 
 `scripts/build-mac.sh --no-open` installs without opening, and arguments after `--` go to the app (`-- -serverPort 4759`). You can also open `apps/mac/Omni.xcodeproj` in Xcode and run the `Omni` scheme; it finds the server on :4747 or starts one from the repo.
 
-Optional: `scripts/install-launchd.sh` installs a LaunchAgent that starts the server at login, restarts it if it dies and keeps the Mac awake while it runs (`--uninstall` removes it). Skip it when you use the Mac app.
+The Mac app and the Linux app own the server the way a desktop app owns its backend: opening the app starts it, quitting stops it. Quitting while turns run asks whether to keep the server running for them. Omni no longer ships a LaunchAgent; the Mac app turns off an old `com.omni-os.server` agent at launch and renames its plist to `.plist.disabled`. On a Mac the server keeps the machine from idle-sleeping while it runs (`OMNI_CAFFEINATE=0` turns that off).
 
 Reaching it from your phone: [Remote access](remote-access.md).
 
@@ -110,11 +110,20 @@ Pulls your existing Claude Code sessions into Omni as resumable threads.
 
 ## Updating
 
+Click **Update**. The server checks origin's `main` every 15 minutes. When `main` has commits the running server or the Mac app lacks, an Update notice shows in the Mac app, in the desktop Web UI's sidebar and on the phone's Activity screen. One click:
+
+1. waits until no turn runs (Cancel stops the wait),
+2. runs `scripts/sync-main.sh`, which puts the main checkout on `main`, level with origin (it refuses when tracked files have changes, leaves worktrees alone, and runs `npm install` when `package-lock.json` changed),
+3. rebuilds the Web UI and restarts the server,
+4. in the Mac app, when the app itself is behind, rebuilds and relaunches it.
+
+Update needs an app that started the server: the Mac app or the Linux app. A server you run with `npm run dev` or `npm start` shows the notice without the button; update it by hand:
+
 ```bash
 git pull                  # a fork: git fetch upstream && git merge upstream/main
 npm install --include=dev
-scripts/build-mac.sh      # Mac: rebuilds and reinstalls the app
+scripts/build-mac.sh      # Mac: rebuilds and reinstalls the app (syncs main first; --no-sync builds the branch you are on)
 scripts/install-linux.sh  # Linux: rebuilds the Web UI and the launcher
 ```
 
-Restart the server if you run it with `npm run dev` or `npm start`. The Mac app restarts its own. On a Mac, Rebuild and Relaunch, Restart Server and `scripts/build-mac.sh` first run `scripts/sync-main.sh`, which puts the checkout on `main`, level with origin. It refuses when tracked files have changes, and leaves worktrees alone. Pass `--no-sync` to `build-mac.sh` to build the branch you are on. A fork merges cleanly as long as your settings stay in `data/`; see [FORKING.md](../../FORKING.md).
+The Conductor reaches the same button through its `omni_update` tool. `OMNI_UPDATE_CHECK=0` turns the check off. A fork merges cleanly as long as your settings stay in `data/`; see [FORKING.md](../../FORKING.md).

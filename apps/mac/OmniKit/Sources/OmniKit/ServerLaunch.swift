@@ -210,6 +210,8 @@ public enum ServerEnvironment {
     env["NODE_ENV"] = "production"
     env["NODE_OPTIONS"] = "--disable-warning=ExperimentalWarning"
     env["OMNI_PORT"] = String(port)
+    // The app starts the server again when it exits for an update, so the server offers Update (apps/server/update.ts).
+    env["OMNI_SUPERVISOR"] = "mac"
     env.merge(extra) { $1 }
     return env.filter { !isBlocked($0.key) }
   }

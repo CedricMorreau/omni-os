@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { appUrl, browserCommand, desktopEntry, escapeDesktop, execOfDesktop, installPlan, windowArgs } from '../src/desktop.ts';
 import {
   checkoutMessage, checkoutProblem, childEnv, classifyAnswer, decide, extractPath, formatVersion,
-  orderedNodeBins, parseNodeVersion, pickNode, probePort, proofFor, settleProbe, tokenFile, waitForReady,
+  orderedNodeBins, parseNodeVersion, pickNode, probePort, proofFor, settleProbe, shouldRestart, tokenFile, waitForReady,
 } from '../src/launch.ts';
 import { acquireInstance, releaseInstance, stopGroup } from '../src/process.ts';
 import { parseArgs, run } from '../src/run.ts';
@@ -80,6 +80,7 @@ describe('server env', () => {
     expect(env.PATH).toBe('/home/me/.local/bin:/usr/bin');
     expect(env.NODE_ENV).toBe('production');
     expect(env.OMNI_PORT).toBe('4747');
+    expect(env.OMNI_SUPERVISOR).toBe('linux');
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.OMNI_TOKEN).toBeUndefined();
@@ -241,5 +242,15 @@ describe('probe', () => {
     expect((await probePort(9, token, fetchRefused)).kind).toBe('free');
     const fetchTimeout: typeof fetch = async () => { throw new DOMException('timed out', 'TimeoutError'); };
     expect((await probePort(9, token, fetchTimeout)).kind).toBe('slow');
+  });
+});
+
+describe('shouldRestart', () => {
+  it('starts the server again only after Update, and not in a loop', () => {
+    expect(shouldRestart(75, 60_000)).toBe(true);
+    expect(shouldRestart(75, 2_000)).toBe(false);
+    expect(shouldRestart(0, 60_000)).toBe(false);
+    expect(shouldRestart(1, 60_000)).toBe(false);
+    expect(shouldRestart(null, 60_000)).toBe(false);
   });
 });

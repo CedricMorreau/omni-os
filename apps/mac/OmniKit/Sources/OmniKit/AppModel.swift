@@ -172,12 +172,21 @@ public final class AppModel {
   }
 
   /// Opens the feed, checks the server and starts following the settings. Once.
-  public func launch() {
+  /// - Parameter startingServer: start the server, or attach to one that answers, as the app opens. The app does;
+  ///   tests and QA runs start it themselves. A run with launch arguments (`isVolatile`) leaves the old LaunchAgent alone.
+  public func launch(startingServer: Bool = false, retiring agent: LegacyLaunchAgent = LegacyLaunchAgent()) {
     guard !launched else { return }
     launched = true
     feed.start()
     store.start()
-    checkServer()
+    if startingServer {
+      Task { [weak self, settings] in
+        if !settings.isVolatile { await agent.retire() }
+        await self?.startServer()
+      }
+    } else {
+      checkServer()
+    }
     monitor.start()
     watchers.append(Task { [weak self, settings] in
       for await config in Observations({ settings.config }) {

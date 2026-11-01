@@ -74,7 +74,7 @@ automations/                shared automation YAML, cron or events (yours go in 
 prototypes/                 standalone experiments (not npm workspaces; see prototypes/README.md)
 omni.config.example.json    every field of data/omni.config.json
 mods/                       Claude Code mods loaded with OMNI_MODS=1 (omni-progress)
-scripts/                    shell shim, Mac build, Linux launcher, QA stack, PR screenshots, launchd install, docs-daily
+scripts/                    shell shim, Mac build, Linux launcher, QA stack, PR screenshots, sync-main (Update), docs-daily
 docs/                       user guides (user/), architecture (internals/), ADRs (adr/), PR screenshot guide
 CONTEXT.md                  domain glossary (channel, thread, harness, crew...)
 CONTRIBUTING.md             dev setup, checks and what a PR needs

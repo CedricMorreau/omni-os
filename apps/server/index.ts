@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { config, paths } from './config.ts';
@@ -40,6 +41,7 @@ const { recoverHandoffs } = await import('./handoff.ts');
 const { startWorktreeRetention } = await import('./worktree-cleanup.ts');
 const { migrateLegacyConfig } = await import('./config-migrate.ts');
 const { computerName } = await import('./sync/devices.ts');
+const { onRestart, RESTART_EXIT_CODE, startUpdateCheck } = await import('./update.ts');
 
 // An install from before data/omni.config.json keeps its old settings and skips onboarding.
 migrateLegacyConfig();
@@ -81,6 +83,15 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   startCatalogRefresh();
   // With this Mac's retention policy on (Settings > Machines), removes idle worktrees that hold nothing unsaved, now and daily.
   startWorktreeRetention();
+  // The Mac stays awake while the server runs, as the old LaunchAgent's caffeinate kept it: phones reach it over the
+  // tailnet. -w ends caffeinate with this process. OMNI_CAFFEINATE=0 turns it off.
+  if (process.platform === 'darwin' && process.env.OMNI_CAFFEINATE !== '0') {
+    spawn('/usr/bin/caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' })
+      .on('error', (err) => console.error('[omni] caffeinate:', err.message))
+      .unref();
+  }
+  // Looks for new commits on main now and then, for the Update button (update.ts). Off with OMNI_UPDATE_CHECK=0.
+  startUpdateCheck();
   // Off unless the sync credentials are in the secret store; then it runs alongside, and a failure only logs.
   // Omni Connect after sync: it needs the machine id sync arms. Off unless turned on in Settings.
   startSync()
@@ -98,7 +109,8 @@ holdIdleSockets(server as Server);
 
 // Close warm claude processes so none outlive the server. A second signal exits at once.
 let exiting = false;
-const shutdown = (sig: string) => {
+// Update exits with RESTART_EXIT_CODE, which tells the app that started the server to start it again.
+const shutdown = (sig: string, code = 0) => {
   if (exiting) process.exit(1);
   exiting = true;
   console.log(`[omni] ${sig}, closing live sessions`);
@@ -106,11 +118,12 @@ const shutdown = (sig: string) => {
   closeAllTerminals();
   stopAllRuns();
   stopConnect();
-  setTimeout(() => process.exit(0), 6000).unref();
+  setTimeout(() => process.exit(code), 6000).unref();
   void shutdownAll().finally(() => {
     closeAllBrowsers();
-    process.exit(0);
+    process.exit(code);
   });
 };
+onRestart(() => shutdown('update', RESTART_EXIT_CODE));
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));

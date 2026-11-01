@@ -16,7 +16,7 @@ public enum ServerProcess {
   static let logLimit: UInt64 = 10 << 20
 
   /// Starts the server in a session and process group of its own, stdin from /dev/null, stdout and stderr
-  /// appended to `log`. Nothing ties it to the app: it keeps running when the app quits.
+  /// appended to `log`. A quit stops it (`AppModel.prepareToQuit`) unless Ben keeps it for running turns.
   public static func spawn(_ launch: ServerLaunch, log: URL) throws(ServerStartError) -> SpawnedServer {
     let fm = FileManager.default
     do {

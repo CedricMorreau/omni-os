@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { HARNESS_ROWS, harnessLabel, OmniMark } from '../components/brand.tsx';
 import { useLiveThreads } from '../components/ThreadList.tsx';
 import { Segmented } from '../components/ui.tsx';
+import { UpdateNotice } from '../components/UpdateNotice.tsx';
 import { plural, windowPct } from '../format.ts';
 import { href } from '../router.ts';
 import { recentThreadGroups, recentThreads, runningThreadGroups, type ThreadRowGroup } from '../sidebar-lists.ts';
@@ -52,6 +53,7 @@ export function ActivityScreen() {
         <div>
           <MoTitle title="Activity" sub={`${date} · ${a.running.length} running · ${a.needs.length} ${a.needs.length === 1 ? 'needs' : 'need'} you`} />
           <UsageMeters usage={usage} />
+          <UpdateNotice className="mx-4 mb-3" />
           <div className="px-4">
             <Segmented
               label="Filter"

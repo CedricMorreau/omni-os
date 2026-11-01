@@ -345,7 +345,30 @@ export type FeedEvent =
   | { type: 'needs_you'; thread_id: string }
   /** A delivery to this automation was saved or changed state. */
   | { type: 'automation_delivery'; automation: string }
+  /** The update check or Update moved on: refetch GET /api/update. */
+  | { type: 'update' }
   | { type: 'reconnect' };
+
+/** GET /api/update (apps/server/update.ts): how far this server is behind main, and where Update is. */
+export interface UpdateCommit {
+  sha: string;
+  subject: string;
+}
+
+export type UpdatePhase = 'idle' | 'waiting' | 'updating' | 'restarting' | 'failed';
+
+export interface UpdateView {
+  current: string | null;
+  target: string | null;
+  behind: number;
+  commits: UpdateCommit[];
+  checkedAt: string | null;
+  phase: UpdatePhase;
+  waitingFor: number;
+  error: string | null;
+  /** An app started this server and starts it again, so Update can run. */
+  canApply: boolean;
+}
 
 // ---------- fetch helpers ----------
 

@@ -48,7 +48,7 @@ struct ServerView: View {
           .font(.omni(size: 22, weight: .medium))
           .tracking(-0.22)
           .foregroundStyle(Tok.fg)
-        Text("Start it here, or run npm start in the repo. It keeps running when the app quits.")
+        Text("The app starts it when it opens and stops it when it quits. Start it here, or run npm start in the repo.")
           .font(.omni(size: 13.5))
           .foregroundStyle(Tok.fg3)
           .multilineTextAlignment(.center)

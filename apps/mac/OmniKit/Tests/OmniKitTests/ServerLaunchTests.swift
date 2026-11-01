@@ -180,7 +180,7 @@ struct ServerEnvironmentTests {
       "HOME": NSHomeDirectory(), "USER": NSUserName(), "LOGNAME": NSUserName(), "SHELL": "/bin/zsh",
       "TMPDIR": NSTemporaryDirectory(), "LANG": "en_GB.UTF-8",
       "PATH": "/node/bin:/login/bin", "NODE_ENV": "production", "NODE_OPTIONS": "--disable-warning=ExperimentalWarning",
-      "OMNI_PORT": "4757",
+      "OMNI_PORT": "4757", "OMNI_SUPERVISOR": "mac",
     ])
   }
 
@@ -243,6 +243,7 @@ struct ServerLauncherTests {
     #expect(lines.contains("NODE_ENV=production"))
     #expect(lines.contains("NODE_OPTIONS=--disable-warning=ExperimentalWarning"))
     #expect(lines.contains("OMNI_PORT=4757"))
+    #expect(lines.contains("OMNI_SUPERVISOR=mac"))
     #expect(lines.contains("OMNI_DATA_DIR=/tmp/omni-data"))
     #expect(!out.contains("API_KEY"), "no key from the login shell or the app")
     #expect(!out.contains("XPC_SERVICE_NAME"))

@@ -64,7 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    model.launch()
+    // Opening the app starts the server, and quitting it stops it (unless turns run and Ben keeps it).
+    #if DEBUG
+    model.launch(startingServer: qa == nil)
+    #else
+    model.launch(startingServer: true)
+    #endif
     updater.start()
     events = SystemEvents(model: model)
     let notifications = SystemNotifications(model: model)

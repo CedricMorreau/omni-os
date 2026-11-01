@@ -33,6 +33,13 @@ import OmniKit
     #expect(!UpdateCheck.same("3259342", main))
   }
 
+  @Test func theLineSaysHowManyCommitsWhenItKnows() {
+    #expect(UpdateNotices(serverBehind: true, behindBy: 3).label == "Omni has 3 new commits on main.")
+    #expect(UpdateNotices(appBehind: true, behindBy: 1).label == "Omni has 1 new commit on main.")
+    #expect(UpdateNotices(serverBehind: true).label == "An update is ready.")
+    #expect(UpdateNotices(serverBehind: true, behindBy: 0).label == "An update is ready.")
+  }
+
   @Test func failureLinePrefersTheScriptsOwnErrorLines() {
     let tail = ["==> Updating the checkout to main", "sync-main: the checkout has uncommitted changes on wip. Commit or stash them, then try again.", ""]
     #expect(UpdateCheck.failureLine(tail) == tail[1])

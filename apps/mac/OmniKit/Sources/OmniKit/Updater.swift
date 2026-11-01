@@ -42,8 +42,9 @@ public enum AppRebuild: Hashable, Sendable {
   case failed(String)
 }
 
-/// Notices that the server or the app is behind main, and the two things Ben can click about it. Nothing
-/// here runs without a click.
+/// Notices that the server or the app is behind main, and the one Update button that brings both level. It asks
+/// origin for main every 15 minutes and when the app comes to the front (at most every 10). Nothing is installed
+/// without a click.
 @MainActor @Observable
 public final class Updater {
   public private(set) var notices = UpdateNotices()
@@ -57,6 +58,10 @@ public final class Updater {
   @ObservationIgnored private let host: Host
   @ObservationIgnored private let appCommit: String?
   @ObservationIgnored private var watcher: Task<Void, Never>?
+  @ObservationIgnored private var ticker: Task<Void, Never>?
+  @ObservationIgnored private var lastFetch: ContinuousClock.Instant?
+  @ObservationIgnored private let fetchEvery: Duration = .seconds(10 * 60)
+  @ObservationIgnored private let checkEvery: Duration = .seconds(15 * 60)
 
   public init(model: AppModel, appCommit: String? = AppBuild.commit) {
     self.model = model
@@ -67,9 +72,10 @@ public final class Updater {
 
   isolated deinit {
     watcher?.cancel()
+    ticker?.cancel()
   }
 
-  /// Checks now and again whenever the server's state changes (a restart shows the new commit).
+  /// Checks now, whenever the server's state changes (a restart shows the new commit), and every 15 minutes.
   public func start() {
     guard watcher == nil else { return }
     watcher = Task { [weak self] in
@@ -79,10 +85,22 @@ public final class Updater {
         await self.check()
       }
     }
+    ticker = Task { [weak self, checkEvery] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: checkEvery)
+        guard let self else { return }
+        await self.check()
+      }
+    }
   }
 
+  /// Asks origin for main when the last ask is 10 minutes old, then compares the server and the app with it.
   public func check() async {
     let repo = model.settings.config.repo
+    if lastFetch.map({ ContinuousClock.now - $0 >= fetchEvery }) ?? true {
+      lastFetch = .now
+      await RepoHead.fetch(repo: repo)
+    }
     let main = await RepoHead.main(repo: repo)
     var server: String?
     if case .running(_, let info) = model.supervisor.state { server = info?.gitHead }
@@ -92,8 +110,33 @@ public final class Updater {
         containsMain[commit] = await RepoHead.contains(repo: repo, commit: commit, ancestor: main)
       }
     }
-    notices = UpdateCheck.notices(serverHead: server, appCommit: appCommit, mainHead: main, containsMain: containsMain)
+    var found = UpdateCheck.notices(serverHead: server, appCommit: appCommit, mainHead: main, containsMain: containsMain)
+    if let main, !found.isEmpty {
+      var counts: [Int] = []
+      if found.serverBehind, let server, let n = await RepoHead.count(repo: repo, from: server, to: main) { counts.append(n) }
+      if found.appBehind, let appCommit, let n = await RepoHead.count(repo: repo, from: appCommit, to: main) { counts.append(n) }
+      found.behindBy = counts.max()
+    }
+    notices = found
   }
+
+  /// The Update button: restart the server from main when it is behind (the restart waits for running turns,
+  /// updates the checkout to main and builds the Web UI), then rebuild and relaunch the app when it is behind.
+  public func update() async {
+    let rebuildAfter = notices.appBehind
+    if notices.serverBehind || !rebuildAfter {
+      await restartServer()
+      // A restart that was cancelled or failed leaves the server behind: then the app is not rebuilt either.
+      guard case .idle = restart.step, !notices.serverBehind else { return }
+      // The restart put the checkout on main, so the app is built from it as it is.
+      if rebuildAfter { await rebuildApp(sync: false) }
+    } else {
+      await rebuildApp()
+    }
+  }
+
+  /// Update is running: the restart or the rebuild.
+  public var isUpdating: Bool { restart.step.isActive || rebuild == .building }
 
   /// Restart stops a server that was started outside the app: the window says so before the click counts.
   public var restartStopsOutsideServer: Bool {
@@ -114,7 +157,8 @@ public final class Updater {
 
   /// Runs `scripts/build-mac.sh` from the repo. It quits the installed app, replaces it and opens the new one,
   /// so when this app is the installed copy the script ends it. Otherwise the new copy opens beside it.
-  public func rebuildApp() async {
+  /// - Parameter sync: false when the checkout was just put on main, so build-mac.sh skips sync-main.sh.
+  public func rebuildApp(sync: Bool = true) async {
     guard rebuild != .building else { return }
     let repo = model.settings.config.repo
     let script = repo.appending(path: "scripts/build-mac.sh")
@@ -126,7 +170,8 @@ public final class Updater {
     var env = ServerEnvironment.minimal(ProcessInfo.processInfo.environment)
     env["PATH"] = path
     let run = await ToolRun.run(
-      "/bin/bash", [script.path], environment: env, directory: repo, log: Self.appRebuildLog, timeout: .seconds(30 * 60)
+      "/bin/bash", [script.path] + (sync ? [] : ["--no-sync"]), environment: env, directory: repo, log: Self.appRebuildLog,
+      timeout: .seconds(30 * 60)
     )
     guard let run, run.code == 0 else {
       return rebuild = .failed("The rebuild failed. " + (run.flatMap { UpdateCheck.failureLine($0.tail) } ?? "See the log."))

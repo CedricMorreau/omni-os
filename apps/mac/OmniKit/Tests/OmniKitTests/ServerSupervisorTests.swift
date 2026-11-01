@@ -19,6 +19,7 @@ private struct Rig {
   var repo = repoRoot
   var node: URL?
   var startTimeout: Duration = .seconds(40)
+  var restartAfter: Duration = .seconds(10)
 
   var log: URL { dir.path("logs/server.log") }
   var record: URL { dir.path("support/server.json") }
@@ -40,7 +41,7 @@ private struct Rig {
         "OMNI_CLAUDE_BIN": repoRoot.appending(path: "packages/test-fixtures/fake-claude.mjs").path,
         "OMNI_CODEX_BIN": dir.path("none").path, "OMNI_CURSOR_BIN": dir.path("none").path,
         "OMNI_BRAIN_DIR": dir.path("brain").path, "OMNI_WEB_DIST": dir.path("none").path,
-        "OMNI_BROWSER": "0", "OMNI_HOST": "127.0.0.1",
+        "OMNI_BROWSER": "0", "OMNI_HOST": "127.0.0.1", "OMNI_UPDATE_CHECK": "0", "OMNI_CAFFEINATE": "0",
       ]
     )
   }
@@ -54,7 +55,7 @@ private struct Rig {
       config: { config },
       options: .init(
         launcher: launcher, logURL: log, recordURL: record ?? self.record, probeTimeout: .milliseconds(500),
-        startTimeout: startTimeout
+        startTimeout: startTimeout, restartAfter: restartAfter
       )
     )
   }
@@ -80,10 +81,12 @@ private func realNode() async throws -> URL {
 
 /// A Node stand-in that serves /api/status the way servers before #76 did, with no `server` object. It proves it
 /// holds the token in its data dir, as every server since the token does.
-private func oldServer(in dir: TempDir, node: URL) -> URL {
+private func oldServer(in dir: TempDir, node: URL, quitWith code: Int32? = nil) -> URL {
+  // GET /quit ends it with `code`, the way Update in the Web UI ends the server.
+  let quit = code.map { "if (q.url === '/quit') { s.end('{}'); return setTimeout(() => process.exit(\($0)), 50); } " } ?? ""
   let js = """
     const t = require('fs').readFileSync(process.env.OMNI_DATA_DIR + '/api-token', 'utf8').trim(); \
-    require('http').createServer((q, s) => { s.setHeader('content-type', 'application/json'); \
+    require('http').createServer((q, s) => { s.setHeader('content-type', 'application/json'); \(quit)\
     const n = q.url.match(/^[/]api[/]auth[/]proof[?]nonce=([0-9a-f]+)/); \
     if (n) return s.end(JSON.stringify({ proof: require('crypto').createHmac('sha256', t).update('omni-proof:' + process.env.OMNI_PORT + ':' + n[1]).digest('hex') })); \
     s.end(JSON.stringify({ usage: {}, slots: {}, running: 0, queued: 0, maxConcurrent: 4, maxUploadMb: 25 })) })\
@@ -494,6 +497,35 @@ struct ServerSupervisorTests {
     #expect(again.state == .notRunning)
     #expect(!processAlive(record.pid))
     #expect(ServerRecord.load(from: rig.record) == nil)
+  }
+
+  @Test func startsTheServerAgainWhenItExitsForAnUpdate() async throws {
+    var rig = Rig()
+    defer { rig.cleanUp() }
+    rig.node = oldServer(in: rig.dir, node: try await realNode(), quitWith: ServerSupervisor.restartExitCode)
+    rig.restartAfter = .zero
+    let supervisor = rig.supervisor()
+    await supervisor.start()
+    let first = try #require(ServerRecord.load(from: rig.record))
+    _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(rig.port)/quit")!)
+    try await waitFor("started again", within: .seconds(20)) {
+      rig.starts() == 2 && supervisor.state == .running(startedByApp: true, server: nil)
+    }
+    #expect(!processAlive(first.pid))
+    #expect(ServerRecord.load(from: rig.record)?.pid != first.pid)
+    await supervisor.stop()
+  }
+
+  @Test func aServerThatExitsForAnUpdateRightAfterItsStartIsNotStartedAgain() async throws {
+    var rig = Rig()
+    defer { rig.cleanUp() }
+    rig.node = oldServer(in: rig.dir, node: try await realNode(), quitWith: ServerSupervisor.restartExitCode)
+    rig.restartAfter = .seconds(600)
+    let supervisor = rig.supervisor()
+    await supervisor.start()
+    _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(rig.port)/quit")!)
+    try await waitFor("not running", within: .seconds(10)) { supervisor.state == .notRunning }
+    #expect(rig.starts() == 1)
   }
 
   @Test func doesNotStartASecondServerOnAnotherPort() async throws {

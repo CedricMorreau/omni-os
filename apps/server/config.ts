@@ -5,7 +5,7 @@ import { configPath, resolved } from './user-config.ts';
 /** The repo root: data/, crew/, automations/ and mods/ live here, beside apps/ and packages/. */
 export const ROOT = resolve(import.meta.dirname, '../..');
 
-// Minimal .env loader so the launchd service and `npm run dev` read the same config.
+// Minimal .env loader so a server the Mac or Linux app starts and `npm run dev` read the same config.
 const envFile = join(ROOT, '.env');
 if (existsSync(envFile)) {
   for (const line of readFileSync(envFile, 'utf8').split('\n')) {
