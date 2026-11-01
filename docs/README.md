@@ -10,6 +10,7 @@
 - [Automations](user/automations.md): cron, GitHub PR events, published pages and signed GitHub webhooks
 - [Sync between two Macs](user/sync.md)
 - [Remote access and security](user/remote-access.md), including the phone layout and home-screen setup
+- [Omni Connect](user/omni-connect.md): open any machine from a phone through your relay, without Tailscale
 - [Link previews](user/link-previews.md)
 - [Mods](user/mods.md)
 - [Other ways in](user/entry-points.md): shell, Quick Prompt, history import, brain export
@@ -33,7 +34,7 @@ Start with [CONTRIBUTING.md](../CONTRIBUTING.md). Agents also read [CLAUDE.md](.
 - [Prototypes](../prototypes/README.md): standalone experiments outside the apps and packages
 - [Screenshots on PRs](pr-screenshots.md)
 - Reviews: [2026-10-31 consolidation release, the KPIs re-measured](reviews/2026-10-31-consolidation-review.md) · [2026-10-22 bloat and dead code](reviews/2026-10-22-thermo-bloat-review.html) · [2026-10-16 thermo](reviews/2026-10-16-thermo-review.html)
-- Decisions: [0001 Codex app-server](adr/0001-codex-app-server.md) · [0002 Mac app is a client](adr/0002-mac-app-is-a-client.md) · [0003 Hermes remote harness](adr/0003-hermes-remote-harness.md) · [0004 Supabase sync](adr/0004-supabase-sync.md) · [0005 One execution owner](adr/0005-one-execution-owner.md) · [0006 Linux app is a window](adr/0006-linux-app-is-a-window.md) · [0007 Google sign-in through Clerk](adr/0007-google-sign-in-through-clerk.md) · [0008 Cloudflare relay](adr/0008-cloudflare-relay.md)
+- Decisions: [0001 Codex app-server](adr/0001-codex-app-server.md) · [0002 Mac app is a client](adr/0002-mac-app-is-a-client.md) · [0003 Hermes remote harness](adr/0003-hermes-remote-harness.md) · [0004 Supabase sync](adr/0004-supabase-sync.md) · [0005 One execution owner](adr/0005-one-execution-owner.md) · [0006 Linux app is a window](adr/0006-linux-app-is-a-window.md) · [0007 Google sign-in through Clerk](adr/0007-google-sign-in-through-clerk.md) · [0008 Cloudflare relay](adr/0008-cloudflare-relay.md) · [0009 Omni Connect](adr/0009-omni-connect.md)
 
 ## Where a new doc goes
 

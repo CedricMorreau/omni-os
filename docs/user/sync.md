@@ -6,7 +6,7 @@ Optional. Each Mac keeps its own SQLite as the source of truth. A relay you depl
 
 You need a Cloudflare account (the free plan is enough) and Google sign-in set up in Omni, with your Google account linked in Settings > Machines ([remote access](remote-access.md)).
 
-1. Run `npm run relay:config` on that Omni. It prints the steps with your Clerk app and user id filled in: `wrangler login`, create the `omni-relay` R2 bucket, `wrangler deploy` from `apps/relay`, then set the Worker's three secrets (`CLERK_ISSUER`, `CLERK_CLIENT_ID`, `ALLOWED_USERS`).
+1. Run `npm run relay:config` on that Omni. It prints the steps with your Clerk app and user id filled in: `wrangler login`, create the `omni-relay` R2 bucket, `wrangler deploy` from `apps/relay`, then set the Worker's three secrets (`CLERK_ISSUER`, `CLERK_CLIENT_ID`, `ALLOWED_USERS`). It also prints the four optional Cloudflare secrets [Omni Connect](omni-connect.md) needs.
 2. `wrangler deploy` prints the relay's URL, like `https://omni-relay.<account>.workers.dev`. Opening `<url>/v1/info` shows the Clerk app it trusts.
 
 Later updates are `npx wrangler deploy` from `apps/relay` again. The secrets stay. To let another Clerk user in, or take one out, run `npx wrangler secret put ALLOWED_USERS` with the ids separated by commas. Taking a user out signs out all of that user's machines at once.
@@ -15,7 +15,7 @@ Later updates are `npx wrangler deploy` from `apps/relay` again. The secrets sta
 
 Open Settings > Machines (web `#/settings/machines`, where the old `#/sync` also lands; the Mac app's Machines tab; on the phone, Settings, Machines). Under Sync, paste the relay URL and press Sign in with Google. Omni shows a code and opens Clerk's page. Check the page shows the same code, then approve as the Google account on `ALLOWED_USERS`. The first sign-in queues this Mac's existing history, and the other Mac pulls it.
 
-Omni keeps the relay URL and this machine's relay token in the secret store: the Keychain on a Mac, `data/secrets.json` on Linux. They are global and never passed to threads. The Google sign-in itself is not kept. Sign Out ends this machine's token on the relay and removes both. Pause keeps them.
+Omni keeps the relay URL and this machine's relay token in the secret store: the Keychain on a Mac, `data/secrets.json` on Linux. They are global and never passed to threads. The Google sign-in itself is not kept. Sign Out ends this machine's token on the relay and removes both, and the relay deletes the machine's [Omni Connect](omni-connect.md) tunnel. Pause keeps them. Omni Connect uses this same relay sign-in.
 
 Every machine has to use the Clerk app the relay trusts. If they differ, setup says so before it asks Clerk. A Google account that is not on `ALLOWED_USERS` is refused with its Clerk user id, so you can add it.
 

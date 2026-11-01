@@ -13,7 +13,19 @@ import { cookieName, sessionCookieName, tokenMatches } from './api-token.ts';
 import { config } from './config.ts';
 import { resolved } from './user-config.ts';
 
-/** Names the server answers to: loopback, the tailnet (tailscale serve), OMNI_HOST, and OMNI_ALLOWED_HOSTS. */
+/** This machine's Omni Connect hostname while Connect is on (connect/service.ts). app.ts sets it, so the tests never open the db. */
+let connectHost: () => string | null = () => null;
+export const useConnectHost = (fn: typeof connectHost) => {
+  connectHost = fn;
+};
+
+/** The Host is this machine's own Omni Connect hostname: the request came through its Cloudflare tunnel. */
+export const viaConnect = (hostname: string) => {
+  const own = connectHost();
+  return !!own && hostname.toLowerCase().replace(/\.$/, '') === own;
+};
+
+/** Names the server answers to: loopback, the tailnet (tailscale serve), the Omni Connect hostname, OMNI_HOST, and OMNI_ALLOWED_HOSTS. */
 export function hostAllowed(hostname: string, extra: readonly string[] = extraHosts()): boolean {
   const h = hostname.toLowerCase().replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1');
   if (!h) return false;
@@ -21,6 +33,8 @@ export function hostAllowed(hostname: string, extra: readonly string[] = extraHo
   if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
   // MagicDNS names and the 100.64.0.0/10 range belong to Tailscale. Nobody outside the tailnet can point them here.
   if (viaTailnet(h)) return true;
+  // Only Cloudflare's edge serves this name, and only through this machine's own tunnel.
+  if (viaConnect(h)) return true;
   return extra.includes(h);
 }
 
@@ -83,6 +97,14 @@ export const SIGN_IN_ROUTES: readonly (readonly [string, string])[] = [
 ];
 const isSignInRoute = (c: Context) => SIGN_IN_ROUTES.some(([m, p]) => c.req.method === m && c.req.path === p);
 
+/** Omni Connect's routes that prove themselves: the relay's signed mint and health requests, and a browser's code and key proof. */
+export const CONNECT_OPEN_ROUTES: readonly (readonly [string, string])[] = [
+  ['POST', '/api/connect/mint'],
+  ['POST', '/api/connect/health'],
+  ['POST', '/api/connect/redeem'],
+];
+const isConnectRoute = (c: Context) => CONNECT_OPEN_ROUTES.some(([m, p]) => c.req.method === m && c.req.path === p);
+
 /** How a request proved itself: the install's token, a signed-in device's session, or neither (the open routes). */
 export type OmniAuth = { via: 'token' } | { via: 'session'; session: string } | { via: 'none' };
 
@@ -116,6 +138,17 @@ export function viaTailnet(hostname: string): boolean {
  * Omni's own loopback clients and the vite dev proxy send none.
  */
 const PROXY_HEADERS = ['x-forwarded-host', 'x-forwarded-for', 'x-forwarded-proto', 'forwarded', 'tailscale-user-login', 'tailscale-funnel-request', 'cf-connecting-ip'];
+
+/**
+ * Came in through this machine's Connect tunnel, not tailscale serve with the Connect name as its Host. tailscale
+ * serve sets X-Forwarded-For to the peer's tailnet address (100.64.0.0/10) and adds Tailscale-User-Login for a user's
+ * device. Cloudflare appends the client's public address last, which is never in that range.
+ */
+function fromConnectTunnel(c: Context, host: string): boolean {
+  if (!viaConnect(hostnameOf(host)) || c.req.header('tailscale-user-login') !== undefined) return false;
+  const last = (c.req.header('x-forwarded-for') ?? '').split(',').at(-1)?.trim() ?? '';
+  return !viaTailnet(last);
+}
 
 /** The request came in through tailscale serve (or another proxy), whatever Host it names. */
 const cameThroughProxy = (c: Context, host: string) => viaTailnet(hostnameOf(host)) || PROXY_HEADERS.some((h) => c.req.header(h) !== undefined);
@@ -156,7 +189,7 @@ const SIMPLE_TYPES = ['text/plain', 'application/x-www-form-urlencoded'];
  * - a text/plain or form-urlencoded body, the content types that skip the preflight;
  * - no token, or the wrong one (401), in the Authorization header or the paired browser's cookie, and no live
  *   device session in either, except on the proof route, a GitHub webhook post (its own signature), GET desktop-pair
- *   from this machine, and the Google sign-in routes;
+ *   from this machine, the Google sign-in routes, and Omni Connect's signed routes (CONNECT_OPEN_ROUTES);
  * - through tailscale serve (a tailnet Host, or any proxy header), a Tailscale-User-Login that is not in
  *   `integrations.tailscaleLogin`, when that is set.
  * The Mac app, apps/mcp/omni.ts, scripts and curl send no Origin or Sec-Fetch-Site, so the Host and token checks apply to them.
@@ -181,7 +214,7 @@ export const requestGuard: MiddlewareHandler = async (c, next) => {
   if (SIMPLE_TYPES.includes(type)) return refuse('send JSON', 415);
   const desktop = c.req.method === 'GET' && c.req.path === DESKTOP_PAIR_PATH;
   if (desktop && !desktopPairAllowed(c)) return refuse('desktop pairing is only from this machine');
-  const open = desktop || (c.req.method === 'GET' && c.req.path === PROOF_PATH) || isWebhookPost(c) || isSignInRoute(c);
+  const open = desktop || (c.req.method === 'GET' && c.req.path === PROOF_PATH) || isWebhookPost(c) || isSignInRoute(c) || isConnectRoute(c);
   const given = bearer(c);
   let auth: OmniAuth = { via: 'none' };
   if (tokenMatches(given ?? getCookie(c, cookieName()))) auth = { via: 'token' };
@@ -192,7 +225,8 @@ export const requestGuard: MiddlewareHandler = async (c, next) => {
   if (auth.via === 'none' && !open) return refuse("Unauthorized: send this install's token (data/api-token), pair this browser, or sign in with Google", 401);
   c.set('omniAuth', auth);
   const owners = resolved.tailscaleLogins();
-  if (owners.length && cameThroughProxy(c, host) && !owners.includes((c.req.header('tailscale-user-login') ?? '').trim().toLowerCase())) {
+  // Through the Connect tunnel there is no Tailscale login to check: the token or a session is the control there.
+  if (owners.length && cameThroughProxy(c, host) && !fromConnectTunnel(c, host) && !owners.includes((c.req.header('tailscale-user-login') ?? '').trim().toLowerCase())) {
     return refuse('this Tailscale login is not the owner');
   }
   await next();

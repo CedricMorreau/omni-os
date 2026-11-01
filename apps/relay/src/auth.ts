@@ -84,19 +84,22 @@ export const allowedUsers = (raw: string | undefined) => new Set((raw ?? '').spl
 
 // ---------- relay tokens ----------
 
-const PREFIX = 'omni_r_';
+/** A machine's relay token. */
+export const MACHINE_PREFIX = 'omni_r_';
+/** A Connect page session (connect.ts), kept in an HttpOnly cookie on the relay's origin. */
+export const CLIENT_PREFIX = 'omni_c_';
 
-/** A new relay token for this user: the user id (so the Worker knows which Durable Object holds it) and 32 random bytes. */
-export function newToken(sub: string): string {
+/** A new token for this user: the user id (so the Worker knows which Durable Object holds it) and 32 random bytes. */
+export function newToken(sub: string, prefix = MACHINE_PREFIX): string {
   const user = btoa(sub).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const random = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${PREFIX}${user}.${random}`;
+  return `${prefix}${user}.${random}`;
 }
 
-/** The user a relay token names, or null for something that is not one. Says nothing about whether it is live. */
-export function tokenUser(token: string | null | undefined): string | null {
-  if (!token?.startsWith(PREFIX)) return null;
-  const [user, random] = token.slice(PREFIX.length).split('.');
+/** The user a token with this prefix names, or null for something that is not one. Says nothing about whether it is live. */
+export function tokenUser(token: string | null | undefined, prefix = MACHINE_PREFIX): string | null {
+  if (!token?.startsWith(prefix)) return null;
+  const [user, random] = token.slice(prefix.length).split('.');
   if (!user || !random || !/^[0-9a-f]{64}$/.test(random)) return null;
   try {
     return new TextDecoder().decode(b64urlBytes(user)) || null;
