@@ -65,8 +65,24 @@ describe('/mcp: who gets in', () => {
   it('refuses a host outside the allowed names and a cross-site origin, token or not', async () => {
     expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { host: 'evil.example' })).status).toBe(403);
     expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { origin: 'https://evil.example' })).status).toBe(403);
-    // Funnel and tailscale serve keep the MagicDNS name.
-    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { host: 'mac.tail1234.ts.net', 'tailscale-funnel-request': '?1' })).status).toBe(200);
+    // tailscale serve keeps the MagicDNS name.
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { host: 'mac.tail1234.ts.net', 'x-forwarded-for': '100.101.1.2' })).status).toBe(200);
+  });
+
+  it("takes the Cloudflare Tunnel's name once integrations.mcpPublicUrl names it, and /api still refuses it", async () => {
+    const tunnel = { host: 'omni.example.com', 'x-forwarded-proto': 'https', 'x-forwarded-for': '203.0.113.9', 'cf-connecting-ip': '203.0.113.9' };
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, tunnel)).status).toBe(403);
+    process.env.OMNI_MCP_PUBLIC_URL = 'https://Omni.Example.com/';
+    try {
+      expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, tunnel)).status).toBe(200);
+      expect((await post('/mcp', 'initialize', init, { ...tunnel, authorization: `Bearer ${MCP_TOKEN}` })).status).toBe(200);
+      expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { ...tunnel, host: 'other.example.com' })).status).toBe(403);
+      // An ingress that forwards every path still opens nothing else: /api answers only to its own names.
+      const api = await app.request('http://127.0.0.1:4747/api/threads', { headers: { ...tunnel, authorization: `Bearer ${API_TOKEN}` } });
+      expect(api.status).toBe(403);
+    } finally {
+      delete process.env.OMNI_MCP_PUBLIC_URL;
+    }
   });
 
   it('is stateless: GET and DELETE answer 405', async () => {
@@ -260,9 +276,15 @@ describe('/mcp: Google sign-in through Clerk', () => {
         resource_name: 'Omni',
       });
     }
-    // Through Funnel: the https .ts.net address the client used.
-    const funnel = await get('/.well-known/oauth-protected-resource/mcp', { host: 'mac.tail1234.ts.net', 'x-forwarded-proto': 'https', 'tailscale-funnel-request': '?1' });
-    expect(((await funnel.json()) as { resource: string }).resource).toBe('https://mac.tail1234.ts.net/mcp');
+    // Through a Cloudflare Tunnel: the https public address the client used.
+    process.env.OMNI_MCP_PUBLIC_URL = 'https://omni.example.com';
+    try {
+      const tunnel = await get('/.well-known/oauth-protected-resource/mcp', { host: 'omni.example.com', 'x-forwarded-proto': 'https', 'cf-connecting-ip': '203.0.113.9' });
+      expect(((await tunnel.json()) as { resource: string }).resource).toBe('https://omni.example.com/mcp');
+    } finally {
+      delete process.env.OMNI_MCP_PUBLIC_URL;
+    }
+    expect((await get('/.well-known/oauth-protected-resource', { host: 'omni.example.com' })).status).toBe(403);
     expect((await get('/.well-known/oauth-protected-resource', { host: 'evil.example' })).status).toBe(403);
   });
 

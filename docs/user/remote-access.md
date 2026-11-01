@@ -70,7 +70,7 @@ Through `tailscale serve`, set `integrations.tailscaleLogin` in `data/omni.confi
 
 The token stops other macOS accounts, other tailnet devices and anything else that reaches the port. It does not stop a web page from using a paired browser's cookie, so `apps/server/request-guard.ts` also refuses:
 
-- a `Host` that is not loopback, a `.ts.net` name, a 100.64.0.0/10 address, `OMNI_HOST` or one listed in `OMNI_ALLOWED_HOSTS` (comma-separated). This stops DNS rebinding.
+- a `Host` that is not loopback, a `.ts.net` name, a 100.64.0.0/10 address, `OMNI_HOST` or one listed in `OMNI_ALLOWED_HOSTS` (comma-separated). This stops DNS rebinding. The Cloudflare Tunnel name in `integrations.mcpPublicUrl` is not on this list: only `/mcp` and `/.well-known` answer to it.
 - `Sec-Fetch-Site: cross-site`, and any `Origin` (`null` included) that is not the host the request came in on.
 - `text/plain` and form-urlencoded bodies (415), the types a page can send without a CORS preflight.
 
