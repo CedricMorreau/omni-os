@@ -1,8 +1,10 @@
+import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { config, paths } from './config.ts';
 import { releaseLock, takeLock } from './lock.ts';
 import { about } from './about.ts';
 import { isLoopback } from './loopback.ts';
+import { holdIdleSockets } from './keep-alive.ts';
 
 // Boot order: the data dir's lock, then the database, then the port, and only then the threads.
 // So a second server on the same data, or on the same port, exits having changed nothing.
@@ -91,6 +93,8 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   console.log(`[omni] listening on http://${config.host}:${info.port}  workspace=${config.brainDir}  token=${process.env.OMNI_TOKEN ? 'OMNI_TOKEN' : tokenPath()}`);
 });
 server.once('error', onBindError);
+// Idle sockets outlive the proxies' own idle timeout, so tailscale serve never sends on one Node is closing (keep-alive.ts).
+holdIdleSockets(server as Server);
 
 // Close warm claude processes so none outlive the server. A second signal exits at once.
 let exiting = false;
