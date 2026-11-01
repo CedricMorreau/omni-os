@@ -63,7 +63,6 @@ struct SettingsScopeBar: View {
       Text(model.scopedChannel == nil ? "Showing this machine's values. Pick a channel to see its own." : "Showing what this channel sets and what it inherits.")
         .font(.omni(size: 12.5))
         .foregroundStyle(Tok.fg3)
-        .fixedSize(horizontal: false, vertical: true)
     }
   }
 }
@@ -235,10 +234,11 @@ struct ChannelModelCard: View {
 
   var body: some View {
     let set = channel.runDefaults.setsRun
+    let resetAction: (() -> Void)? = busy ? nil : { reset() }
     SettingsCard(
       title: "Default model for new threads",
       note: "What a new thread in this channel starts on. A thread or crew role that picks its own wins.",
-      trailing: { OriginChip(of: set ? .channel : .default, label: set ? "Set on #\(channel.name)" : "Built-in default: Auto", reset: busy ? nil : reset) }
+      trailing: { OriginChip(of: set ? .channel : .default, label: set ? "Set on #\(channel.name)" : "Built-in default: Auto", reset: resetAction) }
     ) {
       HStack(spacing: z(10)) {
         Text(runDefaultLabel(channel, harnesses: harnesses)).font(.omni(size: 13.5)).foregroundStyle(Tok.fg)

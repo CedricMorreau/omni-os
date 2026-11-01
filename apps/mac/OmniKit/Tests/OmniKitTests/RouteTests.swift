@@ -50,8 +50,8 @@ import OmniKit
   /// The pages Settings replaced (#404) keep their hashes, on the web and here.
   @Test func takesThePagesSettingsReplaced() {
     #expect(Route(hash: "#/secrets") == .settings(.secrets))
-    #expect(Route(hash: "#/sync") == .settings(.machines))
-    #expect(Route(hash: "#/storage") == .settings(.machines))
+    #expect(Route(hash: "#/sync") == .settings(.sync))
+    #expect(Route(hash: "#/storage") == .settings(.worktrees))
     #expect(Route(hash: "#/sync/x") == .notFound(path: "/sync/x"))
   }
 

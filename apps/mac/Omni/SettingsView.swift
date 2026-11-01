@@ -87,7 +87,7 @@ private struct SettingsDetail: View {
     VStack(alignment: .leading, spacing: 0) {
       VStack(alignment: .leading, spacing: z(6)) {
         Text(section.title).font(.omni(size: 24, weight: .medium)).tracking(-0.24).foregroundStyle(Tok.fg)
-        Text(section.blurb).font(.omni(size: 13)).foregroundStyle(Tok.fg3).fixedSize(horizontal: false, vertical: true)
+        Text(section.blurb).font(.omni(size: 13)).foregroundStyle(Tok.fg3)
         if section.scoped == true {
           SettingsScopeBar(model: model).padding(.top, z(8))
         }
