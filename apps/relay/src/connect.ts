@@ -71,7 +71,7 @@ export class ConnectStore {
     private readonly cf: CloudflareApi | null,
     private readonly zone: string | null,
     private readonly user: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
     private readonly now: () => number = Date.now,
   ) {
     sql.exec(`CREATE TABLE IF NOT EXISTS connect_machines (
@@ -100,8 +100,11 @@ export class ConnectStore {
 
   private async key(): Promise<{ privateJwk: JsonWebKey; publicJwk: EcJwk }> {
     const [row] = this.sql.exec('SELECT private_jwk, public_jwk FROM connect_key WHERE id = 1').toArray() as { private_jwk: string; public_jwk: string }[];
-    if (row) return { privateJwk: JSON.parse(row.private_jwk), publicJwk: JSON.parse(row.public_jwk) };
+    if (row && publicJwk(JSON.parse(row.public_jwk))) return { privateJwk: JSON.parse(row.private_jwk), publicJwk: JSON.parse(row.public_jwk) };
     const pair = await newKeyPair();
+    if (!pair.publicJwk) throw new RelayError(500, 'The relay could not make its Connect key');
+    // A row stored without a usable public key (an earlier build) is replaced, not kept.
+    this.sql.exec('DELETE FROM connect_key WHERE id = 1');
     // A Durable Object runs one request at a time, and nothing awaits between this read and write's caller.
     this.sql.exec('INSERT OR IGNORE INTO connect_key (id, private_jwk, public_jwk) VALUES (1, ?, ?)', JSON.stringify(pair.privateJwk), JSON.stringify(pair.publicJwk));
     return this.key();

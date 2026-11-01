@@ -289,3 +289,20 @@ describe('jwt', () => {
     );
   });
 });
+
+describe('default fetch', () => {
+  it('is called without the API object as `this`, which Workers refuse (Illegal invocation)', async () => {
+    const real = globalThis.fetch;
+    let seenThis: unknown = 'unset';
+    globalThis.fetch = function (this: unknown) {
+      seenThis = this;
+      return Promise.resolve(Response.json({ success: true, result: [] }));
+    } as typeof fetch;
+    try {
+      await new CloudflareApi({ token: 't', accountId: 'acct', zoneId: 'zone', zone: 'omni-os.app' }).provision('t', 'h.omni-os.app', 4747).catch(() => undefined);
+    } finally {
+      globalThis.fetch = real;
+    }
+    expect(seenThis === undefined || seenThis === globalThis).toBe(true);
+  });
+});

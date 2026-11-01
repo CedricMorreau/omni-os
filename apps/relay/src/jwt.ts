@@ -24,7 +24,7 @@ export const randomHex = (bytes: number) => [...crypto.getRandomValues(new Uint8
 /** A public key from untrusted JSON: P-256 with x and y, nothing private. */
 export function publicJwk(v: unknown): EcJwk | null {
   const k = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
-  if (k.kty !== 'EC' || k.crv !== 'P-256' || typeof k.x !== 'string' || typeof k.y !== 'string' || 'd' in k) return null;
+  if (k.kty !== 'EC' || k.crv !== 'P-256' || typeof k.x !== 'string' || typeof k.y !== 'string' || k.d !== undefined) return null;
   if (!/^[A-Za-z0-9_-]{43}$/.test(k.x) || !/^[A-Za-z0-9_-]{43}$/.test(k.y)) return null;
   return { kty: 'EC', crv: 'P-256', x: k.x, y: k.y };
 }

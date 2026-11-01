@@ -25,7 +25,7 @@ type Envelope<T> = { success: boolean; result: T; errors?: { code: number; messa
 export class CloudflareApi {
   constructor(
     private readonly config: CloudflareConfig,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
