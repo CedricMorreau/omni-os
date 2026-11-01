@@ -60,7 +60,7 @@ const sessionCookie = (res: Response) => /omni_session_\d+=([^;]+)/.exec(res.hea
 
 describe('Google sign-in: linking the owner', () => {
   it('offers no Google sign-in until an owner is linked', async () => {
-    expect(await (await req('GET', '/auth/methods', undefined, NO_TOKEN)).json()).toEqual({ google: false });
+    expect(await (await req('GET', '/auth/methods', undefined, NO_TOKEN)).json()).toEqual({ google: false, connect: null });
     const start = await req('POST', '/auth/google/start', {}, NO_TOKEN);
     expect(start.status).toBe(409);
     expect(((await start.json()) as { error: string }).error).toMatch(/No Google account is linked/);
@@ -73,7 +73,7 @@ describe('Google sign-in: linking the owner', () => {
   it('links the account that approves, from a device holding the token', async () => {
     const { body } = await link({ sub: 'user_ada', email: 'ada@example.com' });
     expect(body).toMatchObject({ state: 'linked', owner: { email: 'ada@example.com' } });
-    expect(await (await req('GET', '/auth/methods', undefined, NO_TOKEN)).json()).toEqual({ google: true });
+    expect(await (await req('GET', '/auth/methods', undefined, NO_TOKEN)).json()).toEqual({ google: true, connect: null });
     expect(await (await req('GET', '/auth/account')).json()).toMatchObject({ available: true, owner: { email: 'ada@example.com' }, via: 'token' });
   });
 });
@@ -185,7 +185,7 @@ describe('Google sign-in: what a session may and may not do', () => {
     const again = await appSession('again');
     expect((await req('DELETE', '/auth/google')).status).toBe(200);
     expect((await req('GET', '/threads', undefined, again)).status).toBe(401);
-    expect(await (await req('GET', '/auth/methods', undefined, NO_TOKEN)).json()).toEqual({ google: false });
+    expect(await (await req('GET', '/auth/methods', undefined, NO_TOKEN)).json()).toEqual({ google: false, connect: null });
   });
 
   it('a made-up session token gets nothing', async () => {

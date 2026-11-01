@@ -1,0 +1,29 @@
+# Omni Connect: a Cloudflare tunnel per machine, opened by signing in once
+
+Reaching an Omni from a phone or another computer takes Tailscale today ([remote access](../user/remote-access.md)): both devices join the tailnet, then each browser pairs with the token or signs in with Google on each machine. T3 Code ships the same feature as T3 Connect (pingdotgg/t3code: `infra/relay`, `apps/server/src/cloud`, `docs/internals/t3-connect.md`). Its relay links each environment to a Clerk account, provisions a Cloudflare tunnel per environment, and lets a signed-in client open any of them by having the environment mint a one-time credential bound to the client's key. Omni already has the parts it rests on: Clerk sign-in (ADR 0007), a relay Worker each user deploys with one Durable Object per user (ADR 0008), and a Cloudflare account and zone (`omni-os.app`).
+
+## Decision
+
+Omni Connect is the T3 Connect design on Omni's relay, cut to one user per relay.
+
+- **The sync relay gains Connect.** The user's Durable Object keeps a `connect_machines` row per machine: its id, name, ES256 public key, hostname, tunnel id and DNS record id. A machine registers with its existing relay token. No new sign-in, and no Connect without one.
+- **The relay provisions the tunnel.** With the Worker secrets `CF_API_TOKEN` (Cloudflare Tunnel edit and DNS edit), `CF_ACCOUNT_ID` and `CF_ZONE_ID`, and `CONNECT_ZONE` (`omni-os.app`), it creates a remotely managed tunnel named `omni-<machine id>`, points its ingress at `http://127.0.0.1:<port>`, adds a proxied CNAME `<name>-<6 hex>.<zone>`, and answers with the hostname and the tunnel's connector token. Registering again is idempotent: it reuses the tunnel and updates the port. Turning Connect off deletes the DNS record, the tunnel and the row. The hostname is one label under the zone, so Cloudflare's free universal certificate covers it.
+- **The server runs `cloudflared`.** `cloudflared tunnel --no-autoupdate run` with `TUNNEL_TOKEN` in its environment, supervised with backoff. When it exits five times in ten minutes, the server asks the relay to provision the tunnel again (same hostname). Omni uses the `cloudflared` on `PATH` (or `OMNI_CLOUDFLARED`) and never downloads one: the MCP tunnel already asks for it, and a pinned download with checksums is a release process Omni does not have.
+- **The request guard accepts the machine's own Connect hostname** on every route, like a `.ts.net` name. The token or a session is still required. The Tailscale login check does not apply there: that request did not come through Tailscale.
+- **Sign in once, open any machine.** The relay serves the Connect page at `/connect`. It signs in with Clerk's device grant, run by the relay as the server runs it, and keeps a 30-day HttpOnly cookie that only the relay origin sees. The page lists the machines and their state.
+- **Opening a machine binds a one-time code to a key made on that machine's origin.** The machine's pairing screen (or `/#/connect`) makes a non-extractable P-256 key and goes to `<relay>/connect/open?machine=<id>&jkt=<thumbprint>`. The relay signs a mint request (ES256, its own key, 60 seconds, `jti`, `sub`, `aud` = machine id, `jkt`, `nonce`) and posts it through the tunnel to `POST /api/connect/mint`. The machine checks the signature against the relay key it pinned when it registered, the audience, the expiry, that the `jti` is new, and that `sub` is its linked Google owner. It answers with a code (32 random bytes, 2 minutes, single use, bound to `jkt`), signed with its own key and naming the nonce. The relay checks that signature against the machine's registered public key and sends the browser to `https://<hostname>/#/connect?code=…`. The page redeems the code with a DPoP-style proof from the same key (`POST /api/connect/redeem`) and gets an ordinary `device_sessions` row as an HttpOnly cookie. Revoking it in Settings, Machines works as for any signed-in device.
+- **A machine with no linked owner links the relay's user** when a token-holding client turns Connect on. A machine linked to another account refuses to turn Connect on.
+
+## Considered
+
+- **A hosted Web UI that talks to each machine across origins**, as app.t3.codes does. Omni serves its Web UI from each machine, and its request guard refuses cross-origin requests on purpose. The key therefore lives on the machine's own origin, and the relay page only issues the code.
+- **Tunnels only, with Google sign-in on each machine.** This works with no mint protocol, but a phone would approve a Clerk code for every machine and again after every revocation.
+- **Cloudflare Access in front of each hostname.** That adds a third identity in front of Clerk, and needs Zero Trust seats and per-app policies.
+- **Keep T3's extras.** Push notifications and Live Activities need a native phone app Omni does not have. Tunnel reaping, plan limits and a release-pinned `cloudflared` serve a multi-tenant service. Webhook forwarding through the relay comes later, if wanted.
+
+## Consequences
+
+- One `wrangler deploy` and four more Worker secrets turn Connect on for a relay; `npm run relay:config` prints them. A relay without them answers 503 `connect_not_configured`, and sync keeps working.
+- The relay holds the authority to mint. A stolen relay signing key, together with a page the machine owner opens, can get a session. That is the same trust the relay already has over sync, which carries every thread.
+- A machine is reachable only while its server and `cloudflared` run. The Connect page shows a machine as offline when its `GET /api/connect/health` (signed like a mint) does not answer within 5 seconds.
+- Tunnels stay up while a machine sleeps. Cloudflare does not charge a free account for idle tunnels, so there is no reaper.

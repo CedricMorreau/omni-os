@@ -10,10 +10,12 @@ import { secretStore } from './secret-store.ts';
 export const SYNC_SECRETS = { url: 'OMNI_RELAY_URL', token: 'OMNI_RELAY_TOKEN' } as const;
 /** The Supabase relay's, from before the Cloudflare one (ADR 0008). Still kept from threads until a new sign-in removes them. */
 export const LEGACY_SYNC_SECRETS = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_REFRESH_TOKEN'] as const;
-const PRIVATE = new Set<string>([...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS]);
+/** Omni Connect's machine key and tunnel token (apps/server/connect/service.ts). Global, and never handed to an agent. */
+export const CONNECT_SECRET_NAMES = ['OMNI_CONNECT_KEY', 'OMNI_CONNECT_TUNNEL_TOKEN'] as const;
+const PRIVATE = new Set<string>([...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS, ...CONNECT_SECRET_NAMES]);
 const SERVER_ONLY = new Set<string>(SERVER_ONLY_VARS);
 
-/** False for Omni's sync credentials (global only), the Grok Bot webhook and webhook signing secrets (any scope). */
+/** False for Omni's sync and Connect credentials (global only), the Grok Bot webhook and webhook signing secrets (any scope). */
 export function secretReachesThread(scope: string, name: string): boolean {
   if (SERVER_ONLY.has(name) || name.startsWith(WEBHOOK_SECRET_PREFIX)) return false;
   if (scope === 'global' && PRIVATE.has(name)) return false;

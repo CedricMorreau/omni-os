@@ -7,6 +7,7 @@ import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { apiToken, cookieName, proofFor, sessionCookieName } from './api-token.ts';
 import { clerkConfig } from './clerk.ts';
+import { connectMethod } from './connect/service.ts';
 import {
   browserName,
   listSessions,
@@ -19,7 +20,7 @@ import {
   type FlowOutcome,
   type PollResult,
 } from './google-auth.ts';
-import { desktopPairAllowed } from './request-guard.ts';
+import { desktopPairAllowed, viaConnect } from './request-guard.ts';
 
 export const authApi = new Hono();
 
@@ -67,8 +68,13 @@ const signInError = (c: Context, err: unknown) => {
 const tokenOnly = (c: Context) =>
   c.get('omniAuth')?.via === 'token' ? null : c.json({ error: 'Forbidden: only a device paired with the token can change the linked Google account' }, 403);
 
-/** Open: whether the pairing screen offers Google sign-in. Says nothing about who the owner is. */
-authApi.get('/methods', (c) => c.json({ google: !!clerkConfig() && !!owner() }));
+/**
+ * Open: whether the pairing screen offers Google sign-in, and, on this machine's Connect hostname only, Omni Connect
+ * (the relay, this machine's id and hostname). Says nothing about who the owner is.
+ */
+authApi.get('/methods', async (c) =>
+  c.json({ google: !!clerkConfig() && !!owner(), connect: viaConnect(URL.parse(`http://${c.req.header('host') ?? ''}`)?.hostname ?? '') ? await connectMethod() : null }),
+);
 
 /** The linked account, if any, and how this request got in. */
 authApi.get('/account', (c) => {

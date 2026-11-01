@@ -35,7 +35,9 @@ import { questionsApi } from './questions-api.ts';
 import { threadHistoryApi } from './thread-history-api.ts';
 import { toolOutputApi } from './tool-output-api.ts';
 import { threadsApi } from './threads-api.ts';
-import { requestGuard, useSessionCheck } from './request-guard.ts';
+import { connectApi } from './connect-api.ts';
+import { connectHostname } from './connect/service.ts';
+import { requestGuard, useConnectHost, useSessionCheck } from './request-guard.ts';
 import { sessionFor } from './google-auth.ts';
 import { toolFailuresApi } from './tool-failures-api.ts';
 import { worktreesApi } from './worktrees-api.ts';
@@ -53,6 +55,7 @@ app.onError((err, c) => {
 // Ahead of every route: refuses requests without this install's token, and those other sites make through a browser
 // (apps/server/request-guard.ts). The Web UI below is served without either: it holds no secret, and pairs to get one.
 useSessionCheck(sessionFor);
+useConnectHost(connectHostname);
 api.use('*', requestGuard);
 
 // Mounted in the same order the handlers used to be registered. Hono runs the first match, so
@@ -86,6 +89,7 @@ api.route('/thread-references', threadReferencesApi);
 api.route('/links', linksApi);
 api.route('/grokbot', grokbotApi);
 api.route('/sync', syncApi);
+api.route('/connect', connectApi);
 api.route('/setup', setupApi);
 api.route('/tool-failures', toolFailuresApi);
 api.route('/worktrees', worktreesApi);

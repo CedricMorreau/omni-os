@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { clerkConfig, type ClerkConfig } from '../clerk.ts';
+import { forgetConnect } from '../connect/service.ts';
 import { db, kv, outbox } from '../db.ts';
 import { pollFlow, SignInError, startFlow, type FlowDeps, type FlowOutcome, type FlowStart, type PollResult } from '../google-auth.ts';
 import { deleteSecret, globalSecret, LEGACY_SYNC_SECRETS, setSecret, SYNC_SECRETS } from '../secrets.ts';
@@ -121,6 +122,8 @@ export async function disableSync(opts: { forget?: boolean }, deps: SetupDeps) {
   const [url, token] = await Promise.all([deps.readSecret(SYNC_SECRETS.url), deps.readSecret(SYNC_SECRETS.token)]);
   // Offline, or the relay is gone: the token stays valid there until it is taken off ALLOWED_USERS, but this machine forgets it.
   if (url && token) await deps.relay.revoke(url, token).catch((err: Error) => console.warn(`[sync] could not sign out on the relay: ${err.message}`));
+  // Omni Connect rides on this sign-in, and the relay drops the machine's tunnel with its token.
+  await forgetConnect();
   for (const name of [...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS]) await deps.deleteSecret(name);
 }
 

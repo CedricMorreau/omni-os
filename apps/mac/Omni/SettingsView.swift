@@ -53,7 +53,7 @@ struct GeneralSettingsPage: View {
 }
 
 /// The Machines tab: this Mac's name (the sidebar footer's before #405), where new threads run and the Google account
-/// that signs new devices in, then Sync and
+/// that signs new devices in, then Sync with Omni Connect (which uses its sign-in) and
 /// Storage, which were tabs of their own. Advanced holds the developer items: this Mac's server (port, repo, Node),
 /// its status and log, and the sync path map. The model follows the settings, so a change applies at once: a new
 /// port reconnects, and any change checks the server again.
@@ -68,6 +68,7 @@ struct MachinesSettingsPage: View {
 
       SettingsPart(title: "Sync", note: "History across your machines, relayed through your own Cloudflare relay.")
       SyncSettings(model: model)
+      ConnectSettings(model: model)
 
       SettingsPart(title: "Storage", note: "The worktrees Omni made for threads, what they use, and which are safe to clean up.")
       StorageSettings(model: model)

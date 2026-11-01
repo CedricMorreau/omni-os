@@ -584,6 +584,24 @@ server.registerTool('revoke_signed_in_device', {
   inputSchema: { device_id: z.string().min(1).max(100) },
 }, async ({ device_id }) => text(await call(`/auth/devices/${encodeURIComponent(device_id)}`, { method: 'DELETE' })));
 
+server.registerTool('omni_connect_status', {
+  description: 'Read-only state of Omni Connect on this machine: whether it is on, its public hostname and URL, the relay\'s Connect page, the cloudflared tunnel state and the last error. While it is on, also the machines the relay knows with online state. Connect needs the sync relay sign-in first.',
+  inputSchema: {},
+}, async () => {
+  const status = await call('/connect');
+  if (!status.enabled) return text(status);
+  const machines = await call('/connect/machines').then((r) => r.machines, (err) => ({ error: err instanceof Error ? err.message : String(err) }));
+  return text({ ...status, machines });
+});
+
+server.registerTool('omni_connect_set', {
+  description:
+    `Turn Omni Connect on or off for this machine, only when ${USER} asks. On makes this Omni reachable from the internet at a public hostname ` +
+    '(<name>-xxxxxx.omni-os.app) through a Cloudflare tunnel the sync relay creates; every request there still needs the token or a signed-in session. ' +
+    'It needs the sync relay sign-in and cloudflared installed. Off deletes the tunnel and its DNS record. Sessions already signed in through Connect stay until revoked.',
+  inputSchema: { enabled: z.boolean() },
+}, async ({ enabled }) => text(await call(`/connect/${enabled ? 'enable' : 'disable'}`, { method: 'POST' })));
+
 // #218: the conductor reads a thread Ben referenced in a message the same way every other thread does.
 registerReferencedThread(server);
 

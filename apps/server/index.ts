@@ -33,6 +33,7 @@ const { startTriggerDeliveries } = await import('./automation-triggers.ts');
 const { startPRWatch } = await import('./pr-watch/worker.ts');
 const { startCatalogRefresh } = await import('./harness/catalog-service.ts');
 const { startSync } = await import('./sync/worker.ts');
+const { startConnect, stopConnect } = await import('./connect/service.ts');
 const { recoverHandoffs } = await import('./handoff.ts');
 const { startWorktreeRetention } = await import('./worktree-cleanup.ts');
 const { migrateLegacyConfig } = await import('./config-migrate.ts');
@@ -79,7 +80,11 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   // With this Mac's retention policy on (Settings > Machines), removes idle worktrees that hold nothing unsaved, now and daily.
   startWorktreeRetention();
   // Off unless the sync credentials are in the secret store; then it runs alongside, and a failure only logs.
-  startSync().catch((err) => console.error('[sync] could not start:', (err as Error).message));
+  // Omni Connect after sync: it needs the machine id sync arms. Off unless turned on in Settings.
+  startSync()
+    .catch((err) => console.error('[sync] could not start:', (err as Error).message))
+    .then(() => startConnect())
+    .catch((err) => console.error('[connect] could not start:', (err as Error).message));
   if (!isLoopback(config.host)) {
     console.warn(`[omni] ${config.host} is not loopback. Anyone who can open the port can try the token; it, and the bodies, cross the network in plain HTTP.`);
   }
@@ -96,6 +101,7 @@ const shutdown = (sig: string) => {
   server.close();
   closeAllTerminals();
   stopAllRuns();
+  stopConnect();
   setTimeout(() => process.exit(0), 6000).unref();
   void shutdownAll().finally(() => {
     closeAllBrowsers();

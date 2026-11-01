@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "relayReady": true,
+  "signedIn": true,
+  "hostname": "bens-mac-a1b2c3.omni-os.app",
+  "url": "https://bens-mac-a1b2c3.omni-os.app",
+  "connectPage": "https://relay.example.com/connect",
+  "tunnel": {
+    "state": "missing",
+    "error": "cloudflared is not installed. Install it (brew install cloudflared), or set OMNI_CLOUDFLARED to its path",
+    "cloudflared": null
+  },
+  "error": null
+}

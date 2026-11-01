@@ -118,6 +118,9 @@ private struct DeliveryRefusal: Decodable {
     "browser-pick-unavailable.json": { _ = try decodeFixture(ElementPickReply.self, "browser-pick-unavailable.json") },
     "browser-inspect.json": { _ = try decodeFixture(ElementInspectReply.self, "browser-inspect.json") },
     "browser-inspect-unavailable.json": { _ = try decodeFixture(ElementInspectReply.self, "browser-inspect-unavailable.json") },
+    // Recorded by apps/server/tests/connect.test.ts, against a fake relay.
+    "connect-status.json": { _ = try decodeFixture(ConnectStatus.self, "connect-status.json") },
+    "connect-machines.json": { _ = try decodeFixture(ConnectMachines.self, "connect-machines.json") },
     // Hand-made: apps/server/tests/sync-setup.test.ts checks the server still sends its keys and types.
     "sync-status.json": { _ = try decodeFixture(SyncStatus.self, "sync-status.json") },
     // Hand-made: apps/server/tests/google-auth.test.ts checks the server still sends their keys and types.
