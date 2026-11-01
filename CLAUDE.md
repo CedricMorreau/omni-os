@@ -27,6 +27,7 @@ Local agent workspace. See README.md for what it does.
 - Backend: `apps/server/` (Hono, node:sqlite, no ORM). `runner.ts` owns the claude CLI lifecycle; `stream.ts` is the pure stream-json parser.
 - Web UI: `apps/web/` (React 19, Tailwind v4, hash router). Talks only to `/api`.
 - Mac app: `apps/mac/` (SwiftUI app plus the `OmniKit` package). Another client of `/api`, see `apps/mac/NOTES.md` and ADR 0002.
+- Sync relay: `apps/relay/`. A Cloudflare Worker each user deploys; see ADR 0008. It imports nothing from the other packages.
 - Linux app: `apps/linux/`. A desktop launcher. It starts the server and opens the Web UI in an app window. It is not a fourth screen to port. A Web UI change is what it shows. See ADR 0006.
 - `packages/shared/`: pure TypeScript both clients use (slash grammar, menu, pills). It imports only itself. `apps/web/` and `apps/mac/` never import each other. `apps/linux` imports neither. `turbo boundaries` (run by `npm test`) enforces it with the tags in `turbo.json`.
 - Monorepo: npm workspaces (`apps/*`, `packages/*`) run with Turborepo. Import another package by name (`@omni/shared/slash.ts`), never by a relative path out of the package, and declare it in that package's `package.json`. `packages/test-fixtures` holds the fake CLIs and corpora the TS and Swift tests share. `data/`, `crew/`, `automations/` and `mods/` stay at the repo root.
@@ -53,7 +54,7 @@ Most misses are a change that works where it was tested and is missing elsewhere
 - **Clients**: desktop web, phone web and the Mac app, in the same PR (see "Every surface, every time").
 - **Harnesses**: Claude Code, Codex, Cursor Agent, Cursor Cloud and Hermes each have an adapter in `apps/server/harness/`. Decide per harness, even if the answer is "not supported". The runner talks to all of them through `HarnessSession` in `harness/adapter.ts`: a typed `send`, `interrupt` and `end`, and an `exit` callback. A process id is optional: only Claude Code and Codex have one for the whole session (`harness/session.ts`).
 - **Agents**: something a user can do is usually something the Conductor should reach through `apps/mcp/omni.ts`.
-- **Sync**: new state that should reach the other Mac needs a handler in `apps/server/sync/handlers/`, and a new entity also needs adding to the check in `supabase/migrations/0001_changes.sql`.
+- **Sync**: new state that should reach the other Mac needs a handler in `apps/server/sync/handlers/`. The relay (`apps/relay/`) takes any entity name, so it needs no change.
 - **Mac contract**: a change to JSON the Mac app reads updates `apps/server/tests/mac-fixtures.test.ts`.
 - **Docs**: if the change makes a page in `docs/` wrong, fix it in the same PR. Where a new doc goes: `docs/README.md`. Don't document what the code already says.
 

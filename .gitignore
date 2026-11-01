@@ -9,3 +9,5 @@ apps/mac/OmniKit/.build/
 apps/mac/OmniKit/.swiftpm/
 xcuserdata/
 .playwright-mcp/
+.wrangler/
+.dev.vars

@@ -2,61 +2,89 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MemoryTransport } from '../sync/transport.ts';
+import type { ClerkClient, DevicePoll } from '../clerk.ts';
+import { MemoryTransport, RelayRefusedError, type RelayAuth } from '../sync/transport.ts';
 
-// Sign-in, pause and resume through /api/sync, with a fake Supabase auth and a fake Keychain.
+// Sign-in, pause and resume through /api/sync, with a fake Clerk, a fake relay and a fake Keychain.
 // Nothing reaches the network or the real Keychain.
 let db: typeof import('../db.ts');
 let sync: typeof import('../sync/worker.ts');
 let setup: typeof import('../sync/setup.ts');
-let syncApi: typeof import('../sync-api.ts');
+let auth: typeof import('../google-auth.ts');
 let app: ReturnType<typeof import('../sync-api.ts').createSyncApi>;
 
 const dir = mkdtempSync(join(tmpdir(), 'omni-sync-setup-'));
-const PASSWORD = 'correct horse battery staple 1f9a';
+const ID_TOKEN = 'eyJ.id-token-from-clerk.sig';
+const CLERK = { issuer: 'https://clerk.example.dev', clientId: 'omni-app' };
 const relay = new MemoryTransport();
 const keychain = new Map<string, string>();
 const calls: string[] = [];
-let user = 'user-1';
-let probeError: string | null = null;
+let user = 'user_1';
+let clock = Date.parse('2026-11-01T12:00:00Z');
+let clerkAnswer: DevicePoll = { state: 'pending' };
+let relayInfo: { issuer: string | null; clientId: string | null } | Error = CLERK;
+let exchangeError: Error | null = null;
 
-const fakeAuth = (url: string, anonKey: string): import('../sync/setup.ts').SyncAuth => ({
-  async signInWithPassword(email, password) {
-    calls.push(`password ${url} ${anonKey} ${email}`);
-    if (password !== PASSWORD) throw Object.assign(new Error('Invalid login credentials'), { status: 400 });
-    return { refreshToken: 'refresh-from-password', userId: user, email };
+const fakeClerk = {
+  config: CLERK,
+  async startDevice() {
+    calls.push('clerk start');
+    return { deviceCode: 'dev-1', userCode: 'WDJB-MJHT', verificationUri: 'https://clerk.example.dev/device', verificationUriComplete: null, expiresIn: 600, interval: 5 };
   },
-  async sendCode(email) {
-    calls.push(`send ${email}`);
+  async pollDevice() {
+    calls.push('clerk poll');
+    return clerkAnswer;
   },
-  async verifyCode(email, code) {
-    calls.push(`verify ${email} ${code}`);
-    if (code !== '123456') throw Object.assign(new Error('Token has expired or is invalid'), { status: 403 });
-    return { refreshToken: 'refresh-from-code', userId: user, email };
+} as unknown as ClerkClient;
+
+const fakeRelay: RelayAuth = {
+  async info(url) {
+    calls.push(`info ${url}`);
+    if (relayInfo instanceof Error) throw relayInfo;
+    return relayInfo;
   },
-  async probe() {
-    if (probeError) throw new Error(probeError);
+  async exchange(url, idToken, machine) {
+    calls.push(`exchange ${url} ${idToken} ${machine}`);
+    if (exchangeError) throw exchangeError;
+    return { token: `omni_r_${user}.token`, user: { id: user, email: 'ben@example.com' } };
   },
-});
+  async revoke(url, token) {
+    calls.push(`revoke ${url} ${token}`);
+  },
+};
 
 const post = (path: string, body?: unknown) =>
   app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
 const put = (path: string, body: unknown) =>
   app.request(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-const good = { url: 'https://abc.supabase.co/', anonKey: 'anon-key', email: 'ben@example.com' };
+const URL_ = 'https://omni-relay.ben.workers.dev';
+
+/** Start a sign-in, let Clerk approve it, and poll once. */
+async function signIn(url = URL_) {
+  const start = await post('/setup', { url });
+  expect(start.status).toBe(200);
+  const { flow, secret } = await start.json();
+  clerkAnswer = { state: 'done', identity: { issuer: CLERK.issuer, sub: user, email: 'ben@example.com', name: 'Ben' }, idToken: ID_TOKEN };
+  clock += 5_000;
+  return post('/setup/poll', { flow, secret });
+}
 
 beforeAll(async () => {
   process.env.OMNI_DATA_DIR = dir;
   db = await import('../db.ts');
   sync = await import('../sync/worker.ts');
   setup = await import('../sync/setup.ts');
-  syncApi = await import('../sync-api.ts');
-  app = syncApi.createSyncApi({
-    auth: fakeAuth,
+  auth = await import('../google-auth.ts');
+  app = (await import('../sync-api.ts')).createSyncApi({
+    relay: fakeRelay,
+    clerk: () => CLERK,
+    machineName: async () => 'Ben’s MacBook Air',
+    flows: { clerk: () => fakeClerk, now: () => clock },
     async storeSecret(name, value) {
       keychain.set(name, value);
       db.db.prepare(`INSERT OR REPLACE INTO secrets (scope, name) VALUES ('global', ?)`).run(name);
     },
+    readSecret: async (name) => keychain.get(name) ?? null,
     async deleteSecret(name) {
       keychain.delete(name);
       db.db.prepare(`DELETE FROM secrets WHERE scope = 'global' AND name = ?`).run(name);
@@ -72,78 +100,97 @@ beforeAll(async () => {
 
 beforeEach(() => {
   calls.length = 0;
-  probeError = null;
+  clerkAnswer = { state: 'pending' };
+  relayInfo = CLERK;
+  exchangeError = null;
+  auth.resetFlows();
 });
 
 describe('sync setup input', () => {
   it.each([
-    [{ ...good, url: 'not a url' }, /Supabase URL/],
-    [{ ...good, url: 'http://abc.supabase.co' }, /https/],
-    [{ ...good, anonKey: '' }, /anon key/],
-    [{ ...good, anonKey: 'sb_secret_abc' }, /service-role|secret key/],
-    [{ ...good, anonKey: `x.${Buffer.from(JSON.stringify({ role: 'service_role' })).toString('base64url')}.y` }, /service-role/],
-    [{ ...good, email: 'nope' }, /email/],
-    [{ ...good, password: PASSWORD, code: '123456' }, /password or a code/],
+    [{ url: 'not a url' }, /relay URL/],
+    [{ url: 'http://omni-relay.ben.workers.dev' }, /https/],
+    [{}, /relay URL/],
   ])('refuses %o', async (body, message) => {
     const res = await post('/setup', body);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(message);
     expect(calls).toEqual([]);
-    expect(keychain.size).toBe(0);
   });
 
-  it('takes http for a local Supabase', () => {
-    expect(setup.checkSetup({ ...good, url: 'http://127.0.0.1:54321' }).url).toBe('http://127.0.0.1:54321');
+  it('takes http for a relay under wrangler dev on this machine', () => {
+    expect(setup.checkRelayUrl({ url: 'http://127.0.0.1:8787/' })).toBe('http://127.0.0.1:8787');
+  });
+});
+
+describe('before Clerk is asked', () => {
+  it('refuses a URL that is not an Omni relay', async () => {
+    relayInfo = new RelayRefusedError('https://example.com is not an Omni relay', 400);
+    const res = await post('/setup', { url: 'https://example.com' });
+    expect(res.status).toBe(400);
+    expect(calls).not.toContain('clerk start');
+  });
+
+  it('refuses a relay that trusts another Clerk app, or none yet', async () => {
+    relayInfo = { issuer: 'https://other.clerk.dev', clientId: 'omni-app' };
+    const other = await post('/setup', { url: URL_ });
+    expect(other.status).toBe(409);
+    expect((await other.json()).error).toMatch(/another Clerk app/);
+    relayInfo = { issuer: null, clientId: null };
+    const none = await post('/setup', { url: URL_ });
+    expect((await none.json()).error).toMatch(/relay:config/);
+    expect(calls).not.toContain('clerk start');
+  });
+
+  it('says so when the relay is out of reach', async () => {
+    relayInfo = new Error('Cannot reach the relay');
+    expect((await post('/setup', { url: URL_ })).status).toBe(502);
   });
 });
 
 describe('sync setup', () => {
-  it('reports a wrong password without storing anything', async () => {
-    const res = await post('/setup', { ...good, password: 'wrong' });
-    expect(res.status).toBe(401);
-    expect((await res.json()).error).toBe('Invalid login credentials');
+  it('shows the code, and stays pending until Clerk approves', async () => {
+    const res = await post('/setup', { url: URL_ });
+    const start = await res.json();
+    expect(start).toMatchObject({ userCode: 'WDJB-MJHT', verificationUri: 'https://clerk.example.dev/device', interval: 5 });
+    clock += 5_000;
+    expect(await (await post('/setup/poll', { flow: start.flow, secret: start.secret })).json()).toEqual({ state: 'pending' });
+    expect((await post('/setup/poll', { flow: start.flow, secret: 'wrong' })).status).toBe(404);
+    expect(keychain.size).toBe(0);
+  });
+
+  it('says why when the relay refuses the account, and stores nothing', async () => {
+    exchangeError = new RelayRefusedError('ben@example.com (Clerk user user_1) may not use this relay', 403);
+    const r = await (await signIn()).json();
+    expect(r).toEqual({ state: 'refused', error: expect.stringMatching(/may not use this relay/) });
     expect(keychain.size).toBe(0);
     expect(sync.activeWorker()).toBeNull();
   });
 
-  it('sends a code when no password or code is given', async () => {
-    const res = await post('/setup', good);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ state: 'code_sent', email: 'ben@example.com' });
-    expect(calls).toEqual(['send ben@example.com']);
-    expect(keychain.size).toBe(0);
+  it('a relay sign-in is not a device sign-in: /api/auth/google/poll does not know it', async () => {
+    const { flow, secret } = await (await post('/setup', { url: URL_ })).json();
+    await expect(auth.pollFlow(flow, secret, { clerk: () => fakeClerk, now: () => clock })).rejects.toThrow(/No such sign-in/);
   });
 
-  it('says so when the relay has not been set up', async () => {
-    probeError = 'relation "public.changes" does not exist';
-    const res = await post('/setup', { ...good, code: '123456' });
-    expect(res.status).toBe(502);
-    expect((await res.json()).error).toMatch(/changes.*README/s);
-    expect(keychain.size).toBe(0);
-  });
+  it('signs in, keeps only the URL and this machine’s token, and starts syncing', async () => {
+    db.db.prepare(`INSERT OR REPLACE INTO secrets (scope, name) VALUES ('global', 'SUPABASE_URL'), ('global', 'SUPABASE_REFRESH_TOKEN')`).run();
+    keychain.set('SUPABASE_URL', 'https://abc.supabase.co').set('SUPABASE_REFRESH_TOKEN', 'old');
+    expect((await (await app.request('/status')).json()).legacyRelay).toBe(true);
 
-  it('signs in with a code, stores the credentials in the Keychain and starts syncing', async () => {
-    const res = await post('/setup', { ...good, code: ' 123456 ' });
+    const res = await signIn();
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toMatchObject({ state: 'signed_in', email: 'ben@example.com', status: { configured: true, enabled: true, machineId: 'mac-a' } });
-    expect(calls).toEqual(['verify ben@example.com 123456']);
-    expect(Object.fromEntries(keychain)).toEqual({
-      SUPABASE_URL: 'https://abc.supabase.co',
-      SUPABASE_ANON_KEY: 'anon-key',
-      SUPABASE_REFRESH_TOKEN: 'refresh-from-code',
-    });
+    expect(await res.json()).toMatchObject({ state: 'signed_in', email: 'ben@example.com', relayChanged: false, status: { configured: true, enabled: true, machineId: 'mac-a', legacyRelay: false } });
+    expect(calls).toContain(`exchange ${URL_} ${ID_TOKEN} Ben’s MacBook Air`);
+    // The Supabase credentials go with the move.
+    expect(Object.fromEntries(keychain)).toEqual({ OMNI_RELAY_URL: URL_, OMNI_RELAY_TOKEN: 'omni_r_user_1.token' });
     expect(sync.activeWorker()?.machineId).toBe('mac-a');
   });
 
-  it('signs in with a password and never writes the password anywhere', async () => {
-    const res = await post('/setup', { ...good, password: PASSWORD });
-    expect(res.status).toBe(200);
-    expect(keychain.get('SUPABASE_REFRESH_TOKEN')).toBe('refresh-from-password');
-    expect([...keychain.values()]).not.toContain(PASSWORD);
+  it('never writes the ID token anywhere', async () => {
+    expect([...keychain.values()]).not.toContain(ID_TOKEN);
     db.db.exec('PRAGMA wal_checkpoint(FULL)');
     for (const f of readdirSync(dir)) {
-      if (f.startsWith('omni.db')) expect(readFileSync(join(dir, f)).includes(PASSWORD)).toBe(false);
+      if (f.startsWith('omni.db')) expect(readFileSync(join(dir, f)).includes(ID_TOKEN)).toBe(false);
     }
   });
 
@@ -152,7 +199,7 @@ describe('sync setup', () => {
     expect(off.status).toBe(200);
     expect((await off.json()).status).toMatchObject({ configured: true, enabled: false });
     expect(sync.activeWorker()).toBeNull();
-    expect(keychain.size).toBe(3);
+    expect(keychain.size).toBe(2);
     expect((await post('/now')).status).toBe(409);
 
     const on = await post('/enable');
@@ -166,19 +213,20 @@ describe('sync setup', () => {
     db.kv.set('sync.cursor', 42);
     db.db.prepare(`INSERT INTO sync_deferred (seq, change, error) VALUES (7, '{}', 'x')`).run();
     const pending = db.outbox.counts(['thread']).pending;
-    user = 'user-2';
-    const res = await post('/setup', { ...good, url: 'https://other.supabase.co', password: PASSWORD });
-    expect(res.status).toBe(200);
+    user = 'user_2';
+    const res = await signIn('https://other-relay.ben.workers.dev');
+    expect(await res.json()).toMatchObject({ state: 'signed_in', relayChanged: true });
     expect(db.kv.get('sync.cursor')).toBe(0);
     expect((await import('../sync/apply.ts')).deferredCount()).toBe(0);
     // Everything goes to the new relay again.
     expect(db.outbox.counts(['channel', 'thread', 'kv']).pending).toBeGreaterThan(pending);
   });
 
-  it('forgets the credentials when asked', async () => {
+  it('signs out on the relay and forgets the credentials when asked', async () => {
     const res = await post('/disable', { forget: true });
     expect(res.status).toBe(200);
     expect((await res.json()).status).toMatchObject({ configured: false, enabled: false });
+    expect(calls).toEqual(['revoke https://other-relay.ben.workers.dev omni_r_user_2.token']);
     expect(keychain.size).toBe(0);
     expect((await post('/enable')).status).toBe(409);
   });
@@ -190,7 +238,7 @@ describe('signed out', () => {
     const dead = new MemoryTransport();
     let refused = true;
     dead.pull = async (o) => {
-      if (refused) throw new SyncSignedOutError('Invalid Refresh Token');
+      if (refused) throw new SyncSignedOutError('This machine is signed out of the relay');
       return MemoryTransport.prototype.pull.call(dead, o);
     };
     const w = sync.createSyncWorker({ transport: dead });

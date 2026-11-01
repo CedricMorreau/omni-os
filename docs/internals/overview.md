@@ -76,7 +76,6 @@ omni.config.example.json    every field of data/omni.config.json
 mods/                       Claude Code mods loaded with OMNI_MODS=1 (omni-progress)
 scripts/                    shell shim, Mac build, Linux launcher, QA stack, PR screenshots, launchd install, docs-daily
 docs/                       user guides (user/), architecture (internals/), ADRs (adr/), PR screenshot guide
-supabase/                   sync relay migration
 CONTEXT.md                  domain glossary (channel, thread, harness, crew...)
 CONTRIBUTING.md             dev setup, checks and what a PR needs
 FORKING.md                  what is yours in a fork and how to pull upstream

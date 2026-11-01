@@ -11,6 +11,11 @@ private struct ForgetBody: Encodable, Sendable {
   let forget: Bool
 }
 
+private struct SetupPollBody: Encodable, Sendable {
+  let flow: String
+  let secret: String
+}
+
 private struct PathMapBody: Codable, Sendable {
   let map: [String: String]
 }
@@ -32,13 +37,17 @@ extension OmniClient {
     return reply.status
   }
 
-  /// Signs in and turns sync on, or emails a code when the body has neither a password nor a code.
-  /// The password goes in the body only; the server uses it once and keeps the sign-in token in the Keychain.
-  public func setupSync(_ setup: SyncSetup) async throws(OmniAPIError) -> SyncSetupResult {
+  /// Starts signing in to a relay: the server checks the URL and asks Clerk for a code to show.
+  public func setupSync(_ setup: SyncSetup) async throws(OmniAPIError) -> GoogleFlowStart {
     try await send("POST", "/api/sync/setup", body: setup)
   }
 
-  /// Pauses syncing. `forget` also removes the credentials from the Keychain.
+  /// One poll of a relay sign-in. On signed_in the server holds this machine's relay token and sync is on.
+  public func pollSyncSetup(_ start: GoogleFlowStart) async throws(OmniAPIError) -> SyncSetupPoll {
+    try await send("POST", "/api/sync/setup/poll", body: SetupPollBody(flow: start.flow, secret: start.secret))
+  }
+
+  /// Pauses syncing. `forget` also removes the relay URL and this machine's token from the server's secret store.
   public func disableSync(forget: Bool = false) async throws(OmniAPIError) -> SyncStatus {
     let reply: StatusReply = try await send("POST", "/api/sync/disable", body: ForgetBody(forget: forget))
     return reply.status

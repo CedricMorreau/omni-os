@@ -56,7 +56,8 @@ export type DevicePoll =
   | { state: 'slow_down' }
   | { state: 'denied' }
   | { state: 'expired' }
-  | { state: 'done'; identity: Identity };
+  /** idToken: the verified token itself, for the sync relay to check on its own (apps/server/sync/setup.ts). */
+  | { state: 'done'; identity: Identity; idToken: string };
 
 /** A refusal from Clerk, or Clerk out of reach. */
 export class ClerkError extends Error {}
@@ -155,7 +156,7 @@ export class ClerkClient {
         throw new ClerkError(String(r.error_description || r.error));
     }
     if (typeof r.id_token !== 'string') throw new ClerkError('Clerk sent no ID token. The OAuth app needs the openid scope');
-    return { state: 'done', identity: await this.verifyIdToken(r.id_token) };
+    return { state: 'done', identity: await this.verifyIdToken(r.id_token), idToken: r.id_token };
   }
 
   private async signingKey(kid: string): Promise<Jwk | null> {

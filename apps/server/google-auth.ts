@@ -117,7 +117,11 @@ export function revokeSession(id: string): boolean {
 
 // ---------- sign-in flows ----------
 
-export type FlowPurpose = 'device' | 'link';
+/** `relay`: sign this machine in to the sync relay (apps/server/sync/setup.ts), which checks the ID token itself. */
+export type FlowPurpose = 'device' | 'link' | 'relay';
+
+/** What a `relay` flow does once Clerk approves. A throw ends the flow as refused, with its message. */
+export type FlowFinish = (who: Identity, idToken: string) => Promise<FlowOutcome>;
 
 interface Flow {
   id: string;
@@ -126,6 +130,7 @@ interface Flow {
   name: string;
   kind: SessionKind;
   code: DeviceCode;
+  finish: FlowFinish | null;
   expiresAt: number;
   /** Clerk is asked no sooner than this, whatever the client's pace. */
   nextPollAt: number;
@@ -137,6 +142,7 @@ interface Flow {
 export type FlowOutcome =
   | { state: 'signed_in'; kind: SessionKind; session: { id: string; token: string } }
   | { state: 'linked'; owner: Owner }
+  | { state: 'relay_signed_in'; email: string | null; relayChanged: boolean }
   | { state: 'refused'; error: string }
   | { state: 'denied' }
   | { state: 'expired' };
@@ -182,9 +188,13 @@ const defaultDeps: FlowDeps = { clerk: defaultClerk, now: Date.now };
 
 /**
  * Begin a sign-in. `device` makes a session for the owner and needs one linked; `link` makes the signer the owner,
- * and only a client holding the API token may start it (auth-api.ts checks that).
+ * and only a client holding the API token may start it (auth-api.ts checks that). `relay` runs opts.finish.
  */
-export async function startFlow(purpose: FlowPurpose, opts: { name: string; kind: SessionKind }, deps: FlowDeps = defaultDeps): Promise<FlowStart> {
+export async function startFlow(
+  purpose: FlowPurpose,
+  opts: { name: string; kind: SessionKind; finish?: FlowFinish },
+  deps: FlowDeps = defaultDeps,
+): Promise<FlowStart> {
   const client = deps.clerk();
   if (!client) throw new SignInError('Google sign-in is not set up on this Omni', 409);
   if (purpose === 'device' && !owner()) throw new SignInError('No Google account is linked to this Omni yet. Link one in Settings, Machines, on a device that is already paired', 409);
@@ -202,7 +212,7 @@ export async function startFlow(purpose: FlowPurpose, opts: { name: string; kind
   const id = randomUUID();
   const secret = randomBytes(24).toString('hex');
   const expiresAt = at + code.expiresIn * 1000;
-  flows.set(id, { id, secretHash: sha256(secret), purpose, name: opts.name, kind: opts.kind, code, expiresAt, nextPollAt: at + code.interval * 1000, interval: code.interval, outcome: null });
+  flows.set(id, { id, secretHash: sha256(secret), purpose, name: opts.name, kind: opts.kind, code, finish: opts.finish ?? null, expiresAt, nextPollAt: at + code.interval * 1000, interval: code.interval, outcome: null });
   return {
     flow: id,
     secret,
@@ -216,12 +226,12 @@ export async function startFlow(purpose: FlowPurpose, opts: { name: string; kind
 
 const secretMatches = (f: Flow, secret: string) => timingSafeEqual(Buffer.from(f.secretHash), Buffer.from(sha256(secret)));
 
-/** One poll from the client. Asks Clerk only when the interval Clerk set has passed. */
-export async function pollFlow(id: string, secret: string, deps: FlowDeps = defaultDeps): Promise<PollResult> {
+/** One poll from the client. Asks Clerk only when the interval Clerk set has passed. `relay` flows only answer when `relay` is set, and only they do then. */
+export async function pollFlow(id: string, secret: string, deps: FlowDeps = defaultDeps, relay = false): Promise<PollResult> {
   const at = deps.now();
   prune(at);
   const f = flows.get(id);
-  if (!f || !secretMatches(f, secret)) throw new SignInError('No such sign-in. Start again', 404);
+  if (!f || !secretMatches(f, secret) || (f.purpose === 'relay') !== relay) throw new SignInError('No such sign-in. Start again', 404);
   if (f.outcome) return f.outcome;
   if (at > f.expiresAt) return (f.outcome = { state: 'expired' });
   if (at < f.nextPollAt) return { state: 'pending' };
@@ -242,6 +252,17 @@ export async function pollFlow(id: string, secret: string, deps: FlowDeps = defa
     return { state: 'pending' };
   }
   if (r.state !== 'done') return (f.outcome = r);
+  if (f.finish) {
+    const finish = f.finish;
+    f.finish = null;
+    // Polls that come while it runs (a relay call) wait for its outcome instead of asking Clerk with a spent code.
+    f.nextPollAt = Infinity;
+    try {
+      return (f.outcome = await finish(r.identity, r.idToken));
+    } catch (err) {
+      return (f.outcome = { state: 'refused', error: (err as Error).message });
+    }
+  }
   if (f.purpose === 'link') return (f.outcome = { state: 'linked', owner: linkOwner(r.identity) });
   if (!isOwner(r.identity)) {
     const who = r.identity.email ? `${r.identity.email} does not` : 'That Google account does not';

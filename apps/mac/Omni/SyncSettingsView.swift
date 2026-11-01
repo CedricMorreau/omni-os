@@ -3,7 +3,7 @@ import OmniKit
 import SwiftUI
 
 /// The Sync part of the Machines tab (a tab of its own before #404), like the Web UI's Settings, Machines, Sync. A new
-/// model per client and per visit; a password or code typed and not sent goes when the tab or the window closes. The
+/// model per client and per visit; a sign-in still waiting for Clerk stops when the tab or the window closes. The
 /// status reloads every 5 seconds while it shows.
 struct SyncSettings: View {
   let model: AppModel
@@ -30,7 +30,7 @@ struct SyncSettings: View {
     .onChange(of: model.store.connection) { _, connection in
       if connection == .open, let sync { Task { await sync.load() } }
     }
-    .onDisappear { sync?.clearSecrets() }
+    .onDisappear { sync?.cancelSignIn() }
   }
 }
 
@@ -44,7 +44,7 @@ struct SyncForm: View {
     VStack(alignment: .leading, spacing: z(16)) {
       SettingsIntro(
         icon: "refresh",
-        text: Text("Sync keeps this Mac's history in step with your other Mac through your own Supabase project. Each Mac keeps its own database; Supabase only relays the changes. The sign-in token lives in \(storeLabel), and the password is never stored.")
+        text: Text("Sync keeps this Mac's history in step with your other machines. Each machine keeps its own database; your own Cloudflare relay only carries the changes. The relay URL and this Mac's sign-in token live in \(storeLabel). Sign in with the Google account linked under Google account.")
       )
 
       switch sync.loadState {
@@ -55,7 +55,7 @@ struct SyncForm: View {
       case .loaded:
         if let status = sync.status {
           if status.configured { statusSection(status) }
-          if status.needsSignIn { signInSection(signedOut: status.signedOut) }
+          if status.needsSignIn { signInSection(status) }
         }
       }
     }
@@ -64,7 +64,7 @@ struct SyncForm: View {
       Button("Sign Out", role: .destructive) { Task { await sync.signOut() } }
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("Omni stops syncing and removes the relay URL, the key and the sign-in token from \(storeLabel). The history on this Mac stays.")
+      Text("Omni stops syncing, ends this Mac's sign-in on the relay and removes the relay URL and its token from \(storeLabel). The history on this Mac stays.")
     }
   }
 
@@ -135,8 +135,11 @@ struct SyncForm: View {
       if let error = sync.actionError, error != s.lastError {
         ErrorNote(text: error)
       }
+      if sync.relayChanged {
+        DoneNote(text: "Signed in to a new relay. This Mac's history is queued for it.")
+      }
       HStack(alignment: .firstTextBaseline, spacing: z(12)) {
-        Text("Signing out removes the credentials from \(storeLabel). History stays on this Mac.")
+        Text("Signing out removes the relay URL and this Mac's token from \(storeLabel). History stays on this Mac.")
           .font(.omni(size: 12))
           .foregroundStyle(Tok.fg3)
           .fixedSize(horizontal: false, vertical: true)
@@ -161,84 +164,46 @@ struct SyncForm: View {
 
   // MARK: Sign-in
 
-  private func signInSection(signedOut: Bool) -> some View {
+  private func signInSection(_ s: SyncStatus) -> some View {
     SettingsCard(
-      title: signedOut ? "Sign in again" : "Sign in to your relay",
-      note: "Use the same Supabase user on each Mac. The one-time Supabase setup is in the README. Use the anon key, never the service-role key."
+      title: s.signedOut ? "Sign in again" : "Sign in to your relay",
+      note: "Use the same relay on every machine, and the Google account linked to this Omni. Setting up the relay is in docs/user/sync.md."
     ) {
-      if signedOut {
+      if s.signedOut {
         NeedsNote(text: "The relay signed this Mac out. Sign in again to keep syncing.")
+      } else if s.legacyRelay == true {
+        NeedsNote(text: "Sync moved from Supabase to a Cloudflare relay. Sign in once on each machine: this Mac's history is queued again, and nothing is lost.")
       }
-      HStack(alignment: .top, spacing: z(12)) {
+      if let flow = sync.signingIn {
+        DeviceCodePanel(flow: flow) { sync.cancelSignIn() }
+      } else {
         VStack(alignment: .leading, spacing: 0) {
-          FieldLabel(text: "Supabase URL")
-          TextField("Supabase URL", text: $sync.url, prompt: Text(verbatim: "https://abcd.supabase.co"))
+          FieldLabel(text: "Relay URL")
+          TextField("Relay URL", text: $sync.url, prompt: Text(verbatim: "https://omni-relay.<you>.workers.dev"))
             .textFieldStyle(.omniMono)
             .autocorrectionDisabled()
-        }
-        VStack(alignment: .leading, spacing: 0) {
-          FieldLabel(text: "Anon key")
-          SecureField("Anon key", text: $sync.anonKey, prompt: Text("The anon or publishable key"))
-            .textFieldStyle(.omniMono)
-        }
-      }
-      VStack(alignment: .leading, spacing: 0) {
-        FieldLabel(text: "Email")
-        TextField("Email", text: $sync.email, prompt: Text(verbatim: "you@example.com"))
-          .textFieldStyle(.omni)
-          .textContentType(.username)
-          .autocorrectionDisabled()
-      }
-      VStack(alignment: .leading, spacing: 0) {
-        FieldLabel(text: "Sign in with")
-        SegmentedPill(
-          selection: $sync.method,
-          options: [(SyncModel.Method.password, "Password"), (SyncModel.Method.code, "Email code")],
-          small: true
-        )
-        .accessibilityLabel("Sign in with")
-      }
-      switch sync.method {
-      case .password:
-        VStack(alignment: .leading, spacing: 0) {
-          FieldLabel(text: "Password")
-          SecureField("Password", text: $sync.password)
-            .textFieldStyle(.omni)
-            .textContentType(.password)
-            .privacySensitive()
             .onSubmit(signIn)
-        }
-      case .code:
-        if let email = sync.codeSentTo {
-          VStack(alignment: .leading, spacing: 0) {
-            FieldLabel(text: "Code", hint: "Omni emailed a code to \(email).")
-            HStack(spacing: z(8)) {
-              TextField("Code", text: $sync.code, prompt: Text("123456"))
-                .textFieldStyle(.omniMono)
-                .textContentType(.oneTimeCode)
-                .privacySensitive()
-                .onSubmit(signIn)
-              Button("Send Again") { sync.resetCode() }
-                .buttonStyle(.pill(.ghost, height: 32))
-            }
-          }
         }
       }
       if let error = sync.signInError {
         ErrorNote(text: error)
       }
-      HStack(spacing: z(10)) {
-        Button(sync.signInTitle, action: signIn)
-          .buttonStyle(.pill(.primary, height: 34))
-          .disabled(!sync.canSignIn)
-        if sync.isSigningIn { Loader(size: 14) }
-        Spacer(minLength: 0)
+      if sync.signingIn == nil {
+        HStack(spacing: z(10)) {
+          Button("Sign In with Google", action: signIn)
+            .buttonStyle(.pill(.primary, height: 34))
+            .disabled(!sync.canSignIn)
+          if sync.isStarting { Loader(size: 14) }
+          Spacer(minLength: 0)
+        }
       }
     }
   }
 
   private func signIn() {
-    Task { await sync.signIn() }
+    Task {
+      if let start = await sync.startSignIn(), let url = start.pageURL { NSWorkspace.shared.open(url) }
+    }
   }
 }
 

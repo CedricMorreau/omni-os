@@ -25,6 +25,8 @@ describe('terminal env', () => {
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_ANON_KEY: 'anon',
     SUPABASE_REFRESH_TOKEN: 'refresh',
+    OMNI_RELAY_URL: 'https://relay.example.dev',
+    OMNI_RELAY_TOKEN: 'omni_r_x',
     GROKBOT_WEBHOOK_URL: 'https://hook.example',
     GROKBOT_WEBHOOK_AUTH: 'token',
     UNSET: undefined,
@@ -46,6 +48,8 @@ describe('terminal env', () => {
       'SUPABASE_URL',
       'SUPABASE_ANON_KEY',
       'SUPABASE_REFRESH_TOKEN',
+      'OMNI_RELAY_URL',
+      'OMNI_RELAY_TOKEN',
       GROKBOT_WEBHOOK_URL,
       GROKBOT_WEBHOOK_AUTH,
     ]) {

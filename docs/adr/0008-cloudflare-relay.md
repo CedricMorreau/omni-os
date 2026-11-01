@@ -1,0 +1,28 @@
+# The sync relay is a Cloudflare Worker, and machines sign in to it with Google through Clerk
+
+ADR 0004 still holds: each machine keeps its own SQLite, and an append-only change log relays changes between them. This ADR changes what the relay runs on and how a machine signs in to it. The relay used to be a Supabase project. Ben set it up by pasting SQL and creating a user, and each machine signed in with a password or an emailed code. Omni already signs devices and MCP clients in with Google through Clerk (ADR 0007). Ben also has a Cloudflare account for the MCP tunnel.
+
+## Decision
+
+The relay is a Worker in `apps/relay/` that Ben deploys to his own Cloudflare account.
+
+- **One Durable Object per user** holds that user's change log and the machines' tokens in its SQLite. A Durable Object handles one request at a time, so seq order is commit order, which `omni_push`'s advisory lock gave before. The same object holds a WebSocket per machine (hibernating while idle) and sends `changes` to every machine but the one that pushed. This replaces Realtime.
+- **R2** holds thread files, session files and handoff bundles under `<user>/files/`. A change whose JSON is over 1 MB goes to `<user>/changes/` too, because a Durable Object's SQLite value holds at most 2 MB. Postgres refused that size, and U+0000 and lone surrogates, so `pgJson` is gone.
+- **Sign-in is Clerk's device grant.** The server runs it as for a new device. It hands the ID token to the relay's `/v1/auth/token`, which checks the RS256 signature against the instance's JWKS, the issuer, the audience (Omni's OAuth app), and that the token is under 10 minutes old. The user must be on the Worker's `ALLOWED_USERS`. The relay then answers with a token for that machine (`omni_r_<user>.<random>`) and keeps only its hash. That token and the relay URL are all a machine keeps, in its secret store. Neither rotates.
+- **Any entity name of the right shape is accepted.** The relay no longer lists entities, so a new synced entity needs no relay change. The `NEWER` list, `RelayEntityRefusedError` and the status's `refused` are gone. A machine on an older build keeps a change it has no handler for deferred, as before.
+- `npm run relay:config` prints the deploy steps with this install's Clerk issuer, client id and linked user filled in. `CLERK_ISSUER`, `CLERK_CLIENT_ID` and `ALLOWED_USERS` are Worker secrets, so a later `wrangler deploy` keeps them.
+
+## Considered
+
+- **Keep Supabase and switch its auth to Clerk** (Supabase third-party auth). Ben would keep two vendors and still paste SQL for each new entity. Supabase's free tier gives 1 GB of storage. R2 gives 10 GB and charges no egress.
+- **D1 instead of Durable Objects.** D1 is SQLite too, but has no WebSocket of its own and no single writer per user. Ordering would need a lock, and the nudge would need a Durable Object anyway.
+- **Have the relay check a Clerk session on every request.** Clerk's OAuth access tokens are opaque by default, so every request would mean a `userinfo` call or a short-lived token to refresh. A relay token per machine works offline from Clerk once issued, and it can be revoked per machine.
+
+## Consequences
+
+- Moving is one sign-in per machine. The status's `legacyRelay` is true while a machine still holds the Supabase secrets and nothing newer, and Settings says sync moved. The sign-in removes the Supabase secrets. Its relay id differs from the old one, so the cursor goes back to 0 and the machine's history queues again, as for any new relay. The Supabase project can be deleted after every machine has moved.
+- Every machine that syncs, the Linux box included, must use the Clerk app the relay trusts. Setup checks this against `/v1/info` before Clerk is asked. A Clerk user who is not on `ALLOWED_USERS` gets a refusal that names their user id, so letting a user in is one `wrangler secret put`.
+- Signing out on a machine revokes its token on the relay. Taking a user off `ALLOWED_USERS` signs out all of that user's machines at once. There is no list of machine tokens in the UI yet.
+- Free-plan limits apply: 100 MB per request (Omni caps files at 50 MB), and 100,000 Worker and Durable Object requests a day. At a sync a minute per machine, plus nudged syncs, two machines use a few thousand a day.
+- The relay only grows, as before: nothing prunes `changes`.
+- Tests cover the Worker's token checks and store on node:sqlite (`apps/relay/tests/`), and the server's transport against a fake fetch and WebSocket. The Worker itself runs only under `wrangler dev` or on Cloudflare.

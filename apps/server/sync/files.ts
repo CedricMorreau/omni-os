@@ -20,7 +20,7 @@ import { activeWorker, onSynced, type SyncWorker } from './worker.ts';
 
 /** The thread folder areas that sync. mcp.json, cursor-plugin/ and the rest are rebuilt per machine. */
 export const FILE_AREAS = ['uploads', 'artifacts', 'browser'] as const;
-/** Bigger files stay on their Mac (Supabase's default upload cap is 50 MB). */
+/** Bigger files stay on their Mac: a Worker takes request bodies up to 100 MB, and a 50 MB cap leaves room. */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 export interface FileEntry {

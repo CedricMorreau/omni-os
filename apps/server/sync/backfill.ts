@@ -1,6 +1,6 @@
 import { db, outbox, tx, type SyncEntity } from '../db.ts';
 
-// Queue every existing row for the relay again: after moving to a new Supabase project, or when the relay lost
+// Queue every existing row for the relay again: after moving to a new relay, or when the relay lost
 // history. The first sync on a machine already queues everything (outbox.arm); this is for later.
 // Idempotent: a row with an upsert already waiting is left alone, so running it twice queues nothing new.
 

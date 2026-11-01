@@ -17,7 +17,8 @@ private final class SyncServer: Sendable {
   private struct State {
     var status: String
     var map = #"{"map":{}}"#
-    var setup = #"{"state":"signed_in","email":"ben@example.com"}"#
+    var setup = #"{"flow":"f1","secret":"s1","userCode":"ABCD-EFGH","verificationUri":"https://clerk.example/device","verificationUriComplete":"https://clerk.example/device?code=ABCD-EFGH","expiresAt":"2026-11-01T12:10:00.000Z","interval":1}"#
+    var poll = #"{"state":"pending"}"#
     var failures: [String: (status: Int, body: String)] = [:]
   }
 
@@ -40,6 +41,7 @@ private final class SyncServer: Sendable {
       case ("GET", "/api/sync/status"): return StubTransport.Reply(body: s.status)
       case (_, "/api/sync/path-map"): return StubTransport.Reply(body: s.map)
       case ("POST", "/api/sync/setup"): return StubTransport.Reply(body: s.setup)
+      case ("POST", "/api/sync/setup/poll"): return StubTransport.Reply(body: s.poll)
       default: return StubTransport.Reply(body: #"{"ok":true,"status":\#(s.status)}"#)
       }
     }
@@ -48,6 +50,7 @@ private final class SyncServer: Sendable {
   func status(_ json: String) { box.state.withLock { $0.status = json } }
   func map(_ json: String) { box.state.withLock { $0.map = json } }
   func setup(_ json: String) { box.state.withLock { $0.setup = json } }
+  func poll(_ json: String) { box.state.withLock { $0.poll = json } }
   func fail(_ path: String, _ status: Int, _ body: String) { box.state.withLock { $0.failures[path] = (status, body) } }
 
   var client: OmniClient { OmniClient(port: 4799, transport: transport) }
@@ -67,6 +70,7 @@ private final class SyncServer: Sendable {
     #expect(s.phase == .waiting)
     #expect(s.phaseLabel == "Waiting to push")
     #expect(!s.needsSignIn)
+    #expect(s.legacyRelay == false)
   }
 
   @Test func phaseFollowsTheWebPage() throws {
@@ -84,6 +88,14 @@ private final class SyncServer: Sendable {
     let off = try OmniJSON.decoder().decode(SyncStatus.self, from: Data(try statusJSON(["configured": "false"]).utf8))
     let out = try OmniJSON.decoder().decode(SyncStatus.self, from: Data(try statusJSON(["signedOut": "true"]).utf8))
     #expect(off.needsSignIn && out.needsSignIn)
+    let legacy = try OmniJSON.decoder().decode(SyncStatus.self, from: Data(try statusJSON(["configured": "false", "legacyRelay": "true"]).utf8))
+    #expect(legacy.needsSignIn && legacy.legacyRelay == true)
+  }
+
+  @Test func anOlderServerWithoutLegacyRelayDecodes() throws {
+    let json = try statusJSON().replacingOccurrences(of: #""legacyRelay": false,"#, with: "")
+    let s = try OmniJSON.decoder().decode(SyncStatus.self, from: Data(json.utf8))
+    #expect(s.legacyRelay == nil)
   }
 }
 
@@ -114,13 +126,20 @@ private final class SyncServer: Sendable {
     #expect(try bodyJSON(writes[1]) == .object(["device": .string("here")]))
   }
 
-  @Test func setupSendsOnlyWhatIsGiven() async throws {
+  @Test func setupSendsTheURLAndPollsWithTheFlow() async throws {
     let server = try SyncServer()
-    server.setup(#"{"state":"code_sent","email":"ben@example.com"}"#)
-    let r = try await server.client.setupSync(SyncSetup(url: "https://x.supabase.co", anonKey: "anon", email: "ben@example.com"))
-    #expect(r == .codeSent(email: "ben@example.com"))
-    let body = try bodyJSON(try #require(server.writes.first))
-    #expect(body == .object(["url": .string("https://x.supabase.co"), "anonKey": .string("anon"), "email": .string("ben@example.com")]))
+    let start = try await server.client.setupSync(SyncSetup(url: "https://omni-relay.ben.workers.dev"))
+    #expect(start.userCode == "ABCD-EFGH")
+    #expect(start.pageURL == URL(string: "https://clerk.example/device?code=ABCD-EFGH"))
+    let signedIn = try statusJSON()
+    server.poll(#"{"state":"signed_in","email":"ben@example.com","relayChanged":true,"status":\#(signedIn)}"#)
+    let r = try await server.client.pollSyncSetup(start)
+    #expect(r.state == "signed_in" && r.email == "ben@example.com" && r.relayChanged == true)
+    #expect(r.status?.cursor == 418)
+    let w = server.writes
+    #expect(w.map(\.url!.path) == ["/api/sync/setup", "/api/sync/setup/poll"])
+    #expect(try bodyJSON(w[0]) == .object(["url": .string("https://omni-relay.ben.workers.dev")]))
+    #expect(try bodyJSON(w[1]) == .object(["flow": .string("f1"), "secret": .string("s1")]))
   }
 
   @Test func pathMapRoundTrips() async throws {
@@ -148,9 +167,7 @@ private final class SyncServer: Sendable {
   }
 
   private func fill(_ m: SyncModel) {
-    m.url = " https://x.supabase.co "
-    m.anonKey = "anon"
-    m.email = "ben@example.com"
+    m.url = " https://omni-relay.ben.workers.dev "
   }
 
   @Test func loadsStatusAndPathMapSorted() async throws {
@@ -169,72 +186,72 @@ private final class SyncServer: Sendable {
     #expect(m.loadState == .failed(OmniAPIError.unreachable("").message))
   }
 
-  @Test func passwordSignInClearsThePassword() async throws {
+  @Test func signInWaitsForClerkThenShowsTheStatus() async throws {
     let server = try SyncServer()
     server.status(try statusJSON(["configured": "false"]))
     let m = await loaded(server)
-    fill(m)
     #expect(!m.canSignIn)
-    m.password = "hunter2 "
+    fill(m)
     #expect(m.canSignIn)
-    #expect(m.signInTitle == "Sign In and Sync")
-    server.status(try statusJSON())
-    await m.signIn()
-    let body = try bodyJSON(try #require(server.writes.first))
-    #expect(body == .object([
-      "url": .string("https://x.supabase.co"), "anonKey": .string("anon"), "email": .string("ben@example.com"),
-      "password": .string("hunter2 "),
-    ]))
-    #expect(m.password.isEmpty)
-    #expect(m.signInError == nil)
+    let start = await m.startSignIn()
+    #expect(start?.userCode == "ABCD-EFGH")
+    #expect(m.signingIn == start && !m.canSignIn)
+    let first = try bodyJSON(try #require(server.writes.first))
+    #expect(first == .object(["url": .string("https://omni-relay.ben.workers.dev")]))
+
+    let signedIn = try statusJSON()
+    server.poll(#"{"state":"signed_in","email":"ben@example.com","relayChanged":true,"status":\#(signedIn)}"#)
+    try await waitFor("the sign-in", within: .seconds(5)) { m.signingIn == nil }
     #expect(m.status?.configured == true)
+    #expect(m.relayChanged)
+    #expect(m.signInError == nil)
   }
 
-  @Test func aRefusedPasswordStaysToFix() async throws {
+  @Test func aRefusedRelayShowsWhy() async throws {
     let server = try SyncServer()
-    server.fail("/api/sync/setup", 401, #"{"error":"Invalid login credentials"}"#)
+    server.fail("/api/sync/setup", 400, #"{"error":"That is not an Omni relay"}"#)
     let m = await loaded(server)
     fill(m)
-    m.password = "wrong"
-    await m.signIn()
-    #expect(m.signInError == "Invalid login credentials")
-    #expect(m.password == "wrong")
-    #expect(!m.isSigningIn)
+    #expect(await m.startSignIn() == nil)
+    #expect(m.signInError == "That is not an Omni relay")
+    #expect(m.signingIn == nil && !m.isStarting)
+    #expect(m.url == " https://omni-relay.ben.workers.dev ", "the URL stays to fix")
   }
 
-  @Test func codeSignInEmailsACodeFirst() async throws {
+  @Test func aSignInRefusedOnTheRelayEndsWithItsReason() async throws {
     let server = try SyncServer()
+    server.poll(#"{"state":"refused","error":"ben@example.com may not use this relay"}"#)
     let m = await loaded(server)
     fill(m)
-    m.method = .code
-    #expect(m.needsCode && m.canSignIn)
-    #expect(m.signInTitle == "Email Me a Code")
-    server.setup(#"{"state":"code_sent","email":"ben@example.com"}"#)
-    await m.signIn()
-    #expect(m.codeSentTo == "ben@example.com")
-    #expect(!m.needsCode && !m.canSignIn)
-
-    m.code = " 123456 "
-    server.setup(#"{"state":"signed_in","email":"ben@example.com"}"#)
-    await m.signIn()
-    let bodies = try server.writes.map(bodyJSON)
-    guard case .object(let first) = bodies[0], case .object(let second) = bodies[1] else { Issue.record("not objects"); return }
-    #expect(first["code"] == nil && first["password"] == nil)
-    #expect(second["code"] == .string("123456"))
-    #expect(second["password"] == nil)
-    #expect(m.code.isEmpty && m.codeSentTo == nil)
+    _ = await m.startSignIn()
+    try await waitFor("the refusal", within: .seconds(5)) { m.signingIn == nil }
+    #expect(m.signInError == "ben@example.com may not use this relay")
   }
 
-  @Test func anotherEmailAsksForANewCode() async throws {
+  @Test func aDeclinedOrExpiredCodeSaysSo() async throws {
     let server = try SyncServer()
-    server.setup(#"{"state":"code_sent","email":"ben@example.com"}"#)
+    server.poll(#"{"state":"denied"}"#)
     let m = await loaded(server)
     fill(m)
-    m.method = .code
-    await m.signIn()
-    #expect(m.codeSentTo != nil)
-    m.email = "other@example.com"
-    #expect(m.needsCode)
+    _ = await m.startSignIn()
+    try await waitFor("the denial", within: .seconds(5)) { m.signingIn == nil }
+    #expect(m.signInError == "Sign-in was declined on the Clerk page.")
+    server.poll(#"{"state":"expired"}"#)
+    _ = await m.startSignIn()
+    #expect(m.signInError == nil)
+    try await waitFor("the expiry", within: .seconds(5)) { m.signingIn == nil }
+    #expect(m.signInError == "The code expired before it was approved. Start again.")
+  }
+
+  @Test func cancelStopsPolling() async throws {
+    let server = try SyncServer()
+    let m = await loaded(server)
+    fill(m)
+    _ = await m.startSignIn()
+    m.cancelSignIn()
+    #expect(m.signingIn == nil && m.canSignIn)
+    try await Task.sleep(for: .milliseconds(1_200))
+    #expect(!server.writes.contains { $0.url!.path == "/api/sync/setup/poll" })
   }
 
   @Test func pauseResumeAndSignOut() async throws {

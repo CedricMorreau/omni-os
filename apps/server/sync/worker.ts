@@ -1,14 +1,14 @@
-import { kv, outbox, type OutboxRow, type SyncEntity } from '../db.ts';
-import { globalSecret, listSecrets, setSecret, SYNC_SECRETS } from '../secrets.ts';
+import { kv, outbox, type OutboxRow } from '../db.ts';
+import { globalSecret, LEGACY_SYNC_SECRETS, listSecrets, SYNC_SECRETS } from '../secrets.ts';
 import { applyBatch, deferredCount, getHandler, registeredEntities, retryDeferred, type ApplyContext } from './apply.ts';
-import { createSupabaseTransport, isEntityRefused, isoTs, isSignedOut, type Change, type SyncTransport } from './transport.ts';
+import { createRelayTransport, isoTs, isSignedOut, type Change, type SyncTransport } from './transport.ts';
 import { watchNetwork, type NetworkWatch } from './network.ts';
 import { automationsOwner, claimIfUnowned, type AutomationsOwner } from './owner.ts';
 import { hardwareId } from './hardware.ts';
 import './handlers/index.ts';
 
 // The sync loop: push the outbox in batches, then pull what other machines pushed since the cursor and apply it.
-// On start, every 60s, soon after a local write, when Realtime says another machine pushed or its link comes
+// On start, every 60s, soon after a local write, when the relay's WebSocket says another machine pushed or its link comes
 // back, when the network comes back, and on syncNow() (POST /api/sync/now, which the apps call on wake and focus).
 // A failure backs off exponentially and keeps the outbox; the next success clears it.
 
@@ -46,17 +46,17 @@ export interface SyncStatus {
   machineId: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
-  /** The relay refused this machine's refresh token: it takes a new sign-in, not a retry. */
+  /** The relay refused this machine's token: it takes a new sign-in, not a retry. */
   signedOut: boolean;
   /** Failed syncs in a row. */
   failures: number;
   nextSyncAt: string | null;
   /** Outbox rows waiting to push. */
   pending: number;
-  /** Outbox rows for an entity with no handler yet, or one the relay refuses. They push once it takes them. */
+  /** Outbox rows for an entity with no handler yet. They push once one ships. */
   held: number;
-  /** Entities the relay refused (set up by an older 0001_changes.sql): held until the SQL runs again. */
-  refused: SyncEntity[];
+  /** This machine still holds the Supabase relay's credentials and has not signed in to the Cloudflare one (ADR 0008). */
+  legacyRelay: boolean;
   /** Remote changes that could not apply yet. */
   deferred: number;
   cursor: number;
@@ -83,9 +83,6 @@ export interface SyncWorker {
 /** Delay before the next try after `failures` failed syncs in a row: 5s, 10s, 20s … up to 15 min. */
 export const backoffMs = (failures: number, base = 5_000, max = 15 * 60_000) =>
   Math.min(max, base * 2 ** Math.max(0, failures - 1));
-
-/** Entities a relay set up by an older 0001_changes.sql may refuse, newest first. The rest it always took. */
-const NEWER: readonly SyncEntity[] = ['assignment', 'remote_command', 'limit_stop', 'result_read', 'completion', 'folder'];
 
 /**
  * One change per row in the batch, in the order each first appears. Repeat writes to a row become one change
@@ -140,29 +137,14 @@ export function createSyncWorker(opts: SyncWorkerOptions): SyncWorker {
   let inflight: Promise<SyncResult> | null = null;
   let queued: Promise<SyncResult> | null = null;
 
-  /**
-   * Entities the relay refused, from the newest down. Each sync tries them again first, so they flow as soon as
-   * the relay takes them; until then the rest syncs as before and these wait in the outbox.
-   */
-  const refused = new Set<SyncEntity>();
-  const pushable = () => registeredEntities().filter((e) => !refused.has(e));
-
   async function push(): Promise<number> {
     let pushed = 0;
     for (;;) {
       if (stopped) return pushed;
-      const rows = outbox.pending(batch, pushable());
+      const rows = outbox.pending(batch, registeredEntities());
       if (!rows.length) return pushed;
       const changes = toChanges(rows, machineId);
-      try {
-        if (changes.length) await transport.push(changes);
-      } catch (err) {
-        const newest = NEWER.find((e) => !refused.has(e) && changes.some((c) => c.entity === e));
-        if (!isEntityRefused(err) || !newest) throw err;
-        refused.add(newest);
-        console.warn(`[sync] ${(err as Error).message}. ${newest} changes wait until it does.`);
-        continue;
-      }
+      if (changes.length) await transport.push(changes);
       outbox.ack(rows.map((r) => r.id));
       pushed += changes.length;
       if (rows.length < batch) return pushed;
@@ -193,7 +175,6 @@ export function createSyncWorker(opts: SyncWorkerOptions): SyncWorker {
 
   async function cycle(): Promise<SyncResult> {
     const result: SyncResult = { pushed: 0, pulled: 0, applied: 0, skipped: 0, deferred: 0 };
-    refused.clear();
     try {
       result.pushed = await push();
       await pull(result);
@@ -272,8 +253,7 @@ export function createSyncWorker(opts: SyncWorkerOptions): SyncWorker {
     },
     status() {
       return {
-        ...baseStatus(pushable()),
-        refused: [...refused],
+        ...baseStatus(),
         configured: true,
         running: !!inflight,
         machineId,
@@ -311,14 +291,17 @@ export async function syncNow(): Promise<SyncResult | null> {
   return active ? active.syncNow() : null;
 }
 
-/** True when all three sync credentials are named in the secrets table. Reads names only, never the secret store. */
+const globalNames = () => new Set(listSecrets().filter((s) => s.scope === 'global').map((s) => s.name));
+
+/** True when both sync credentials are named in the secrets table. Reads names only, never the secret store. */
 export function syncConfigured(): boolean {
-  const names = new Set(listSecrets().filter((s) => s.scope === 'global').map((s) => s.name));
+  const names = globalNames();
   return Object.values(SYNC_SECRETS).every((n) => names.has(n));
 }
 
-function baseStatus(entities = registeredEntities()): SyncStatus {
-  const counts = outbox.counts(entities);
+function baseStatus(): SyncStatus {
+  const counts = outbox.counts(registeredEntities());
+  const names = globalNames();
   return {
     configured: syncConfigured(),
     enabled: kv.get<boolean>('sync.enabled') !== false,
@@ -331,7 +314,7 @@ function baseStatus(entities = registeredEntities()): SyncStatus {
     nextSyncAt: null,
     pending: counts.pending,
     held: counts.held,
-    refused: [],
+    legacyRelay: !Object.values(SYNC_SECRETS).every((n) => names.has(n)) && LEGACY_SYNC_SECRETS.some((n) => names.has(n)),
     deferred: deferredCount(),
     cursor: kv.get<number>('sync.cursor') ?? 0,
     automations: automationsOwner(),
@@ -346,18 +329,9 @@ export const syncStatus = (): SyncStatus => (active ? active.status() : baseStat
  */
 export async function startSync(): Promise<SyncWorker | null> {
   if (!syncConfigured() || kv.get<boolean>('sync.enabled') === false) return null;
-  const [url, anonKey, refreshToken] = await Promise.all([
-    globalSecret(SYNC_SECRETS.url),
-    globalSecret(SYNC_SECRETS.anonKey),
-    globalSecret(SYNC_SECRETS.refreshToken),
-  ]);
-  if (!url || !anonKey || !refreshToken) return null;
-  const transport = createSupabaseTransport({
-    url,
-    anonKey,
-    refreshToken,
-    onRefreshToken: (token) => setSecret('global', SYNC_SECRETS.refreshToken, token),
-  });
+  const [url, token] = await Promise.all([globalSecret(SYNC_SECRETS.url), globalSecret(SYNC_SECRETS.token)]);
+  if (!url || !token) return null;
+  const transport = createRelayTransport({ url, token });
   const w = createSyncWorker({ transport, autoPushMs: 2_000, network: watchNetwork });
   await setActiveWorker(w);
   // Replaced again while the last one finished (a second sign-in): that one starts instead.

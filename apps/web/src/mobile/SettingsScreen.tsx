@@ -8,7 +8,7 @@ import { useShell } from './shell.tsx';
 
 function syncSub(s: SyncStatus | undefined, now: number) {
   if (!s) return 'Reading sync';
-  if (!s.configured) return 'Sync is off';
+  if (!s.configured) return s.legacyRelay ? 'Sync moved to Cloudflare: sign in again' : 'Sync is off';
   if (s.signedOut) return 'Signed out of sync';
   if (s.lastError) return `Sync failing: ${s.lastError}`;
   return s.lastSyncAt ? `Synced ${relTime(s.lastSyncAt, now)}` : 'Not synced yet';
