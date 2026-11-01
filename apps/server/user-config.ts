@@ -211,6 +211,8 @@ export const resolved = {
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+  /** The tunnel's https origin, no trailing slash, or '' when unset. */
+  mcpPublicUrl: () => (process.env.OMNI_MCP_PUBLIC_URL ?? userConfig().integrations.mcpPublicUrl).trim().replace(/\/+$/, ''),
   clerkPublishableKey: () => (process.env.OMNI_CLERK_PUBLISHABLE_KEY ?? userConfig().integrations.clerkPublishableKey).trim(),
   clerkClientId: () => (process.env.OMNI_CLERK_CLIENT_ID ?? userConfig().integrations.clerkClientId).trim(),
 };

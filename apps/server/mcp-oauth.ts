@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { DEFAULT_CLERK_PUBLISHABLE_KEY, issuerFromKey } from './clerk.ts';
 import { owner } from './google-auth.ts';
-import { hostAllowed } from './request-guard.ts';
+import { mcpHostAllowed } from './request-guard.ts';
 import { resolved } from './user-config.ts';
 
 /** What a client asks Clerk for: enough for userinfo to name the user. */
@@ -77,7 +77,7 @@ export async function isOwnerToken(token: string, now = Date.now()): Promise<boo
   return sub !== null && sub === owner()?.sub;
 }
 
-/** The address a client reached this server on: through Funnel, the https .ts.net name tailscale passes on. */
+/** The address a client reached this server on: through a Cloudflare Tunnel, the https public name cloudflared passes on. */
 export function publicBase(c: Context): string {
   const url = new URL(c.req.url);
   const proto = c.req.header('x-forwarded-proto')?.split(',')[0].trim() || url.protocol.replace(':', '');
@@ -118,7 +118,7 @@ function clerkMetadata(issuer: string, now = Date.now()): Promise<unknown> {
 export const oauthMetadataApi = new Hono();
 
 oauthMetadataApi.use('*', async (c, next) => {
-  if (!hostAllowed(hostnameOf(c.req.header('host') ?? new URL(c.req.url).host))) return c.json({ error: 'Forbidden: host not allowed' }, 403);
+  if (!mcpHostAllowed(hostnameOf(c.req.header('host') ?? new URL(c.req.url).host))) return c.json({ error: 'Forbidden: host not allowed' }, 403);
   if (c.req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   await next();
   for (const [k, v] of Object.entries(CORS)) c.res.headers.set(k, v);

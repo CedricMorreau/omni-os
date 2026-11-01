@@ -131,6 +131,18 @@ export const SETTING_FIELDS = [
     max: 500,
   },
   {
+    // The https address a Cloudflare Tunnel forwards /mcp and /.well-known on, like https://omni.example.com. Only those
+    // two routes answer to its name: /api still refuses it, so a tunnel that forwards everything opens nothing more.
+    section: 'integrations',
+    key: 'mcpPublicUrl',
+    label: 'Public MCP URL',
+    input: 'url',
+    page: null,
+    placeholder: 'https://omni.example.com',
+    default: '',
+    max: 300,
+  },
+  {
     // The Clerk instance Google sign-in goes through (apps/server/clerk.ts), by its publishable key. Empty: the shared
     // instance in DEFAULT_CLERK_PUBLISHABLE_KEY. Public, like a URL: it only says where the instance lives.
     section: 'integrations',

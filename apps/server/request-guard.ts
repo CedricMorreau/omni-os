@@ -24,6 +24,27 @@ export function hostAllowed(hostname: string, extra: readonly string[] = extraHo
   return extra.includes(h);
 }
 
+/** The hostname of `integrations.mcpPublicUrl`, or '' when unset. */
+export function mcpPublicHost(): string {
+  const url = resolved.mcpPublicUrl();
+  if (!url) return '';
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * hostAllowed, plus the Cloudflare Tunnel's public name. Only /mcp and /.well-known use it: requestGuard keeps
+ * refusing that name on /api, so a tunnel whose ingress forwards every path still reaches nothing else.
+ */
+export function mcpHostAllowed(hostname: string): boolean {
+  if (hostAllowed(hostname)) return true;
+  const own = mcpPublicHost();
+  return !!own && hostname.toLowerCase().replace(/\.$/, '') === own;
+}
+
 function extraHosts(): string[] {
   const list = (process.env.OMNI_ALLOWED_HOSTS ?? '').split(',');
   if (!['0.0.0.0', '::'].includes(config.host)) list.push(config.host);
@@ -91,9 +112,10 @@ export function viaTailnet(hostname: string): boolean {
  * Headers a proxy in front of the server adds. tailscale serve always sets X-Forwarded-Host from the incoming Host,
  * and X-Forwarded-For and the Tailscale-* identity headers when it knows them (ipn/ipnlocal/serve.go,
  * `addProxyForwardedHeaders` and `addTailscaleIdentityHeaders`). A client behind it can pick its Host, but it cannot
- * take a header off the request the proxy sends on. Omni's own loopback clients and the vite dev proxy send none.
+ * take a header off the request the proxy sends on. cloudflared adds Cf-Connecting-IP and X-Forwarded-For the same way.
+ * Omni's own loopback clients and the vite dev proxy send none.
  */
-const PROXY_HEADERS = ['x-forwarded-host', 'x-forwarded-for', 'x-forwarded-proto', 'forwarded', 'tailscale-user-login', 'tailscale-funnel-request'];
+const PROXY_HEADERS = ['x-forwarded-host', 'x-forwarded-for', 'x-forwarded-proto', 'forwarded', 'tailscale-user-login', 'tailscale-funnel-request', 'cf-connecting-ip'];
 
 /** The request came in through tailscale serve (or another proxy), whatever Host it names. */
 const cameThroughProxy = (c: Context, host: string) => viaTailnet(hostnameOf(host)) || PROXY_HEADERS.some((h) => c.req.header(h) !== undefined);
@@ -116,7 +138,9 @@ const ownAddresses = () => Object.values(networkInterfaces()).flatMap((list) => 
  */
 export function fromThisMac(c: Context): boolean {
   const proxied = cameThroughProxy(c, requestHost(c));
-  const client = proxied ? c.req.header('x-forwarded-for')?.split(',')[0] : (c.env as { incoming?: IncomingMessage } | undefined)?.incoming?.socket.remoteAddress;
+  // Cloudflare sets Cf-Connecting-IP itself; the first X-Forwarded-For entry through it is whatever the client sent.
+  const forwarded = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0];
+  const client = proxied ? forwarded : (c.env as { incoming?: IncomingMessage } | undefined)?.incoming?.socket.remoteAddress;
   if (client === undefined) return !proxied;
   return ownAddresses().includes(client.trim().toLowerCase().replace(/^::ffff:(?=\d+\.)/, ''));
 }

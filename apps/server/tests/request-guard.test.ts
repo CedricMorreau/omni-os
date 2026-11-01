@@ -57,6 +57,8 @@ describe('requestGuard: the token', () => {
     expect((await get('/api/auth/desktop-pair')).status).toBe(200);
     expect((await get('/api/auth/desktop-pair', { 'x-forwarded-host': 'box.tail1234.ts.net' })).status).toBe(403);
     expect((await get('/api/auth/desktop-pair', { authorization: `Bearer ${TOKEN}`, 'x-forwarded-for': '100.64.0.2' })).status).toBe(403);
+    // cloudflared, with a spoofed loopback first in X-Forwarded-For: still a proxy.
+    expect((await get('/api/auth/desktop-pair', { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '127.0.0.1, 203.0.113.9' })).status).toBe(403);
     expect((await get('/api/auth/desktop-pair', { 'sec-fetch-site': 'cross-site' })).status).toBe(403);
     expect((await get('/api/auth/desktop-pair', { host: 'evil.example' })).status).toBe(403);
     expect((await app.request('http://127.0.0.1:4747/api/auth/desktop-pair', { method: 'POST', headers: { host: '127.0.0.1:4747', authorization: '' } })).status).toBe(401);
@@ -109,7 +111,7 @@ describe('requestGuard: through tailscale serve', () => {
   it('needs the login when tailscale serve forwards the request, whatever Host the client names', async () => {
     process.env.OMNI_TAILSCALE_LOGIN = 'ben@example.com';
     // tailscale serve always sets X-Forwarded-Host; a client behind it picked Host: 127.0.0.1.
-    const proxies: Record<string, string>[] = [{ 'x-forwarded-host': '127.0.0.1:4747' }, { 'x-forwarded-for': '100.101.1.2' }, { 'tailscale-funnel-request': '?1' }];
+    const proxies: Record<string, string>[] = [{ 'x-forwarded-host': '127.0.0.1:4747' }, { 'x-forwarded-for': '100.101.1.2' }, { 'tailscale-funnel-request': '?1' }, { 'cf-connecting-ip': '203.0.113.9' }];
     for (const proxied of proxies) {
       expect((await get('/api/threads', { ...AUTH, ...proxied })).status, JSON.stringify(proxied)).toBe(403);
       expect((await get('/api/threads', { ...AUTH, ...proxied, 'tailscale-user-login': 'mallory@example.com' })).status).toBe(403);
