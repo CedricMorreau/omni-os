@@ -4,13 +4,25 @@ import Foundation
 public struct UpdateNotices: Hashable, Sendable {
   public var serverBehind = false
   public var appBehind = false
+  /// How many commits on main the further behind of the two lacks. nil when git can't say.
+  public var behindBy: Int?
 
-  public init(serverBehind: Bool = false, appBehind: Bool = false) {
+  public init(serverBehind: Bool = false, appBehind: Bool = false, behindBy: Int? = nil) {
     self.serverBehind = serverBehind
     self.appBehind = appBehind
+    self.behindBy = behindBy
   }
 
   public var isEmpty: Bool { !serverBehind && !appBehind }
+
+  /// The Update row's line.
+  public var label: String {
+    switch behindBy {
+    case .some(1): "Omni has 1 new commit on main."
+    case .some(let n) where n > 1: "Omni has \(n) new commits on main."
+    default: "An update is ready."
+    }
+  }
 }
 
 public enum UpdateCheck {
@@ -46,15 +58,39 @@ public enum UpdateCheck {
 }
 
 public enum RepoHead {
-  /// The commit `main` points at in the repo, nil when git can't say.
-  public static func main(repo: URL) async -> String? {
+  private static func git(_ repo: URL, _ arguments: [String], timeout: Duration = .seconds(5)) async -> (status: Int32?, text: String)? {
     let out = await Spawn.capture(
-      "/usr/bin/git", ["-C", repo.path, "rev-parse", "--verify", "--quiet", "main^{commit}"],
-      environment: ["HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"], timeout: .seconds(5)
+      "/usr/bin/git", ["-C", repo.path] + arguments,
+      environment: ["HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"], timeout: timeout
     )
-    guard let out, out.status == 0 else { return nil }
-    let text = String(decoding: out.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-    return text.isEmpty ? nil : text
+    guard let out else { return nil }
+    return (out.status, String(decoding: out.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+  }
+
+  private static func commit(_ repo: URL, _ ref: String) async -> String? {
+    guard let out = await git(repo, ["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"]), out.status == 0 else { return nil }
+    return out.text.isEmpty ? nil : out.text
+  }
+
+  /// main's newest commit known here: origin/main when it contains the local main (or there is no local main),
+  /// else the local main. nil when git can't say. The server's `mainHead` (apps/server/update.ts) picks the same.
+  public static func main(repo: URL) async -> String? {
+    let local = await commit(repo, "refs/heads/main")
+    guard let remote = await commit(repo, "refs/remotes/origin/main") else { return local }
+    guard let local else { return remote }
+    return await contains(repo: repo, commit: remote, ancestor: local) == true ? remote : local
+  }
+
+  /// Asks origin for its main. False when it could not, like offline.
+  @discardableResult
+  public static func fetch(repo: URL) async -> Bool {
+    await git(repo, ["fetch", "--quiet", "origin", "main"], timeout: .seconds(30))?.status == 0
+  }
+
+  /// How many commits `target` has that `commit` lacks, nil when git can't say.
+  public static func count(repo: URL, from commit: String, to target: String) async -> Int? {
+    guard let out = await git(repo, ["rev-list", "--count", "\(commit)..\(target)"]), out.status == 0 else { return nil }
+    return Int(out.text)
   }
 
   /// Whether `ancestor` is in `commit`'s history, nil when git can't say (an unknown commit, no repo).

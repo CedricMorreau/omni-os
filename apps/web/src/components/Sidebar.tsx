@@ -16,6 +16,7 @@ import { FolderNameField, FolderRow, AddFolderButton } from './sidebar/FolderRow
 import { ChannelThreadEntry, NavLink, RunningBadge, SectionLink, ThreadLink, ThreadSection, useSectionFold } from './sidebar/SidebarRows.tsx';
 import { ChannelListLink, WorkspaceLinks } from './sidebar/SidebarLinks.tsx';
 import { UsageCard } from './sidebar/UsageCard.tsx';
+import { UpdateNotice } from './UpdateNotice.tsx';
 
 /** Past this many threads a channel shows "N more" (or "See all threads" when highlighted) and links to its full list. */
 const MAX_THREADS = 5;
@@ -260,6 +261,7 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
 
       {/* The machine's name moved to Settings, Machines (#405). */}
       <div className="px-3 pt-1 pb-3">
+        <UpdateNotice className="mb-2" />
         <UsageCard />
       </div>
     </nav>

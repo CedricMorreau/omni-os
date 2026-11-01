@@ -46,7 +46,9 @@ public struct ServerRecord: Codable, Hashable, Sendable {
 
 /// Finds, starts and stops the Omni server on the port in the settings. It attaches to a server that
 /// already answers there, whoever started it, once that server proves it holds this install's token, and never
-/// starts a second one. A server it starts outlives the app, and the next launch knows it by its record.
+/// starts a second one. A server it starts runs in a session of its own, so it can be kept running past a quit
+/// (Quit asks while turns run), and the next launch knows it by its record. When the server asks to be started
+/// again (Update in the Web UI exits with `restartExitCode`), it starts it again.
 @MainActor @Observable public final class ServerSupervisor {
   public enum State: Hashable, Sendable {
     case unknown
@@ -73,13 +75,16 @@ public struct ServerRecord: Codable, Hashable, Sendable {
     public var stopTimeout: Duration
     /// nil for the file the server writes in its data dir (`ServerToken.file(repo:environment:)`).
     public var token: ServerToken?
+    /// A server that asks to be started again sooner than this after its start is not: that would loop.
+    public var restartAfter: Duration
 
     public init(
       launcher: ServerLauncher = ServerLauncher(), logURL: URL = Self.defaultLog, recordURL: URL = Self.defaultRecord,
       probeTimeout: Duration = .milliseconds(1500), startTimeout: Duration = .seconds(20), stopTimeout: Duration = .seconds(8),
-      token: ServerToken? = nil
+      token: ServerToken? = nil, restartAfter: Duration = .seconds(10)
     ) {
       self.token = token
+      self.restartAfter = restartAfter
       self.launcher = launcher
       self.logURL = logURL
       self.recordURL = recordURL
@@ -88,6 +93,9 @@ public struct ServerRecord: Codable, Hashable, Sendable {
       self.stopTimeout = stopTimeout
     }
   }
+
+  /// The exit code of a server that asks the app to start it again: Update in the Web UI (apps/server/update.ts).
+  public static let restartExitCode: Int32 = 75
 
   public private(set) var state = State.unknown
   /// The port of the last check.
@@ -387,7 +395,22 @@ public struct ServerRecord: Codable, Hashable, Sendable {
 
   private func exited(_ pid: Int32) {
     guard watched == pid else { return }
+    let again = asksToStartAgain(pid)
     watch(nil)
-    Task { await self.refresh() }
+    Task {
+      if again { await self.start() } else { await self.refresh() }
+    }
+  }
+
+  /// A server the app started that ended with `restartExitCode`, and ran long enough that starting it again can't
+  /// loop. A child of this launch tells by its exit code. One an earlier launch started (or one already reaped)
+  /// can't, so the last lines of its log say it: the server logs `[omni] update, closing live sessions` first.
+  private func asksToStartAgain(_ pid: Int32) -> Bool {
+    guard case .group(let record) = target, record.pid == pid else { return false }
+    let after = options.restartAfter.components
+    let minimum = Double(after.seconds) + Double(after.attoseconds) / 1e18
+    guard Date.now.timeIntervalSince(record.startedAt) >= minimum else { return false }
+    if Spawn.hasExited(pid) { return Spawn.reap(pid) == Self.restartExitCode }
+    return ServerProcess.logTail(options.logURL, lines: 8).contains { $0.contains("[omni] update, closing live sessions") }
   }
 }

@@ -15,7 +15,7 @@ Then pair the phone once. On the Mac, print a pairing link with the `.ts.net` ad
 OMNI_URL=https://<your-mac>.<tailnet>.ts.net scripts/omni.sh --pair
 ```
 
-Open that link on the phone (AirDrop it, or paste it). Or open the `.ts.net` address and paste the token from `data/api-token` into the pairing screen. Once a Google account is linked (below), the pairing screen also offers Sign in with Google, so a new device needs no token at all. The server itself stays on loopback; Tailscale is the door. The Mac has to be awake: `scripts/install-launchd.sh` keeps it from idle-sleeping while the server runs.
+Open that link on the phone (AirDrop it, or paste it). Or open the `.ts.net` address and paste the token from `data/api-token` into the pairing screen. Once a Google account is linked (below), the pairing screen also offers Sign in with Google, so a new device needs no token at all. The server itself stays on loopback; Tailscale is the door. The Mac has to be awake: the server keeps it from idle-sleeping while it runs, so leave the Omni app open.
 
 Every client names the Mac its Omni runs on: the desktop sidebar's footer, the phone's Channels and Settings headers, and the Mac app's server line. A browser on another device gets a Remote chip, and its tab title starts with that Mac's name.
 

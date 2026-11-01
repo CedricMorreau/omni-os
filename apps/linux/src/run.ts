@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { HELP, appUrl, browserCommand, installPlan, windowArgs } from './desktop.ts';
 import {
   checkoutMessage, checkoutProblem, childEnv, decide, fallbackPath, formatVersion, nodeDirFirst,
-  orderedNodeBins, parseNodeVersion, pickNode, probePort, serverArgs, settleProbe, tokenFile, waitForReady,
+  orderedNodeBins, parseNodeVersion, pickNode, probePort, serverArgs, settleProbe, shouldRestart, tokenFile, waitForReady,
 } from './launch.ts';
 import {
   acquireInstance, browserProfile, commandPath, focusWindow, installedNodes, isExecutable,
@@ -162,7 +162,7 @@ export async function run(argv: string[], io: Io = { log: (line) => console.log(
     return 0;
   }
 
-  let started: Spawned | null = null;
+  let started = null as Spawned | null;
   let window: ReturnType<typeof spawn> | null = null;
   let cancelled = false;
   const onSignal = () => {
@@ -178,11 +178,13 @@ export async function run(argv: string[], io: Io = { log: (line) => console.log(
       io.error(decision.message);
       return 1;
     }
-    if (decision.action === 'start') {
+    const logFile = stateLog(process.env, home);
+    let startedAt = 0;
+    const startServer = async () => {
       const env = childEnv(process.env, nodeDirFirst(process.execPath, loginPath), parsed.port);
-      const logFile = stateLog(process.env, home);
       started = spawnServer({ node: process.execPath, args: serverArgs(), cwd: repo, env, logFile });
-      const ready = await waitForReady({
+      startedAt = Date.now();
+      return waitForReady({
         probe,
         exited: () => started?.exited() ?? null,
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -191,6 +193,9 @@ export async function run(argv: string[], io: Io = { log: (line) => console.log(
         logTail: () => readTail(logFile),
         cancelled: () => cancelled,
       });
+    };
+    if (decision.action === 'start') {
+      const ready = await startServer();
       if (!ready.ok) {
         if (!cancelled) io.error(ready.message);
         return cancelled ? 0 : 1;
@@ -204,7 +209,20 @@ export async function run(argv: string[], io: Io = { log: (line) => console.log(
     const profile = browserProfile(process.env, home);
     mkdirSync(profile, { recursive: true, mode: 0o700 });
     window = spawn(browser, windowArgs(appUrl(parsed.port), profile), { stdio: 'ignore' });
-    const code = await waitExit(window);
+    // Update in the Web UI ends the server with RESTART_EXIT_CODE: start it again while the window stays open.
+    let restarting = false;
+    const watch = setInterval(() => {
+      const code = started?.exited() ?? null;
+      if (restarting || code === null || cancelled) return;
+      if (!shouldRestart(code, Date.now() - startedAt)) return;
+      restarting = true;
+      io.log('The server restarted for an update.');
+      void startServer().then((ready) => {
+        if (!ready.ok && !cancelled) io.error(ready.message);
+        restarting = false;
+      });
+    }, 500);
+    const code = await waitExit(window).finally(() => clearInterval(watch));
     return code === 0 ? 0 : code;
   } finally {
     process.off('SIGINT', onSignal);

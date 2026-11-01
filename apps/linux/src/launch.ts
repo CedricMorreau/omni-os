@@ -112,7 +112,17 @@ export function childEnv(app: NodeJS.ProcessEnv, path: string, port: number): Re
   env.NODE_ENV = 'production';
   env.NODE_OPTIONS = '--disable-warning=ExperimentalWarning';
   env.OMNI_PORT = String(port);
+  // This app starts the server again when it exits with RESTART_EXIT_CODE, so the Web UI offers Update.
+  env.OMNI_SUPERVISOR = 'linux';
   return env;
+}
+
+/** The server's exit code after the Web UI's Update (apps/server/update.ts): start it again. */
+export const RESTART_EXIT_CODE = 75;
+
+/** Start the server again after it exited: only for Update's code, and not for one that asks again at once. */
+export function shouldRestart(code: number | null, ranMs: number): boolean {
+  return code === RESTART_EXIT_CODE && ranMs >= 10_000;
 }
 
 export function proofFor(token: string, port: number, nonce: string): string {

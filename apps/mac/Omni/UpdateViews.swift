@@ -2,7 +2,7 @@ import AppKit
 import OmniKit
 import SwiftUI
 
-/// Above the detail: the server or the app is behind main, and the progress of Restart and Rebuild.
+/// Above the detail: Omni is behind main, with one Update button, and the progress of the update.
 struct UpdateBar: View {
   let updater: Updater
   @State private var confirmRestart = false
@@ -21,39 +21,38 @@ struct UpdateBar: View {
           Button("Open Log") { NSWorkspace.shared.open(Updater.webBuildLog) }.buttonStyle(.pill(.secondary, height: 26))
           Button("Dismiss") { updater.restart.dismissFailure() }.buttonStyle(.pill(.ghost, height: 26))
         }
-      } else if updater.notices.serverBehind {
-        row(icon: .icon("refresh"), text: "The server is behind main.") {
-          Button("Restart") {
-            if updater.restartStopsOutsideServer { confirmRestart = true } else { Task { await updater.restartServer() } }
+      } else {
+        switch updater.rebuild {
+        case .building:
+          row(icon: nil, text: "Building the app. It relaunches when it is done.") {}
+        case .failed(let message):
+          row(icon: .needs, text: message) {
+            Button("Open Log") { NSWorkspace.shared.open(Updater.appRebuildLog) }.buttonStyle(.pill(.secondary, height: 26))
+            Button("Dismiss") { updater.dismissRebuildFailure() }.buttonStyle(.pill(.ghost, height: 26))
           }
-          .buttonStyle(.pill(.primary, height: 26))
-        }
-      }
-
-      switch updater.rebuild {
-      case .building:
-        row(icon: nil, text: "Building the app. It relaunches when it is done.") {}
-      case .failed(let message):
-        row(icon: .needs, text: message) {
-          Button("Open Log") { NSWorkspace.shared.open(Updater.appRebuildLog) }.buttonStyle(.pill(.secondary, height: 26))
-          Button("Dismiss") { updater.dismissRebuildFailure() }.buttonStyle(.pill(.ghost, height: 26))
-        }
-      case .idle:
-        if updater.notices.appBehind {
-          row(icon: .icon("download"), text: "This app is behind main.") {
-            Button("Rebuild and Relaunch") { Task { await updater.rebuildApp() } }
+        case .idle:
+          if !updater.notices.isEmpty {
+            row(icon: .icon("download"), text: updater.notices.label) {
+              Button("Update") {
+                if updater.notices.serverBehind && updater.restartStopsOutsideServer {
+                  confirmRestart = true
+                } else {
+                  Task { await updater.update() }
+                }
+              }
               .buttonStyle(.pill(.primary, height: 26))
+            }
           }
         }
       }
     }
     .confirmationDialog(
-      "Restart the server?", isPresented: $confirmRestart, titleVisibility: .visible
+      "Update the server?", isPresented: $confirmRestart, titleVisibility: .visible
     ) {
-      Button("Stop and Restart") { Task { await updater.restartServer() } }
+      Button("Stop and Update") { Task { await updater.update() } }
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("This server was started outside the app. Restart stops that process and starts a new one from the app.")
+      Text("This server was started outside the app. Update stops that process and starts a new one from the app.")
     }
   }
 
