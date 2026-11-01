@@ -42,6 +42,7 @@ Before this, the relay was a Supabase project. A machine that still holds the Su
 
 Pick where a new thread runs: this machine, or any other synced machine, such as a Linux box with more CPU and memory. The machine you talk to stays the hub. The thread is made there, goes to the other machine with its first message, runs there, and syncs back as it goes, so you watch it from the hub as usual (a few seconds behind).
 
+- A machine whose sync state was reset comes back under a new id. Every picker lists one entry per Tailscale node, the newest, so the old id no longer shows. Threads still assigned to the old id stay on it until they are handed off.
 - The default is Settings > Machines, Run new threads on (`runOn.device` in `data/omni.config.json`, per machine). The new-thread composer's Machine chip ("On This Mac", next to the model pill) overrides it per thread, on desktop, phone and the Mac app; it is hidden while this is the only machine. The Conductor's `delegate` takes `device` too (a machine's name or id, or `here`).
 - An offline default stays selected in the composer. Sending reports why it cannot run there; choose This Mac explicitly to run locally.
 - The other machine cuts a worktree thread's worktree itself, from the channel's repo at the same path (or through its path map), so the repo must be cloned there.
