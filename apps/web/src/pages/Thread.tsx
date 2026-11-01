@@ -10,7 +10,10 @@ import { SetupCard } from '../components/thread/SetupCard.tsx';
 import { LimitCard } from '../components/thread/LimitCard.tsx';
 import { StaleSessionCard } from '../components/thread/StaleSessionCard.tsx';
 import { HandoffCard, type HandoffAnswer } from '../components/thread/Handoff.tsx';
-import { ThreadPR } from '../components/thread/ThreadPR.tsx';
+import { useThreadPR } from '../components/thread/ThreadPR.tsx';
+import { usePRWatch } from '../components/thread/PRWatch.tsx';
+import { useBranchChanges } from '../mobile/ThreadTurn.tsx';
+import { prNext } from '../thread-glance.ts';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { ThreadHeader } from '../components/thread/ThreadHeader.tsx';
 import { ThreadPanel } from '../components/thread/ThreadPanel.tsx';
@@ -106,7 +109,12 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
     [setSelected, setPanelTab],
   );
   const panel = useThreadPanel({ artifactParam, files, ready, loaded: thread !== null, select: selectArtifact });
-  const { prBusy, restoring, openPR, restore, toggleDone } = useThreadActions({ id, thread, slotBusy, applyThread, setActionError, pin });
+  const { prBusy, restoring, ask, restore, toggleDone } = useThreadActions({ id, thread, slotBusy, applyThread, setActionError, pin });
+  // The branch's PRs and changes: the PRs tab and the Details tab's branch card read them, and the PRs tab's badge.
+  const prs = useThreadPR(thread, slotBusy);
+  const watch = usePRWatch(thread?.id, prs);
+  const changes = useBranchChanges(thread, slotBusy);
+  const next = prNext(prs?.pr ?? null, !!changes?.files.length);
 
   useThreadPresence(id, thread);
   useThreadInterruptKey({ slotBusy, interrupting, interrupt });
@@ -244,9 +252,6 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
               }}
               // A rename keeps updated_at, so it has to win a tie.
               onChanged={(t) => applyThread(t)}
-              extra={
-                thread.branch ? <ThreadPR thread={thread} slotBusy={slotBusy} busy={prBusy} onOpen={openPR} /> : undefined
-              }
               machine={{ blocked, handoff, takeover, onChanged: handedOff }}
             />
           </div>
@@ -267,7 +272,8 @@ export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; ar
               tab={panelTab}
               onTab={setPanelTab}
               onClose={panel.toggle}
-              details={{ channel, parent, children, init, lastResult, warm, links, agents, onJump: jumpTo }}
+              details={{ channel, parent, children, init, lastResult, warm, links, agents, onJump: jumpTo, prs, changes, next, busy: prBusy, onAsk: (p) => void ask(p), onTab: setPanelTab }}
+              prs={{ data: prs, watch, next, busy: prBusy, onAsk: (p) => void ask(p) }}
             />
           </div>
         </aside>

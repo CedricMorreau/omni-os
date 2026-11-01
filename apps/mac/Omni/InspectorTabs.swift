@@ -211,10 +211,12 @@ private struct ShotViewer: View {
 
 // MARK: Details
 
-/// How the thread runs, its running sub-agents and its delegated threads, live.
+/// The branch card, the thread's agents (lineage, running, previous) and how it runs, live. DetailsTab.tsx.
 struct DetailsTab: View {
   let model: AppModel
   let store: ThreadStore
+  let branch: ThreadBranchModel
+  @Binding var tab: InspectorSelection.Tab
   @State private var copied = false
   @State private var showMCP = false
 
@@ -224,7 +226,9 @@ struct DetailsTab: View {
       let last = store.events.last { $0.kind == "result" }.flatMap { if case .result(let r) = $0.content { r } else { nil } }
       let cwd = store.cwd ?? ""
       ScrollView {
-        VStack(alignment: .leading, spacing: z(14)) {
+        VStack(alignment: .leading, spacing: z(12)) {
+          GlanceCard(model: model, store: store, branch: branch, tab: $tab)
+          AgentsCard(model: model, store: store)
           VStack(spacing: 0) {
             let channel = store.channel?.name ?? thread.channelID
             row("Channel") {
@@ -249,7 +253,6 @@ struct DetailsTab: View {
             row("Source") {
               Text(thread.source.rawValue) + Text(thread.automation.map { " · \($0)" } ?? "").foregroundStyle(Tok.fg3)
             }
-            if let branch = thread.branch, !branch.isEmpty { row("Branch") { mono(branch) } }
             row("Working dir") {
               if let remote = ThreadDetails.remoteWorkspace(thread.harness) { Text(remote).foregroundStyle(Tok.fg3) } else { mono(cwd) }
             }
@@ -273,22 +276,6 @@ struct DetailsTab: View {
               }
             }
             if let task = thread.taskID, !task.isEmpty { row("Task") { mono(task) } }
-            if let parent = store.parent {
-              row("Parent") {
-                Button {
-                  model.route = .thread(id: parent.id)
-                } label: {
-                  HStack(spacing: z(6)) { StatusDot(status: parent.status, size: 6); Text(parent.title) }
-                }
-                .buttonStyle(.plain)
-              }
-            }
-            if let from = store.continuedFrom { row("Continued from") { ContinueLinkRow(model: model, link: from) } }
-            if !store.continuedIn.isEmpty {
-              row("Continued in") {
-                VStack(alignment: .leading, spacing: z(6)) { ForEach(store.continuedIn) { ContinueLinkRow(model: model, link: $0) } }
-              }
-            }
             if let mcp = session?.mcp, !mcp.isEmpty { row("MCP") { mcpList(mcp.map(MCPServer.init)) } }
             row("Created") { Text(ThreadDetails.fullDate(thread.createdAt)) }
             row("Updated") { Text(ThreadDetails.fullDate(thread.updatedAt)) }
@@ -301,12 +288,8 @@ struct DetailsTab: View {
           .padding(.vertical, z(4))
           .background(Tok.bg, in: RoundedRectangle(cornerRadius: z(20), style: .continuous))
 
-          if !store.children.isEmpty { delegated }
           if let resume = ThreadDetails.resumeCommand(harness: thread.harness, sessionID: thread.sessionID, cwd: cwd) {
             resumeCard(resume)
-          }
-          RunningSubagentsSection(agents: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: thread.id)) { at in
-            Task { await store.reveal(at) }
           }
         }
         .font(.omni(size: 12.5))
@@ -315,41 +298,6 @@ struct DetailsTab: View {
         .padding(.bottom, z(12))
       }
     }
-  }
-
-  private var delegated: some View {
-    VStack(alignment: .leading, spacing: z(6)) {
-      HStack {
-        Text("Delegated threads").omniCaption()
-        Spacer()
-        Text("\(store.children.count)").font(.omni(size: 11)).monospacedDigit().foregroundStyle(Tok.fg3)
-      }
-      .padding(.horizontal, z(8))
-      VStack(spacing: 0) {
-        ForEach(store.children) { child in
-          Button {
-            model.route = .thread(id: child.id)
-          } label: {
-            HStack(spacing: z(8)) {
-              StatusDot(status: child.status, size: 7)
-              Text(child.title).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
-              if let task = child.taskID, !task.isEmpty {
-                Text(task).font(.omni(size: 11, design: .monospaced)).foregroundStyle(Tok.fg4)
-              }
-              Text("#\(model.store.channel(child.channelID)?.name ?? child.channelID)").font(.omni(size: 11)).foregroundStyle(Tok.fg3)
-            }
-            .padding(.horizontal, z(12))
-            .frame(height: z(36))
-            .contentShape(Capsule())
-            .rowHover(radius: 18)
-          }
-          .buttonStyle(.plain)
-        }
-      }
-      .padding(z(4))
-      .background(Tok.bg, in: RoundedRectangle(cornerRadius: z(20), style: .continuous))
-    }
-    .padding(.top, z(2))
   }
 
   private func resumeCard(_ command: String) -> some View {
@@ -386,24 +334,34 @@ struct DetailsTab: View {
     .background(Tok.bg, in: RoundedRectangle(cornerRadius: z(20), style: .continuous))
   }
 
+  /// One line: how many servers connected and how many did not. The names show only when asked for, failed ones first.
   private func mcpList(_ servers: [MCPServer]) -> some View {
     let bad = servers.filter { !$0.ok }
     let good = servers.filter(\.ok)
-    return VStack(alignment: .leading, spacing: z(4)) {
-      HStack(spacing: z(6)) {
-        Text("\(good.count) connected") + Text(bad.isEmpty ? "" : " · \(bad.count) not connected")
-        Button(showMCP ? "Hide" : "Show") { showMCP.toggle() }
-          .buttonStyle(.plain).font(.omni(size: 12)).foregroundStyle(Tok.fg3)
+    return VStack(alignment: .leading, spacing: z(6)) {
+      Button {
+        showMCP.toggle()
+      } label: {
+        HStack(spacing: z(4)) {
+          (Text("\(good.count) connected") + Text(bad.isEmpty ? "" : " · \(bad.count) not connected").foregroundStyle(Tok.fg3))
+            .lineLimit(1)
+          OmniIcon(name: "chevronDown", size: 12).foregroundStyle(Tok.fg4).rotationEffect(.degrees(showMCP ? 0 : -90))
+        }
       }
-      Flow(spacing: 4) {
-        ForEach(bad) { chip($0, warn: true) }
-        if showMCP { ForEach(good) { chip($0, warn: false) } }
+      .buttonStyle(.plain)
+      .accessibilityValue(showMCP ? "Expanded" : "Collapsed")
+      .help(showMCP ? "Hide the servers" : "Show the servers")
+      if showMCP {
+        Flow(spacing: 4) {
+          ForEach(bad) { chip($0, warn: true) }
+          ForEach(good) { chip($0, warn: false) }
+        }
       }
     }
   }
 
   private func chip(_ server: MCPServer, warn: Bool) -> some View {
-    Chip(text: server.label, tone: warn ? .needs : .plain)
+    Chip(text: server.label, tone: warn ? .outline : .plain)
       .help(warn ? "\(server.name) (\(server.status))" : server.name)
   }
 

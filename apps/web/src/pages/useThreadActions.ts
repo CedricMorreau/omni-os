@@ -3,7 +3,10 @@ import { api, errorText, type SendMode, type Thread } from '../api.ts';
 import { OPEN_PR_PROMPT } from '../components/thread/ThreadPR.tsx';
 import { useApp } from '../store.tsx';
 
-/** The header's own actions on a thread: open a PR, restore it from the archive, mark it done. Failures land in `setActionError`. */
+/**
+ * The page's own actions on a thread: ask the agent for a branch step (open a PR, fix conflicts or checks), restore it
+ * from the archive, mark it done. Failures land in `setActionError`.
+ */
 export function useThreadActions({
   id,
   thread,
@@ -23,13 +26,13 @@ export function useThreadActions({
   const [prBusy, setPrBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  const openPR = async () => {
+  const ask = async (prompt: string) => {
     setPrBusy(true);
     setActionError(null);
     try {
       // Mid-turn, wait for the work to finish instead of steering it to commit halfway.
       const mode: SendMode | undefined = slotBusy ? 'queue' : undefined;
-      const t = await api.post<Thread>(`/threads/${encodeURIComponent(id)}/messages`, { prompt: OPEN_PR_PROMPT, mode });
+      const t = await api.post<Thread>(`/threads/${encodeURIComponent(id)}/messages`, { prompt, mode });
       applyThread(t, true);
       pin();
     } catch (e) {
@@ -38,6 +41,8 @@ export function useThreadActions({
       setPrBusy(false);
     }
   };
+
+  const openPR = () => ask(OPEN_PR_PROMPT);
 
   // An archived thread opened from its channel's Archived list or a search: put it back in the lists.
   const restore = async () => {
@@ -63,5 +68,5 @@ export function useThreadActions({
     }
   };
 
-  return { prBusy, restoring, openPR, restore, toggleDone };
+  return { prBusy, restoring, ask, openPR, restore, toggleDone };
 }

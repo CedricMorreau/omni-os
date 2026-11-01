@@ -1,49 +1,9 @@
 import OmniKit
 import SwiftUI
 
-/// RunningSubagents.tsx: the agents a thread spawned itself that still run, under the Details tab's resume command. Nothing
-/// when none run. A row scrolls the transcript to the call that started it, loading that page when it is far back.
-struct RunningSubagentsSection: View {
-  let agents: [OmniKit.BackgroundTask]
-  let jump: (Int) -> Void
-
-  var body: some View {
-    if !agents.isEmpty {
-      VStack(alignment: .leading, spacing: z(6)) {
-        HStack {
-          Text("Running subagents").omniCaption()
-          Spacer()
-          Text("\(agents.count)").font(.omni(size: 11)).monospacedDigit().foregroundStyle(Tok.fg3)
-        }
-        .padding(.horizontal, z(8))
-        VStack(spacing: 0) {
-          ForEach(agents) { SubagentRow(task: $0, jump: jump) }
-        }
-        .padding(z(4))
-        .background(Tok.bg, in: RoundedRectangle(cornerRadius: z(20), style: .continuous))
-      }
-      .accessibilityElement(children: .contain)
-      .accessibilityLabel("Running subagents")
-      #if DEBUG
-      .onAppear { QAProbe.jumpSubagent = press }
-      .onChange(of: agents) { QAProbe.jumpSubagent = press }
-      .onDisappear { QAProbe.jumpSubagent = nil }
-      #endif
-    }
-  }
-
-  #if DEBUG
-  /// What a click on the row at an index does, for the QA runner's `subagent` step.
-  private func press(_ i: Int) -> (thread: String, at: Int)? {
-    guard agents.indices.contains(i), let at = agents[i].eventID else { return nil }
-    jump(at)
-    return (agents[i].threadID, at)
-  }
-  #endif
-}
-
 /// SubagentRow in RunningSubagents.tsx: what it does, its kind and how long it has run.
-private struct SubagentRow: View {
+/// The Details tab's agents card (`AgentsCard` in InspectorBranch.swift) lists one per running sub-agent.
+struct SubagentRow: View {
   let task: OmniKit.BackgroundTask
   let jump: (Int) -> Void
 

@@ -4,18 +4,20 @@ import Foundation
 /// (ThreadPage in apps/web/src/pages/Thread.tsx), with its first-artifact quirk fixed.
 public struct InspectorSelection: Equatable, Sendable {
   public enum Tab: String, CaseIterable, Sendable {
-    /// `web` is the Mac's own browser (`NativeBrowserView`), which the Web UI has no tab for: a page cannot embed a native web view.
-    case artifacts, changes, browser, web, terminal, actions, details
+    /// Details leads and PRs follows, the two Ben reaches for most. `web` is the Mac's own browser (`NativeBrowserView`),
+    /// which the Web UI has no tab for: a page cannot embed a native web view.
+    case details, prs, artifacts, changes, browser, web, terminal, actions
 
     public var title: String {
       switch self {
+      case .details: "Details"
+      case .prs: "PRs"
       case .artifacts: "Artifacts"
       case .changes: "Changes"
       case .browser: "Browser"
       case .web: "Web"
       case .terminal: "Terminal"
       case .actions: "Actions"
-      case .details: "Details"
       }
     }
   }
@@ -28,18 +30,19 @@ public struct InspectorSelection: Equatable, Sendable {
     self.artifactID = artifactID
   }
 
-  /// When the thread opens: `?artifact` wins, else the newest HTML page, else the newest file, else Details.
+  /// When the thread opens: `?artifact` opens Artifacts on it; otherwise Details, with the newest HTML page (else the
+  /// newest file) picked for when Artifacts opens.
   public static func initial(artifacts: [Artifact], param: Int? = nil) -> Self {
     if let param { return Self(tab: .artifacts, artifactID: param) }
-    if let pick = defaultArtifact(artifacts) { return Self(tab: .artifacts, artifactID: pick.id) }
-    return Self(tab: .details)
+    return Self(tab: .details, artifactID: defaultArtifact(artifacts)?.id)
   }
 
-  /// A new HTML artifact is selected and shown, the first one too. The Web, Terminal, Changes and Actions tabs stay put, so
-  /// a page landing never pulls Ben out of a page he is using, the shell mid-command, the changes he is reading or a run's output.
+  /// A new HTML artifact is selected and shown, the first one too. The Web, Terminal, Changes, Actions and PRs tabs stay
+  /// put, so a page landing never pulls Ben out of a page he is using, the shell mid-command, the changes he is reading,
+  /// a run's output or his PRs.
   public mutating func arrived(_ a: Artifact) {
     artifactID = a.id
-    if ![.web, .terminal, .changes, .actions].contains(tab) { tab = .artifacts }
+    if ![.web, .terminal, .changes, .actions, .prs].contains(tab) { tab = .artifacts }
   }
 
   public mutating func open(artifact id: Int) {

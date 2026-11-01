@@ -8,7 +8,7 @@ import { holds } from '../thread-history.ts';
 import { useInterrupt, useTurnState } from './threadTurn.ts';
 import { useThreadHistory } from './useThreadHistory.ts';
 
-export type PanelTab = 'artifacts' | 'changes' | 'browser' | 'terminal' | 'actions' | 'details';
+export type PanelTab = 'details' | 'prs' | 'artifacts' | 'changes' | 'browser' | 'terminal' | 'actions';
 
 /**
  * The later of two snapshots of the thread. A send's reply can land after the stream has already
@@ -39,7 +39,8 @@ export function useThreadSession(id: string, artifactParam: number | undefined, 
   const [notFound, setNotFound] = useState(false);
   const [ready, setReady] = useState(false);
   const [selected, setSelected] = useState<number | undefined>(artifactParam);
-  const [panelTab, setPanelTab] = useState<PanelTab>('artifacts');
+  // Details leads: it holds the branch card, which is what Ben checks first. A linked artifact opens Artifacts instead.
+  const [panelTab, setPanelTab] = useState<PanelTab>(artifactParam ? 'artifacts' : 'details');
   const [queued, setQueued] = useState<PendingMsg[]>([]);
   const [warm, setWarm] = useState<boolean | undefined>(undefined);
   const [blocked, setBlocked] = useState<string | null>(null);
@@ -62,8 +63,8 @@ export function useThreadSession(id: string, artifactParam: number | undefined, 
     artifactIds.current.add(a.id);
     if (isNew && a.kind === 'html') {
       setSelected(a.id);
-      // Never pull Ben out of the shell mid-command, the changes he is reading or a run's output.
-      setPanelTab((t) => (t === 'terminal' || t === 'changes' || t === 'actions' ? t : 'artifacts'));
+      // Never pull Ben out of the shell mid-command, the changes he is reading, a run's output or his PRs.
+      setPanelTab((t) => (t === 'terminal' || t === 'changes' || t === 'actions' || t === 'prs' ? t : 'artifacts'));
     }
     setArtifacts((prev) => (prev.some((x) => x.id === a.id) ? prev.map((x) => (x.id === a.id ? a : x)) : [...prev, a]));
   }, []);
@@ -106,7 +107,6 @@ export function useThreadSession(id: string, artifactParam: number | undefined, 
           const html = [...visible].reverse().find((a) => a.kind === 'html');
           const pick = html ?? visible[visible.length - 1];
           if (pick) setSelected(pick.id);
-          else if (!visible.length) setPanelTab('details');
         }
         setError(null);
       } catch (e) {

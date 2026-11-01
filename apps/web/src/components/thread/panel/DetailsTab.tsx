@@ -1,13 +1,16 @@
 import { useState, type ReactNode } from 'react';
 import type { BackgroundTask, Channel, Thread } from '../../../api.ts';
 import { HarnessMark } from '../../brand.tsx';
-import { Chip, CopyButton, StatusDot } from '../../ui.tsx';
+import { Chip, CopyButton, Icon, StatusDot } from '../../ui.tsx';
 import { duration, fullDate, plural } from '../../../format.ts';
 import { href } from '../../../router.ts';
 import { cloudAgentUrl } from '../../../cloud-agent.ts';
 import type { ThreadLinks } from '../../../continue.ts';
-import { ContinueLinkItem } from '../../ContinueLinks.tsx';
-import { RunningSubagents } from './RunningSubagents.tsx';
+import type { PanelTab } from '../../../pages/useThreadSession.ts';
+import type { PRNext } from '../../../thread-glance.ts';
+import { AgentsSection } from './AgentsSection.tsx';
+import { GlanceCard, type BranchChanges } from './GlanceCard.tsx';
+import type { ThreadPRs } from './PRsTab.tsx';
 
 export interface InitP {
   model?: string;
@@ -25,6 +28,7 @@ export interface ResultP {
 
 const shellQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
+/** One line: how many servers connected and how many did not. The names show only when asked for, failed ones first. */
 function McpList({ servers }: { servers: string[] }) {
   const [open, setOpen] = useState(false);
   const parsed = servers.map((m) => {
@@ -38,24 +42,20 @@ function McpList({ servers }: { servers: string[] }) {
   const good = parsed.filter((p) => p.ok);
   return (
     <div>
-      <div className="text-fg-2">
-        {good.length} connected
-        {bad.length > 0 && <span className="text-fg-2"> · {bad.length} not connected</span>}
-        <button type="button" onClick={() => setOpen((v) => !v)} className="ml-2 text-[12px] text-fg-3 underline-offset-2 hover:text-fg hover:underline">
-          {open ? 'Hide' : 'Show'}
-        </button>
-      </div>
-      {bad.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex max-w-full items-center gap-1 text-left text-fg-2 hover:text-fg">
+        <span className="truncate">
+          {good.length} connected
+          {bad.length > 0 && <span className="text-fg-3"> · {bad.length} not connected</span>}
+        </span>
+        <Icon name="chevronDown" size={12} className={`shrink-0 text-fg-4 transition-transform group-hover:text-fg-3 ${open ? '' : '-rotate-90'}`} />
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
           {bad.map((p) => (
-            <Chip key={p.key} tone="needs" title={`${p.name} (${p.status})`}>
+            <Chip key={p.key} tone="outline" title={`${p.name} (${p.status})`}>
               {p.label}
             </Chip>
           ))}
-        </div>
-      )}
-      {open && (
-        <div className="mt-1 flex flex-wrap gap-1">
           {good.map((p) => (
             <Chip key={p.key} title={p.name}>
               {p.label}
@@ -87,6 +87,12 @@ export function DetailsTab({
   links,
   agents,
   onJump,
+  prs,
+  changes,
+  next,
+  busy = false,
+  onAsk = () => {},
+  onTab = () => {},
 }: {
   thread: Thread;
   channel: Channel | undefined;
@@ -96,9 +102,16 @@ export function DetailsTab({
   lastResult: ResultP | null;
   warm: boolean | undefined;
   links: ThreadLinks;
-  /** Its running sub-agents (subagents.ts), listed under the resume command. */
+  /** Its running sub-agents (subagents.ts), listed with its other agents near the top. */
   agents: BackgroundTask[];
   onJump: (eventId: number) => void;
+  /** The branch card on top: its PRs, changes, the step its PR calls for, and how to take it. */
+  prs?: ThreadPRs;
+  changes?: BranchChanges;
+  next?: PRNext;
+  busy?: boolean;
+  onAsk?: (prompt: string) => void;
+  onTab?: (tab: PanelTab) => void;
 }) {
   const cwd = init?.cwd || thread.cwd;
   const cloud = thread.harness === 'cursor-cloud';
@@ -111,7 +124,9 @@ export function DetailsTab({
   };
   const resume = remote ? '' : `cd ${shellQuote(cwd)} && ${resumeCmd[thread.harness] ?? resumeCmd['claude-code']}`;
   return (
-    <div className="scroll-thin h-full overflow-y-auto px-2.5 pb-3">
+    <div className="scroll-thin flex h-full flex-col gap-3 overflow-y-auto px-2.5 pb-3 [&>*]:shrink-0">
+      <GlanceCard thread={thread} prs={prs} changes={changes ?? null} next={next ?? null} busy={busy} onAsk={onAsk} onTab={onTab} />
+      <AgentsSection parent={parent} links={links} children={children} agents={agents} onJump={onJump} />
       <dl className="divide-y divide-line rounded-[20px] bg-bg py-1">
         <Row k="Channel">
           <a href={href.channel(thread.channel_id)} className="font-medium hover:underline">
@@ -132,11 +147,6 @@ export function DetailsTab({
           {thread.source}
           {thread.automation && <span className="text-fg-3"> · {thread.automation}</span>}
         </Row>
-        {thread.branch && (
-          <Row k="Branch">
-            <span className="font-mono text-[12px]">{thread.branch}</span>
-          </Row>
-        )}
         <Row k="Working dir">
           {remote ? (
             <span className="text-fg-3">{cloud ? 'Cursor cloud agent, not an Omni worktree' : 'Hermes server, not an Omni worktree'}</span>
@@ -156,27 +166,6 @@ export function DetailsTab({
         {thread.task_id && (
           <Row k="Task">
             <span className="font-mono text-[12px]">{thread.task_id}</span>
-          </Row>
-        )}
-        {parent && (
-          <Row k="Parent">
-            <a href={href.thread(parent.id)} className="inline-flex items-center gap-1.5 hover:underline">
-              <StatusDot status={parent.status} size={6} /> {parent.title}
-            </a>
-          </Row>
-        )}
-        {links.from && (
-          <Row k="Continued from">
-            <ContinueLinkItem link={links.from} carried />
-          </Row>
-        )}
-        {links.into.length > 0 && (
-          <Row k="Continued in">
-            <div className="flex flex-col gap-1">
-              {links.into.map((l) => (
-                <ContinueLinkItem key={l.id} link={l} />
-              ))}
-            </div>
           </Row>
         )}
         {init?.mcp && init.mcp.length > 0 && (
@@ -201,27 +190,8 @@ export function DetailsTab({
         )}
       </dl>
 
-      {children.length > 0 && (
-        <div className="mt-4">
-          <div className="mb-1.5 flex items-center px-2">
-            <span className="caption">Delegated threads</span>
-            <span className="ml-auto font-num text-[11px] text-fg-3">{children.length}</span>
-          </div>
-          <div className="rounded-[20px] bg-bg p-1">
-            {children.map((c) => (
-              <a key={c.id} href={href.thread(c.id)} className="hov flex h-9 min-w-0 items-center gap-2.5 rounded-full px-3 text-[12.5px] [--hov:var(--surface)]">
-                <StatusDot status={c.status} size={7} />
-                <span className="min-w-0 flex-1 truncate">{c.title}</span>
-                {c.task_id && <span className="shrink-0 font-mono text-[11px] text-fg-4">{c.task_id}</span>}
-                <span className="shrink-0 text-[11px] text-fg-3">#{c.channel_id}</span>
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
-
       {remote ? (
-        <div className="mt-4 rounded-[20px] bg-bg p-3.5">
+        <div className="rounded-[20px] bg-bg p-3.5">
           <div className="caption mb-2">{cloud ? 'Cursor cloud agent' : 'Remote session'}</div>
           {cloud ? (
             <p className="text-[12.5px] leading-relaxed text-fg-2">
@@ -242,7 +212,7 @@ export function DetailsTab({
           )}
         </div>
       ) : (
-        <div className="mt-4 rounded-[20px] bg-bg p-3.5">
+        <div className="rounded-[20px] bg-bg p-3.5">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="caption">Resume in terminal</span>
             <CopyButton text={resume} />
@@ -250,7 +220,6 @@ export function DetailsTab({
           <code className="block rounded-xl bg-surface px-3 py-2.5 font-mono text-[11.5px] break-all text-fg-2">{resume}</code>
         </div>
       )}
-      <RunningSubagents agents={agents} onJump={onJump} />
     </div>
   );
 }
