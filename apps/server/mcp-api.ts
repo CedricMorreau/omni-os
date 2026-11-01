@@ -1,20 +1,25 @@
 // /mcp: the external Omni MCP server (apps/mcp/external/) over Streamable HTTP, for clients that reach Omni by URL
 // rather than starting a process here: claude.ai, ChatGPT, Grok, or Cursor and Claude Code on another machine.
 //
-// It takes its own token, data/mcp-token, apart from the API token: the URL goes into other companies' connector
-// settings, and rotating it (delete the file, restart) must not unpair every browser. A client that can send a header
-// sends `Authorization: Bearer <mcp-token>`; one that only takes a URL (claude.ai and ChatGPT without OAuth) uses
-// /mcp/<mcp-token>. The API token also works as a header, never in the path. Its tools then call /api in-process
-// with the API token, so every request still passes requestGuard.
+// Three ways in:
+// - Google sign-in through Clerk (mcp-oauth.ts): a Clerk OAuth access token for this install's owner, as
+//   `Authorization: Bearer`. A 401 names the protected resource metadata, so claude.ai, ChatGPT and other OAuth
+//   clients find Clerk and sign in by themselves. On only while a Google account is linked (Settings, Machines).
+// - data/mcp-token, apart from the API token: the URL goes into other companies' connector settings, and rotating it
+//   (delete the file, restart) must not unpair every browser. As a Bearer header, or in the path as /mcp/<mcp-token>
+//   for a client that only takes a URL.
+// - The API token, as a header only, never in the path.
+// Its tools then call /api in-process with the API token, so every request still passes requestGuard.
 //
-// No Tailscale login check: Funnel, the way claude.ai and ChatGPT reach a Mac, carries none. The token is the control.
+// No Tailscale login check: Funnel, the way claude.ai and ChatGPT reach a Mac, carries none.
 import { join } from 'node:path';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { callOver } from '@omni/mcp/external/tools.ts';
 import { mcpHttp } from '@omni/mcp/external/http.ts';
 import { apiToken, loadToken, tokenMatches } from './api-token.ts';
 import { paths } from './config.ts';
+import { ClerkUnreachable, isOwnerToken, mcpIssuer, resourceMetadataUrl } from './mcp-oauth.ts';
 import { hostAllowed } from './request-guard.ts';
 
 export const mcpTokenPath = () => join(paths.data, 'mcp-token');
@@ -38,11 +43,24 @@ const hostnameOf = (host: string) => {
   }
 };
 
-const refuse = (message: string, status: 401 | 403) =>
+const refuse = (message: string, status: 401 | 403 | 503, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }), {
     status,
-    headers: { 'content-type': 'application/json', ...(status === 401 && { 'www-authenticate': 'Bearer' }) },
+    headers: { 'content-type': 'application/json', ...headers },
   });
+
+/**
+ * The 401 for /mcp. With Google sign-in on, its challenge names the resource metadata (RFC 9728), which is how an
+ * OAuth client learns to sign in with Clerk; `invalid_token` tells one holding a stale token to sign in again.
+ */
+function challenge(c: Context, sentToken: boolean) {
+  const oauth = !!mcpIssuer();
+  const params = [...(sentToken ? ['error="invalid_token"'] : []), ...(oauth ? [`resource_metadata="${resourceMetadataUrl(c)}"`] : [])];
+  const how = oauth ? 'sign in with the Google account linked to this Omni, or send' : 'send';
+  return refuse(`Unauthorized: ${how} this install's MCP token (data/mcp-token) as a Bearer header or in the URL as /mcp/<token>`, 401, {
+    'www-authenticate': params.length ? `Bearer ${params.join(', ')}` : 'Bearer',
+  });
+}
 
 /** The router for /mcp, whose tools reach /api through `request` (app.request, in-process). */
 export function mcpApi(request: (path: string, init: RequestInit) => Response | Promise<Response>) {
@@ -59,10 +77,22 @@ export function mcpApi(request: (path: string, init: RequestInit) => Response | 
     const origin = c.req.header('origin');
     if (origin !== undefined && !hostAllowed(hostnameOf(origin.replace(/^[a-z]+:\/\//i, '')))) return refuse('Forbidden: origin not allowed', 403);
     const inPath = c.req.param('token');
+    if (inPath !== undefined) {
+      // A URL holds only the MCP token: never the API token, and never an OAuth token, which a header carries.
+      if (!mcpTokenMatches(inPath)) return refuse("Unauthorized: that is not this install's MCP token", 401, { 'www-authenticate': 'Bearer' });
+      return answer(c.req.raw);
+    }
     const bearer = c.req.header('authorization')?.match(/^Bearer\s+(\S+)\s*$/i)?.[1];
-    const ok = inPath !== undefined ? mcpTokenMatches(inPath) : mcpTokenMatches(bearer) || tokenMatches(bearer);
-    if (!ok) return refuse("Unauthorized: send this install's MCP token (data/mcp-token) as a Bearer header or in the URL as /mcp/<token>", 401);
-    return answer(c.req.raw);
+    if (mcpTokenMatches(bearer) || tokenMatches(bearer)) return answer(c.req.raw);
+    if (bearer) {
+      try {
+        if (await isOwnerToken(bearer)) return answer(c.req.raw);
+      } catch (err) {
+        if (err instanceof ClerkUnreachable) return refuse(`Could not check the sign-in: ${err.message}. Try again shortly`, 503, { 'retry-after': '10' });
+        throw err;
+      }
+    }
+    return challenge(c, !!bearer);
   });
 
   return router;

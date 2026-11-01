@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { FAKE_ISSUER, FAKE_PUBLISHABLE_KEY, fakeClerk } from './fake-clerk.ts';
 import { startRunner } from './runner-boot.ts';
 
 // The external Omni MCP server (apps/mcp/external/) as clients outside Omni reach it: /mcp over Streamable HTTP with
@@ -19,6 +20,8 @@ const h = await startRunner();
 const { app } = await import('../app.ts');
 const { ROOT } = await import('../config.ts');
 const { serve } = await import('@hono/node-server');
+const { linkOwner, unlinkOwner } = await import('../google-auth.ts');
+const { setOAuthFetch } = await import('../mcp-oauth.ts');
 const T = { timeout: 30_000 };
 
 const make = (title: string, status = 'done') =>
@@ -213,5 +216,108 @@ describe('stdio entry', () => {
     const r = await client.request('tools/call', { name: 'list_channels', arguments: {} });
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toMatch(/Unauthorized/);
+  });
+});
+
+describe('/mcp: Google sign-in through Clerk', () => {
+  const clerk = fakeClerk();
+  const OWNER = { sub: 'user_owner', email: 'ben@example.com', name: 'Ben' };
+  const META = 'http://127.0.0.1:4747/.well-known/oauth-protected-resource/mcp';
+  const get = (path: string, headers: Record<string, string> = {}) => app.request(`http://127.0.0.1:4747${path}`, { headers: { host: '127.0.0.1:4747', authorization: '', ...headers } });
+  const listTools = (token: string, path = '/mcp') => post(path, 'tools/list', {}, { authorization: `Bearer ${token}` });
+  const userinfoCalls = () => clerk.calls.filter((p) => p === '/oauth/userinfo').length;
+
+  process.env.OMNI_CLERK_PUBLISHABLE_KEY = FAKE_PUBLISHABLE_KEY;
+  setOAuthFetch(clerk.fetch as typeof fetch);
+  afterAll(() => {
+    unlinkOwner();
+    setOAuthFetch();
+    delete process.env.OMNI_CLERK_PUBLISHABLE_KEY;
+  });
+
+  it('is off until a Google account is linked: no metadata, and a plain Bearer challenge', async () => {
+    unlinkOwner();
+    expect((await get('/.well-known/oauth-protected-resource/mcp')).status).toBe(404);
+    expect((await get('/.well-known/oauth-authorization-server')).status).toBe(404);
+    const res = await post('/mcp', 'tools/list');
+    expect(res.headers.get('www-authenticate')).toBe('Bearer');
+    // An access token alone gets nothing while no owner is linked, and Clerk is not even asked.
+    expect((await listTools(clerk.accessToken(OWNER))).status).toBe(401);
+    expect(userinfoCalls()).toBe(0);
+  });
+
+  it('publishes the protected resource metadata, naming Clerk, at the root and under /mcp', async () => {
+    linkOwner({ issuer: FAKE_ISSUER, ...OWNER });
+    for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+      const res = await get(path);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe('*');
+      expect(await res.json()).toEqual({
+        resource: 'http://127.0.0.1:4747/mcp',
+        authorization_servers: [FAKE_ISSUER],
+        scopes_supported: ['openid', 'profile', 'email'],
+        bearer_methods_supported: ['header'],
+        resource_name: 'Omni',
+      });
+    }
+    // Through Funnel: the https .ts.net address the client used.
+    const funnel = await get('/.well-known/oauth-protected-resource/mcp', { host: 'mac.tail1234.ts.net', 'x-forwarded-proto': 'https', 'tailscale-funnel-request': '?1' });
+    expect(((await funnel.json()) as { resource: string }).resource).toBe('https://mac.tail1234.ts.net/mcp');
+    expect((await get('/.well-known/oauth-protected-resource', { host: 'evil.example' })).status).toBe(403);
+  });
+
+  it("serves Clerk's authorization server metadata for clients on the older spec", async () => {
+    const res = await get('/.well-known/oauth-authorization-server');
+    expect(await res.json()).toMatchObject({ issuer: FAKE_ISSUER, registration_endpoint: `${FAKE_ISSUER}/oauth/register` });
+  });
+
+  it('answers a request with no token with a challenge naming the metadata, and a bad one with invalid_token', async () => {
+    const none = await post('/mcp', 'tools/list');
+    expect(none.status).toBe(401);
+    expect(none.headers.get('www-authenticate')).toBe(`Bearer resource_metadata="${META}"`);
+    const bad = await listTools('oat_nope');
+    expect(bad.status).toBe(401);
+    expect(bad.headers.get('www-authenticate')).toBe(`Bearer error="invalid_token", resource_metadata="${META}"`);
+  });
+
+  it("lets the owner's access token in, and asks Clerk once a minute, not once a request", async () => {
+    const token = clerk.accessToken(OWNER);
+    const before = userinfoCalls();
+    const res = await listTools(token);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { result: { tools: unknown[] } }).result.tools.length).toBe(19);
+    expect((await listTools(token)).status).toBe(200);
+    expect(userinfoCalls()).toBe(before + 1);
+  });
+
+  it("refuses another Google user's token, an owner token in the URL, and a revoked one", async () => {
+    expect((await listTools(clerk.accessToken({ sub: 'user_stranger', email: 'eve@example.com' }))).status).toBe(401);
+    expect((await post(`/mcp/${clerk.accessToken(OWNER)}`, 'tools/list')).status).toBe(401);
+    const token = clerk.accessToken(OWNER);
+    clerk.revoke(token);
+    expect((await listTools(token)).status).toBe(401);
+  });
+
+  it('keeps the static tokens working alongside it', async () => {
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'tools/list')).status).toBe(200);
+    expect((await listTools(MCP_TOKEN)).status).toBe(200);
+    expect((await listTools(API_TOKEN)).status).toBe(200);
+  });
+
+  it('answers 503, not 401, when Clerk cannot be reached', async () => {
+    setOAuthFetch((async () => {
+      throw new TypeError('network down');
+    }) as typeof fetch);
+    const res = await listTools(clerk.accessToken(OWNER));
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('10');
+    setOAuthFetch(clerk.fetch as typeof fetch);
+  });
+
+  it('stops taking the token once the account is unlinked', async () => {
+    const token = clerk.accessToken(OWNER);
+    expect((await listTools(token)).status).toBe(200);
+    unlinkOwner();
+    expect((await listTools(token)).status).toBe(401);
   });
 });

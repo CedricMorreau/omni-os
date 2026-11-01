@@ -59,7 +59,7 @@ Every `/api` request needs this install's token, or the session of a device that
 | Threads | `OMNI_TOKEN` in their environment, next to `OMNI_URL`. Omni's MCP servers (`apps/mcp/omni.ts`, `apps/mcp/ask.ts`) get `OMNI_TOKEN_FILE`, a path, so no token is written into `mcp.json` |
 | Linux app | Opens `http://127.0.0.1:<port>/api/auth/desktop-pair` in its window. The server sets the same cookie as `/pair` and redirects to `/`. The token is not in the URL. A request through Tailscale or any proxy header is refused, so a phone still pairs with the token |
 | Web UI | Pairs once (below), then holds the token in a cookie. Or signs in with Google and holds its own session in an `HttpOnly` cookie, `omni_session_<port>` |
-| MCP clients outside Omni | On this Mac, `apps/mcp/external/stdio.ts` reads `data/api-token`. Over HTTP, `/mcp` takes its own token, `data/mcp-token`, as a header or in the URL. See [Omni as an MCP server](external-mcp.md) |
+| MCP clients outside Omni | On this Mac, `apps/mcp/external/stdio.ts` reads `data/api-token`. Over HTTP, `/mcp` takes a Clerk access token for the linked Google account, or its own token, `data/mcp-token`, as a header or in the URL. See [Omni as an MCP server](external-mcp.md) |
 
 The Web UI and its assets are served without the token and never contain it, so opening the page gets you only the pairing screen. Pairing sends the token once to `POST /api/auth/pair`, which answers with an `HttpOnly`, `SameSite=Strict` cookie on `/api` (`Secure` behind HTTPS). Page scripts never see it, and `EventSource` streams and images carry it. The token gets to a browser one of two ways:
 
