@@ -3,7 +3,7 @@ import SwiftUI
 import WebKit
 
 extension View {
-  /// The thread's inspector: Artifacts, Changes, Browser, Web, Terminal, Actions and Details in a side panel, its toggle in the toolbar.
+  /// The thread's inspector: Details, PRs, Artifacts, Changes, Browser, Web, Terminal and Actions in a side panel, its toggle in the toolbar.
   func threadInspector(model: AppModel, store: ThreadStore) -> some View {
     modifier(ThreadInspector(model: model, store: store))
   }
@@ -69,7 +69,7 @@ private struct ThreadInspector: ViewModifier {
           }
         }
         .buttonStyle(.icon(size: 28, wide: count > 0))
-        .help(count > 0 ? "Artifacts, changes, browser, web, terminal, actions, details (\(count))" : "Artifacts, changes, browser, web, terminal, actions, details")
+        .help(count > 0 ? "Details, PRs, artifacts, changes, browser, web, terminal, actions (\(count))" : "Details, PRs, artifacts, changes, browser, web, terminal, actions")
       }
       .sharedBackgroundVisibility(.hidden)
     }
@@ -92,7 +92,7 @@ private struct ThreadInspector: ViewModifier {
         switch command {
         case .open: isOpen.wrappedValue = true
         case .close: isOpen.wrappedValue = false
-        case .artifacts, .changes, .browser, .web, .terminal, .actions, .details:
+        case .details, .prs, .artifacts, .changes, .browser, .web, .terminal, .actions:
           isOpen.wrappedValue = true
           picked.wrappedValue.tab = InspectorSelection.Tab(rawValue: command.rawValue) ?? .details
         case .turn:
@@ -129,6 +129,8 @@ private struct InspectorPanel: View {
   let store: ThreadStore
   @Binding var selection: InspectorSelection
   let close: () -> Void
+  /// The branch's PRs and changes, which the Details tab's branch card and the PRs tab share.
+  @State private var branch = ThreadBranchModel()
 
   var body: some View {
     let files = store.files
@@ -142,13 +144,14 @@ private struct InspectorPanel: View {
             small: true,
             icon: { tab in
               switch tab {
+              case .details: "info"
+              case .prs: "pr"
               case .artifacts: "layers"
               case .changes: "diff"
               case .browser: "browser"
               case .web: "globe"
               case .terminal: "terminal"
               case .actions: "play"
-              case .details: "info"
               }
             })
             .fixedSize()
@@ -163,6 +166,10 @@ private struct InspectorPanel: View {
       }
       .padding(z(10))
       switch selection.tab {
+      case .details:
+        DetailsTab(model: model, store: store, branch: branch, tab: $selection.tab)
+      case .prs:
+        PRsTab(model: model, store: store, branch: branch)
       case .artifacts:
         ArtifactsTab(client: model.client, files: files, selection: $selection)
       case .changes:
@@ -177,11 +184,18 @@ private struct InspectorPanel: View {
         TerminalTab(client: model.client, thread: store.id, cwd: store.thread?.cwd, draft: store.draftContext)
       case .actions:
         ActionsTab(client: model.client, thread: store.id)
-      case .details:
-        DetailsTab(model: model, store: store)
       }
     }
     .frame(maxHeight: .infinity, alignment: .top)
+    // Again when a turn ends (it may have opened the PR or pushed), and every minute to catch a merge.
+    // Keyed on the branch too: the thread arrives after the panel, and a thread can gain a branch.
+    .task(id: "\(store.running) \(store.thread?.branch ?? "")") {
+      guard !store.running, store.thread?.branch?.isEmpty == false else { return }
+      while !Task.isCancelled {
+        await branch.load(client: model.client, thread: store.id)
+        try? await Task.sleep(for: .seconds(60))
+      }
+    }
     .background(Tok.surface)
     .overlay(alignment: .leading) { Rectangle().fill(Tok.line).frame(width: 1) }
   }
@@ -193,6 +207,8 @@ private struct InspectorPanel: View {
       case .browser: store.screenshots.count
       // The Details tab lists them: a count on it says some run while another tab is open.
       case .details: OmniKit.BackgroundTask.runningSubagents(model.store.tasks, in: store.id).count
+      // The open PRs: one, nearly always, so the tab says the branch has a PR waiting.
+      case .prs: branch.prs?.prs.filter(\.isOpen).count ?? 0
       default: 0
       }
     return n > 0 ? n : nil

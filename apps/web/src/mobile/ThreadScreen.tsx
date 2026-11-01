@@ -27,6 +27,7 @@ import { RunOnSheet } from './RunOnSheet.tsx';
 import { Turn, useBranchChanges, type TurnCtx } from './ThreadTurn.tsx';
 import { useOpenOnNewestTurn } from './useOpenOnNewestTurn.ts';
 import { threadView } from './thread-view.ts';
+import { prLine } from '../thread-glance.ts';
 
 /** The thread: the outcome first, steps folded behind a row, one secondary surface at a time from the menu. */
 export function ThreadScreen() {
@@ -174,7 +175,14 @@ export function ThreadScreen() {
         onSwitched={(t) => applyThread(t)}
         onFork={() => shell.sheet({ name: 'continue', source: thread })}
       />
-      {menu && <MenuSheet thread={thread} prLabel={pr?.pr ? `PR #${pr.pr.number} · ${plural(changes?.files.length ?? 0, 'file')}` : null} onClose={() => setMenu(false)} />}
+      {menu && (
+        <MenuSheet
+          thread={thread}
+          pr={pr?.pr ? { label: `PR #${pr.pr.number}`, line: prLine(pr.pr).text } : null}
+          changes={changes?.files.length ? `${plural(changes.files.length, 'file')} · +${changes.add} −${changes.del}` : null}
+          onClose={() => setMenu(false)}
+        />
+      )}
       {machineSheet && held && (
         <RunOnSheet
           rows={held.rows}

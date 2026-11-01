@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 @MainActor @Observable
 public final class ReplyComposerModel {
   /// The prompt Open PR sends, as OPEN_PR_PROMPT in Thread.tsx.
-  public static let openPRPrompt = "Commit your work, push the branch and open a PR with gh. Reply with the PR URL."
+  public static let openPRPrompt = ThreadGlance.openPRPrompt
 
   public nonisolated let threadID: String
   /// Saved as a draft on every change.

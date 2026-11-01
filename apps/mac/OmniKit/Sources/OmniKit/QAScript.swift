@@ -21,7 +21,7 @@ public enum QAAppearance: String, Hashable, Sendable {
 /// a screen per frame and reports how long the frames took.
 public enum QAInspector: String, Hashable, Sendable {
   /// `turn`: the Changes tab on This turn.
-  case open, close, artifacts, changes, turn, browser, web, terminal, actions, details
+  case open, close, details, prs, artifacts, changes, turn, browser, web, terminal, actions
 }
 
 /// What an annotate step does in the Browser tab: press Annotate and wait for the screenshot, draw a rectangle (in fractions
@@ -129,10 +129,10 @@ public enum QAServerAction: String, Hashable, Sendable {
 /// `{"imageZoom": 2}` (or `"fit"`), `{"nativeBrowser": "<url>"}`, `{"editPending": "text"}`, `{"webhookSecret": "<automation id>"}`, `{"searchHit": 0}`, `{"subagent": 0}`,
 /// `{"deliveries": "<automation id>"}` (or `{"automation": "<id>", "open": "failed", "older": true}`),
 /// `{"type": "text"}`, `{"attach": "<path>"}`, `{"send": "reply"}` (or `steer`, `queue`, `interrupt`, or `{"mode": "reply", "wait": false}`), `{"inspector": "artifacts"}` (or
-/// `changes`, `turn`, `browser`, `web`, `terminal`, `actions`, `details`, `open`, `close`), `{"webTitle": "BLOCKED"}`, `{"palette": "query"}` (or `false`), `{"channel": "create"}` (or `edit`, `archive`, `unarchive`),
+/// `details`, `prs`, `changes`, `turn`, `browser`, `web`, `terminal`, `actions`, `open`, `close`), `{"webTitle": "BLOCKED"}`, `{"palette": "query"}` (or `false`), `{"channel": "create"}` (or `edit`, `archive`, `unarchive`),
 /// `{"folder": {"new": "<channel id>"}}` (or `{"new": "<channel id>", "name": "<folder>"}` to make it, `{"rename": "<folder>"}`, `{"delete": "<folder>"}`, `{"here": "<folder>"}`,
 /// `{"drag": "<thread title>", "over": "<folder>"}`, `{"file": "<thread title>", "into": "<folder>"}`,
-/// `{"menu": "<folder>", "shot": "<name>"}`, or `"reset"`), `{"screen": "name"}`, `{"handoffMenu": "name"}`, `{"prMenu": "name"}`, `{"handOff": "<device id>"}`, `{"takeOver": "name"}`,
+/// `{"menu": "<folder>", "shot": "<name>"}`, or `"reset"`), `{"screen": "name"}`, `{"handoffMenu": "name"}`, `{"handOff": "<device id>"}`, `{"takeOver": "name"}`,
 /// `{"quickPrompt": "text"}` (or `{"send": true}`, `false`), `{"selectLines": {"file": "<path>", "from": 1, "to": 3}}`,
 /// `{"addContext": "note"}`, `{"selectTerminal": true}`, `{"addTerminal": "note"}`, `{"annotate": "start"}` (or `add`, `cancel`, `live`, `send`, or
 /// `{"drag": [0.1, 0.2, 0.6, 0.5], "note": "text"}`, `{"tap": [0.4, 0.3], "note": "text"}`, `{"hover": [0.4, 0.3]}`, `{"livePick": [0.4, 0.3], "note": "text"}`,
@@ -217,7 +217,6 @@ public enum QAStep: Hashable, Sendable {
   /// Machine chip, not this menu.
   case handoffMenu(String)
   /// Clicks the reply box's PR button and writes `<name>.png` while its menu is open.
-  case prMenu(String)
   /// Hands the open thread to this device, as picking it in the Machine chip's Hand off to does.
   case handOff(String)
   /// Presses the reply box's Take Over, writes `<name>.png` while its confirm shows, then presses Take Over in it.
@@ -334,7 +333,7 @@ public struct QAScript: Hashable, Sendable {
     self.steps = steps
   }
 
-  private static let kinds = ["route", "wait", "sleep", "snapshot", "port", "open", "openThread", "settings", "server", "appearance", "scroll", "expand", "meter", "modelPicker", "foldAll", "editPending", "webhookSecret", "deliveries", "searchHit", "subagent", "imageZoom", "nativeBrowser", "type", "attach", "run", "send", "inspector", "webTitle", "palette", "channel", "folder", "screen", "handoffMenu", "prMenu", "handOff", "takeOver", "quickPrompt", "selectLines", "addContext", "selectTerminal", "addTerminal", "annotate", "browserAddress", "openContext", "referenceThread", "quit"]
+  private static let kinds = ["route", "wait", "sleep", "snapshot", "port", "open", "openThread", "settings", "server", "appearance", "scroll", "expand", "meter", "modelPicker", "foldAll", "editPending", "webhookSecret", "deliveries", "searchHit", "subagent", "imageZoom", "nativeBrowser", "type", "attach", "run", "send", "inspector", "webTitle", "palette", "channel", "folder", "screen", "handoffMenu", "handOff", "takeOver", "quickPrompt", "selectLines", "addContext", "selectTerminal", "addTerminal", "annotate", "browserAddress", "openContext", "referenceThread", "quit"]
 
   private static func step(_ raw: Any) throws(QAScriptError) -> QAStep {
     guard let dict = raw as? [String: Any] else { throw QAScriptError("a step must be an object") }
@@ -448,7 +447,7 @@ public struct QAScript: Hashable, Sendable {
       return .attach(path)
     case "inspector":
       guard let name = value as? String, let to = QAInspector(rawValue: name) else {
-        throw QAScriptError("inspector takes open, close, artifacts, changes, turn, browser, web, terminal, actions or details")
+        throw QAScriptError("inspector takes open, close, details, prs, artifacts, changes, turn, browser, web, terminal or actions")
       }
       return .inspector(to)
     case "webTitle":
@@ -475,11 +474,6 @@ public struct QAScript: Hashable, Sendable {
         throw QAScriptError("handoffMenu takes a file name of letters, digits, dots, dashes and underscores")
       }
       return .handoffMenu(name)
-    case "prMenu":
-      guard let name = value as? String, validName(name) else {
-        throw QAScriptError("prMenu takes a file name of letters, digits, dots, dashes and underscores")
-      }
-      return .prMenu(name)
     case "handOff":
       guard let id = value as? String, !id.isEmpty else { throw QAScriptError("handOff takes a device id") }
       return .handOff(id)

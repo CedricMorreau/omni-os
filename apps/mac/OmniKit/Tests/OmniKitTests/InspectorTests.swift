@@ -14,9 +14,9 @@ private func list(_ items: [(Int, String)]) throws -> [Artifact] { try items.map
     #expect(s == InspectorSelection(tab: .artifacts, artifactID: 2))
   }
 
-  @Test func newestHTMLElseNewestFileElseDetails() throws {
-    #expect(InspectorSelection.initial(artifacts: try list([(1, "html"), (2, "text"), (3, "screenshot")])) == .init(tab: .artifacts, artifactID: 1))
-    #expect(InspectorSelection.initial(artifacts: try list([(1, "text"), (2, "csv"), (3, "screenshot")])) == .init(tab: .artifacts, artifactID: 2))
+  @Test func opensOnDetailsWithTheNewestHTMLElseNewestFilePicked() throws {
+    #expect(InspectorSelection.initial(artifacts: try list([(1, "html"), (2, "text"), (3, "screenshot")])) == .init(tab: .details, artifactID: 1))
+    #expect(InspectorSelection.initial(artifacts: try list([(1, "text"), (2, "csv"), (3, "screenshot")])) == .init(tab: .details, artifactID: 2))
     #expect(InspectorSelection.initial(artifacts: try list([(1, "screenshot")])) == .init(tab: .details, artifactID: nil))
     #expect(InspectorSelection.initial(artifacts: []) == .init(tab: .details, artifactID: nil))
   }
@@ -33,7 +33,7 @@ private func list(_ items: [(Int, String)]) throws -> [Artifact] { try items.map
     var s = InspectorSelection(tab: .terminal)
     s.arrived(try art(4))
     #expect(s == .init(tab: .terminal, artifactID: 4))
-    #expect(InspectorSelection.Tab.allCases.map(\.title) == ["Artifacts", "Changes", "Browser", "Web", "Terminal", "Actions", "Details"])
+    #expect(InspectorSelection.Tab.allCases.map(\.title) == ["Details", "PRs", "Artifacts", "Changes", "Browser", "Web", "Terminal", "Actions"])
   }
 
   @Test func aNewPageLeavesTheWebTabOpen() throws {
@@ -49,6 +49,12 @@ private func list(_ items: [(Int, String)]) throws -> [Artifact] { try items.map
     var s = InspectorSelection(tab: .changes)
     s.arrived(try art(5))
     #expect(s == .init(tab: .changes, artifactID: 5))
+  }
+
+  @Test func aNewPageLeavesThePRsOpen() throws {
+    var s = InspectorSelection(tab: .prs)
+    s.arrived(try art(9))
+    #expect(s == .init(tab: .prs, artifactID: 9))
   }
 
   @Test func aNewPageLeavesARunsOutputOpen() throws {

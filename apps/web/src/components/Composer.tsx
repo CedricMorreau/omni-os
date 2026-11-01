@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorText, harnessesPath, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
 import { dropNewThreadPreset, navigate, openNewThread, peekNewThreadPreset } from '../router.ts';
 import { useApp } from '../store.tsx';
@@ -241,7 +241,6 @@ export function ReplyComposer({
   canSteer = true,
   onSent,
   onChanged,
-  extra,
   stop,
   machine,
 }: {
@@ -255,7 +254,6 @@ export function ReplyComposer({
   onSent?: (t: Thread, mode?: SendMode) => void;
   /** The thread after `/rename` or a run switch. */
   onChanged?: (t: Thread) => void;
-  extra?: ReactNode;
 }) {
   const { id: threadId, status } = thread;
   // A switch queued behind the turn: what Ben sends waits for it too (apps/server/runner/queue.ts), so nothing steers.
@@ -401,7 +399,6 @@ export function ReplyComposer({
         className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-4"
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
-        {extra}
         <AttachButton onPick={att.add} disabled={busy} />
         <ForkThreadButton thread={thread} disabled={busy} />
         <ThreadRunPills thread={thread} openRequest={pillRequest} onSwitched={(t) => onChanged?.(t)} onError={setError} />

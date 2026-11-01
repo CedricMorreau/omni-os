@@ -2,19 +2,27 @@ import { lazy, Suspense, type ComponentProps } from 'react';
 import type { Artifact, Thread } from '../../api.ts';
 import type { PanelTab } from '../../pages/useThreadSession.ts';
 import { plural } from '../../format.ts';
-import { IconButton, Loading, Segmented } from '../ui.tsx';
+import { prLine } from '../../thread-glance.ts';
+import { IconButton, Loading, Segmented, StatusDot } from '../ui.tsx';
 import { ActionsTab } from './panel/ActionsTab.tsx';
 import { ArtifactsTab } from './panel/ArtifactsTab.tsx';
 import { BrowserTab } from './panel/BrowserTab.tsx';
 import { ChangesTab } from './panel/ChangesTab.tsx';
 import { DetailsTab } from './panel/DetailsTab.tsx';
+import { PRsTab } from './panel/PRsTab.tsx';
 
 // xterm.js is large; load it the first time the tab opens.
 const TerminalView = lazy(() => import('../TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
 type Details = ComponentProps<typeof DetailsTab>;
+type PRs = ComponentProps<typeof PRsTab>;
 
-/** The thread's inspector: a tab strip over Artifacts, Changes, Browser, Terminal, Actions and Details. */
+const PR_DOT = { live: 'running', done: 'done', needs: 'needs', outline: 'idle' } as const;
+
+/**
+ * The thread's inspector: a tab strip over Details, PRs, Artifacts, Changes, Browser, Terminal and Actions. Details
+ * leads with the branch card and PRs follows, the two Ben reaches for most.
+ */
 export function ThreadPanel({
   thread,
   files,
@@ -25,6 +33,7 @@ export function ThreadPanel({
   onTab,
   onClose,
   details,
+  prs,
 }: {
   thread: Thread;
   files: Artifact[];
@@ -35,8 +44,11 @@ export function ThreadPanel({
   onTab: (tab: PanelTab) => void;
   onClose: () => void;
   details: Omit<Details, 'thread'>;
+  prs: Omit<PRs, 'thread'>;
 }) {
   const { agents } = details;
+  const pr = prs.data?.pr;
+  const line = pr ? prLine(pr) : null;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-1 px-2.5 py-2.5">
@@ -47,11 +59,6 @@ export function ThreadPanel({
             value={tab}
             onChange={onTab}
             options={[
-              { id: 'artifacts', icon: 'layers', title: 'Artifacts', badge: files.length ? <span className="font-num text-[10.5px] text-fg-4">{files.length}</span> : undefined },
-              { id: 'changes', icon: 'diff', title: 'Changes' },
-              { id: 'browser', icon: 'browser', title: 'Browser', badge: shots.length ? <span className="font-num text-[10.5px] text-fg-4">{shots.length}</span> : undefined },
-              { id: 'terminal', icon: 'terminal', title: 'Terminal' },
-              { id: 'actions', icon: 'play', title: 'Actions' },
               {
                 id: 'details',
                 icon: 'info',
@@ -62,12 +69,25 @@ export function ThreadPanel({
                   </span>
                 ) : undefined,
               },
+              {
+                id: 'prs',
+                icon: 'pr',
+                title: pr && line ? `PRs: #${pr.number}, ${line.text}` : 'PRs',
+                badge: pr && line ? <StatusDot status={PR_DOT[line.tone]} size={6} /> : undefined,
+              },
+              { id: 'artifacts', icon: 'layers', title: 'Artifacts', badge: files.length ? <span className="font-num text-[10.5px] text-fg-4">{files.length}</span> : undefined },
+              { id: 'changes', icon: 'diff', title: 'Changes' },
+              { id: 'browser', icon: 'browser', title: 'Browser', badge: shots.length ? <span className="font-num text-[10.5px] text-fg-4">{shots.length}</span> : undefined },
+              { id: 'terminal', icon: 'terminal', title: 'Terminal' },
+              { id: 'actions', icon: 'play', title: 'Actions' },
             ]}
           />
         </div>
         <IconButton icon="x" label="Close panel" onClick={onClose} />
       </div>
       <div className="min-h-0 flex-1">
+        {tab === 'details' && <DetailsTab thread={thread} {...details} />}
+        {tab === 'prs' && <PRsTab thread={thread} {...prs} />}
         {tab === 'artifacts' && <ArtifactsTab artifacts={files} selected={selectedArtifact} onSelect={onSelect} />}
         {tab === 'changes' && <ChangesTab thread={thread} />}
         {tab === 'browser' && <BrowserTab channelId={thread.channel_id} threadId={thread.id} shots={shots} />}
@@ -77,7 +97,6 @@ export function ThreadPanel({
           </Suspense>
         )}
         {tab === 'actions' && <ActionsTab thread={thread} />}
-        {tab === 'details' && <DetailsTab thread={thread} {...details} />}
       </div>
     </div>
   );

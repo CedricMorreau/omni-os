@@ -167,10 +167,6 @@ final class QARunner {
         case .handoffMenu(let name):
           try await handoffMenu(shot: name)
           result.files = [name + ".png"]
-        case .prMenu(let name):
-          guard let frame = QAPRProbe.button else { throw QAScriptError("no PR button on screen") }
-          try await shootMenu(at: NSPoint(x: frame.midX, y: frame.midY), button: .leftMouseDown, shot: name, what: "the PR button")
-          result.files = [name + ".png"]
         case .handOff(let device):
           guard let handOff = QAHandoffProbe.handOff else { throw QAScriptError("no thread that can be handed off on screen") }
           await handOff(device)
@@ -470,7 +466,6 @@ final class QARunner {
     case .folder(let action): "folder \(action)"
     case .screen(let name): "screen \(name)"
     case .handoffMenu(let name): "handoffMenu \(name)"
-    case .prMenu(let name): "prMenu \(name)"
     case .handOff(let device): "handOff \(device)"
     case .takeOver(let name): "takeOver \(name)"
     case .palette(let query): "palette \(query ?? "close")"

@@ -2,7 +2,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { turnCount } from '@omni/shared/history.ts';
 import { api, artifactUrl, errorText, useApi, type HarnessWithRunning, type PRDetail } from '../api.ts';
-import { HarnessMark, harnessLabel } from '../components/brand.tsx';
+import { HarnessLogo, HarnessMark, harnessLabel, Loader } from '../components/brand.tsx';
 import { ArtifactBody } from '../components/ArtifactViewer.tsx';
 import { AnnotateLayer, canAnnotate, useAfterAdd, type AnnotateFrom } from '../components/BrowserAnnotate.tsx';
 import { LiveAnnotateCard, LiveAnnotateOverlay, useLiveAnnotate } from '../components/BrowserAnnotationOverlay.tsx';
@@ -13,13 +13,14 @@ import { ChangesTab } from '../components/thread/panel/ChangesTab.tsx';
 import { usePRWatch, watchCopy } from '../components/thread/PRWatch.tsx';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ThreadIdCtx, ToolOutput } from '../components/thread/ToolOutput.tsx';
-import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, StatusDot } from '../components/ui.tsx';
+import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, STATUS_LABEL, StatusDot } from '../components/ui.tsx';
 import { cloudAgentUrl } from '../cloud-agent.ts';
 import { carriedText } from '@omni/shared/continue.ts';
 import { linkName } from '../components/ContinueLinks.tsx';
-import { fullDate, plural } from '../format.ts';
+import { fullDate, plural, relTime } from '../format.ts';
+import { runningSubagents, subagentKind } from '../subagents.ts';
+import { href, type Route } from '../router.ts';
 import { checkTone } from '../pages/PRs.tsx';
-import type { Route } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { toolLabel, toolSummary, type Item, type ToolCall } from '../transcript/fold.ts';
 import { MoDiff, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoSection } from './parts.tsx';
@@ -370,9 +371,58 @@ export function TerminalScreen() {
 
 // ---------- Details ----------
 
+/** A thread's harness logo with its status dot on the corner, as the desktop agents card marks it. */
+function AgentGlyph({ harness, status }: { harness: string; status: string }) {
+  return (
+    <span className="relative grid size-6 place-items-center">
+      <HarnessLogo harness={harness} size={17} title={harnessLabel(harness)} />
+      <StatusDot status={status} size={7} className="absolute -right-0.5 -bottom-0.5 ring-2 ring-surface" />
+    </span>
+  );
+}
+
+const ACTIVE_STATUS = new Set(['running', 'queued']);
+
+/**
+ * Where the thread sits among its agents, the phone's copy of the desktop agents card: where it came from, what it
+ * handed on to, what runs now and the delegations that finished, folded.
+ */
+function AgentsGroup({ open }: { open: (id: string) => void }) {
+  const { thread, parent, children, links } = useThread();
+  const { tasks } = useApp();
+  const [showPrev, setShowPrev] = useState(false);
+  const agents = useMemo(() => (thread ? runningSubagents(tasks, thread.id) : []), [tasks, thread]);
+  const running = children.filter((c) => ACTIVE_STATUS.has(c.status));
+  const previous = children.filter((c) => !ACTIVE_STATUS.has(c.status));
+  type R = { key: string; icon: ReactNode; label: ReactNode; sub?: ReactNode; right?: ReactNode; go?: () => void };
+  const rows: R[] = [];
+  if (parent) rows.push({ key: `p${parent.id}`, icon: 'arrowUpRight', label: parent.title || 'Untitled', sub: `Delegated it · ${STATUS_LABEL[parent.status] ?? parent.status}`, go: () => open(parent.id) });
+  if (links.from) {
+    const f = links.from;
+    rows.push({ key: `f${f.id}`, icon: <AgentGlyph harness={f.harness} status={f.status} />, label: linkName(f), sub: f.carried ? `Continued from · ${carriedText(f.carried)}` : 'Continued from', go: () => open(f.id) });
+  }
+  for (const l of links.into) rows.push({ key: `i${l.id}`, icon: <AgentGlyph harness={l.harness} status={l.status} />, label: linkName(l), sub: 'Continued in', go: () => open(l.id) });
+  for (const c of running) rows.push({ key: `r${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: 'Running', right: relTime(c.updated_at), go: () => open(c.id) });
+  for (const t of agents) rows.push({ key: `a${t.task_id}`, icon: <Loader size={15} className="text-live-text" />, label: t.description, sub: subagentKind(t) ? `Subagent · ${subagentKind(t)}` : 'Subagent' });
+  if (previous.length) {
+    rows.push({ key: 'prev', icon: 'delegate', label: 'Previous agents', right: <span className="flex items-center gap-1.5">{previous.length}<Icon name="chevronDown" size={14} className={showPrev ? '' : '-rotate-90'} /></span>, go: () => setShowPrev((v) => !v) });
+    if (showPrev) for (const c of previous) rows.push({ key: `d${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: STATUS_LABEL[c.status] ?? c.status, right: relTime(c.updated_at), go: () => open(c.id) });
+  }
+  if (!rows.length) return null;
+  return (
+    <MoSection title="Agents" pad={false}>
+      <MoGroup>
+        {rows.map((r, i) => (
+          <MoListRow key={r.key} icon={r.icon} label={r.label} sub={r.sub} right={r.right} chevron={r.key !== 'prev'} onClick={r.go} last={i === rows.length - 1} />
+        ))}
+      </MoGroup>
+    </MoSection>
+  );
+}
+
 export function DetailsScreen() {
   const shell = useShell();
-  const { thread, init, lastResult, links, history } = useThread();
+  const { thread, init, lastResult, history } = useThread();
   const { channel } = useApp();
   const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
   if (!thread) return <MoHeader onBack={shell.back} title="Details" />;
@@ -397,25 +447,6 @@ export function DetailsScreen() {
   ];
   if (thread.task_id) rows.splice(2, 0, ['Task', <span className="font-mono text-[13px]">{thread.task_id}</span>]);
   if (thread.branch) rows.push(['Branch', <span className="font-mono text-[13px]">{thread.branch}</span>]);
-  if (links.from)
-    rows.push([
-      'Continued from',
-      <span className="flex flex-col py-2">
-        <span className="truncate">{linkName(links.from)}</span>
-        {links.from.carried && <span className="text-[12.5px] leading-[1.35] whitespace-normal text-fg-3">{carriedText(links.from.carried)}</span>}
-      </span>,
-    ]);
-  if (links.into.length)
-    rows.push([
-      'Continued in',
-      <span className="flex flex-col py-2">
-        {links.into.map((l) => (
-          <span key={l.id} className="truncate">
-            {linkName(l)}
-          </span>
-        ))}
-      </span>,
-    ]);
   const agentUrl = thread.harness === 'cursor-cloud' ? cloudAgentUrl(thread.session_id) : null;
   if (agentUrl)
     rows.push([
@@ -428,6 +459,7 @@ export function DetailsScreen() {
     <>
       <MoHeader onBack={shell.back} title="Details" sub={thread.title} />
       <Body className="gap-4">
+        <AgentsGroup open={(id) => shell.open(href.thread(id))} />
         <MoGroup>
           {rows.map(([k, v], i) => (
             <div key={k} className={`flex min-h-12 items-center px-4 text-[14.5px] ${i ? 'border-t border-line' : ''}`}>

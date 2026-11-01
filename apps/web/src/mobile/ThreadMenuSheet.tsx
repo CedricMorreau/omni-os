@@ -176,7 +176,11 @@ function MoveSheet({ thread, onClose }: { thread: Thread; onClose: () => void })
 
 type Mode = 'rename' | 'move' | 'reference';
 
-export function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabel: string | null; onClose: () => void }) {
+/**
+ * `pr`: the branch PR's label and status line, null before it has one. Details leads and PR follows, the order of the
+ * desktop panel's tabs.
+ */
+export function MenuSheet({ thread, pr, changes, onClose }: { thread: Thread; pr: { label: string; line: string } | null; changes: string | null; onClose: () => void }) {
   const shell = useShell();
   const { tasks, status } = useApp();
   const { jumpTo } = useThread();
@@ -219,11 +223,12 @@ export function MenuSheet({ thread, prLabel, onClose }: { thread: Thread; prLabe
       <div className={`truncate ${SHEET_TITLE}`}>{thread.title || 'Untitled'}</div>
       <div className="flex flex-col gap-2.5 px-3">
         <MoGroup>
-          {thread.branch && <MoListRow icon="diff" label="Changes" sub={prLabel ?? `On ${thread.branch}`} onClick={() => go(href.threadView(thread.id, prLabel ? 'pr' : 'changes'))} />}
+          <MoListRow icon="info" label="Details" sub="Agents, harness, model, session" onClick={() => go(href.threadView(thread.id, 'details'))} />
+          {thread.branch && <MoListRow icon="pr" label={pr?.label ?? 'PR'} sub={pr?.line ?? 'No PR yet'} onClick={() => go(href.threadView(thread.id, 'pr'))} />}
+          {thread.branch && <MoListRow icon="diff" label="Changes" sub={changes ?? `On ${thread.branch}`} onClick={() => go(href.threadView(thread.id, 'changes'))} />}
           <MoListRow icon="browser" label="Browser" sub="Watch only" onClick={() => go(href.threadView(thread.id, 'browser'))} />
           <MoListRow icon="terminal" label="Terminal" sub="Read only" onClick={() => go(href.threadView(thread.id, 'terminal'))} />
-          <MoListRow icon="play" label="Actions" sub="Preview, checks, tests" onClick={() => go(href.threadView(thread.id, 'actions'))} />
-          <MoListRow icon="info" label="Details" sub="Harness, model, session" onClick={() => go(href.threadView(thread.id, 'details'))} last />
+          <MoListRow icon="play" label="Actions" sub="Preview, checks, tests" onClick={() => go(href.threadView(thread.id, 'actions'))} last />
         </MoGroup>
         {menu.map((g) => (
           <MoSection key={g.id} title={g.title} pad={false}>

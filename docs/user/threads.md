@@ -35,9 +35,17 @@ Files can ride along with a message (paperclip, drag-and-drop or paste). They la
 
 To continue a thread in a terminal or Claude Desktop: `cd <cwd> && claude --resume <session id>` (the thread's Details panel has a copy button). Check there that the session is no longer warm first, so two processes do not write the same session.
 
+## The thread panel
+
+The side panel's tabs run Details, PRs, Artifacts, Changes, Browser, Terminal and Actions (the Mac app adds Web). A thread opens on Details unless a link names an artifact.
+
+**Details** starts with the branch card, for a thread on its own branch: the branch, its PR with what decides whether it can merge (checks, conflicts, review), the files changed, and one button for the step the PR needs next. **Open PR** while there is none, **Fix conflicts** or **Fix checks** (each asks the agent, and queues mid-turn), or **Merge**, which opens the PR page to confirm. The PR and changes rows open their tabs. Under the card, the agents card shows the thread's lineage (the thread that delegated it, the thread it continued from or in), what runs now, and its finished delegated threads under **Previous agents**. MCP servers take one line, with the names behind its arrow.
+
+**PRs** lists every PR from the branch with its checks, conflicts and review state, the next step, **Open a new PR** when none is open, and [Watch PR](#watch-pr). On a phone, Thread options lists Details first and the PR screen second.
+
 ## Running subagents
 
-The thread panel's Details tab lists **Running subagents** under Resume in terminal: every agent the thread started itself that is still working, such as an Agent call, a workflow, a fork or a teammate, with its kind and how long it has run. Click one to scroll the transcript to the call that started it, however far back. The Details tab shows how many run while another tab is open, and the section hides when none do. On a phone, the list is at the bottom of the thread's options sheet. Background shells and monitors are not listed, and neither are delegated threads: those are under Delegated threads, and their own agents show in their own thread.
+The Details tab's agents card lists them under **Running**: every agent the thread started itself that is still working, such as an Agent call, a workflow, a fork or a teammate, with its kind and how long it has run. Click one to scroll the transcript to the call that started it, however far back. The Details tab shows how many run while another tab is open. On a phone, the list is at the bottom of the thread's options sheet and in its Details screen. Background shells and monitors are not listed. Delegated threads that still run are listed under Running too, and finished ones under Previous agents; their own agents show in their own thread.
 
 Claude Code reports its agents itself. Codex (multi-agent spawns), Cursor Agent (its task tool) and Hermes (`subagent.*` events) are mapped onto the same list. Cursor Cloud reports no sub-agents.
 
@@ -111,7 +119,7 @@ How the process behind a thread is launched: [Architecture overview](../internal
 
 ## Watch PR
 
-A thread with an open PR can watch its checks and its reviews: **Watch PR** in the composer's PR menu (on the phone, the PR screen), or the Conductor's `watch_pr` tool. Omni polls GitHub itself, so no client needs to be open and an unchanged poll costs no agent turn.
+A thread with an open PR can watch its checks and its reviews: **Watch PR** in the thread panel's PRs tab (on the phone, the PR screen), or the Conductor's `watch_pr` tool. Omni polls GitHub itself, so no client needs to be open and an unchanged poll costs no agent turn.
 
 - A check that fails on the PR head wakes the thread once, with the head commit, the failing checks and the tail of each GitHub Actions log. The same check failing again on the same head, after a re-run, does not wake it again; failing on a new head does.
 - New review feedback from someone else wakes it too: a review that says something or asks for changes, an inline comment, a conversation comment. One wake carries everything new since the last poll, with each author, a link, the head the comment was written on and an excerpt (the first eight with their text, the rest by link). Only feedback written after the watch started counts.

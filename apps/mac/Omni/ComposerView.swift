@@ -33,102 +33,6 @@ struct ReplyComposerHost: View {
   }
 }
 
-/// Open PR until the branch has a PR, then that PR and whether it merged: `ThreadPR` in Thread.tsx.
-/// It opens a menu of every PR from the branch, with Open PR there while none is open.
-private struct ThreadPRSlot: View {
-  let model: AppModel
-  let thread: OmniThread
-  let busy: Bool
-  let opening: Bool
-  let open: () -> Void
-  /// nil until the first answer, so the button does not flash before the PR shows.
-  @State private var prs: ThreadPullRequests?
-  @State private var failed = false
-  @State private var watch: PRWatch?
-  @State private var watchError: String?
-
-  var body: some View {
-    // A ZStack, not a Group: a Group spreads its modifiers over its children, and before the first
-    // answer it has none, so the .task below never ran and Open PR never showed.
-    ZStack {
-      if let pr = prs?.pr, let prs {
-        Menu {
-          Section("\(prs.prs.count) PR\(prs.prs.count == 1 ? "" : "s") from \(thread.branch ?? "this branch")") {
-            ForEach(prs.prs) { p in
-              Button("#\(p.number)  \(p.title)  (\(p.badge))") {
-                model.route = .channel(id: thread.channelID, tab: .prs, pr: p.number)
-              }
-            }
-          }
-          if prs.canOpenAnother {
-            Divider()
-            Button("Open a new PR", action: open).disabled(opening)
-          }
-          PRWatchSection(client: model.client, threadID: thread.id, open: pr.isOpen, watch: $watch, error: $watchError)
-        } label: {
-          HStack(spacing: z(5)) {
-            if opening { ProgressView().controlSize(.mini) } else { Image(systemName: "arrow.triangle.pull") }
-            Text("#\(pr.number)")
-            PRChip(text: pr.badge, tone: pr.badge == "open" ? .ok : pr.badge == "merged" ? .info : .outline)
-            if prs.prs.count > 1 { Text("+\(prs.prs.count - 1)").foregroundStyle(Tok.fg4) }
-            PRWatchGlyph(watch: watch)
-          }
-          .font(.omni(size: 12.5))
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.visible)
-        .fixedSize()
-        .padding(.horizontal, z(8))
-        .frame(height: z(26))
-        .foregroundStyle(Tok.fg3)
-        .help(pr.title)
-        #if DEBUG
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { QAPRProbe.button = $0 }
-        #endif
-      } else if prs != nil || failed {
-        openButton
-      } else {
-        Color.clear.frame(width: 0, height: 0)
-      }
-    }
-    // Again when a turn ends (it may have opened the PR), and every minute to catch a merge.
-    .task(id: busy) {
-      guard !busy else { return }
-      while !Task.isCancelled {
-        await load()
-        try? await Task.sleep(for: .seconds(60))
-      }
-    }
-  }
-
-  private var openButton: some View {
-    Button(action: open) {
-      HStack(spacing: z(6)) {
-        if opening { Loader(size: 13) } else { OmniIcon(name: "pr", size: 14) }
-        Text("Open PR")
-      }
-    }
-    .buttonStyle(.pill(.ghost, height: 28))
-    .disabled(opening)
-    .help(ReplyComposerModel.openPRPrompt)
-  }
-
-  private func load() async {
-    do {
-      prs = try await model.client.pullRequests(forThread: thread.id)
-    } catch {
-      failed = true
-    }
-    guard prs?.pr != nil else { return }
-    do {
-      watch = try await model.client.prWatch(forThread: thread.id)
-    } catch {
-      // A failed read keeps the last answer.
-    }
-  }
-}
-
 private struct ReplyComposerView: View {
   let model: AppModel
   let store: ThreadStore
@@ -255,9 +159,6 @@ private struct ReplyComposerView: View {
       ForkButton(model: model, thread: thread, disabled: reply.sending)
       DictateButton { focusTick += 1 }
       runPickers
-      if thread.branch != nil {
-        ThreadPRSlot(model: model, thread: thread, busy: busyThread, opening: reply.openingPR) { Task { await openPR() } }
-      }
       HStack(spacing: z(10)) {
         if let omni = menu.reply, omni.action != .send {
           SendButton(title: omni.label ?? "Send", armed: omni.armed, sending: omniBusy) { runOmni() }
@@ -382,10 +283,6 @@ private struct ReplyComposerView: View {
       if let t = await reply.send(mode: mode) { store.merge(t, isReply: true) }
       focusTick += 1
     }
-  }
-
-  private func openPR() async {
-    if let t = await reply.openPR(running: busyThread) { store.merge(t, isReply: true) }
   }
 
   private func stage(_ urls: [URL]) {
