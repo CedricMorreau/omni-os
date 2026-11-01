@@ -7,12 +7,12 @@ import { createPublicKey, createVerify, type JsonWebKeyInput } from 'node:crypto
 import { resolved } from './user-config.ts';
 
 /** The Clerk instance an install signs in with unless its config names another: one shared instance, where anyone can make an account. */
-export const DEFAULT_CLERK_PUBLISHABLE_KEY = 'pk_test_Y2VydGFpbi13YWxydXMtNDkxNS5jbGVyay5hY2NvdW50cy5kZXYk';
-/** The instance's public OAuth application for Omni. Empty until it exists: Google sign-in stays off. */
-export const DEFAULT_CLERK_CLIENT_ID = '';
+export const DEFAULT_CLERK_PUBLISHABLE_KEY = 'pk_live_Y2xlcmsub21uaS1vcy5hcHAk';
+/** The instance's public OAuth application for Omni ("Omni OS", device grant on). */
+export const DEFAULT_CLERK_CLIENT_ID = 'uvRoz7VS5Bgge4Ni';
 
 export interface ClerkConfig {
-  /** The instance's Frontend API, like https://certain-walrus-4915.clerk.accounts.dev. The issuer of its tokens. */
+  /** The instance's Frontend API, like https://clerk.omni-os.app. The issuer of its tokens. */
   issuer: string;
   clientId: string;
 }

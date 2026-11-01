@@ -9,7 +9,7 @@ import { FAKE_CLIENT_ID, FAKE_ISSUER, FAKE_PUBLISHABLE_KEY, fakeClerk } from './
 describe('issuerFromKey', () => {
   it("reads the Frontend API out of a publishable key, the shared default's included", () => {
     expect(issuerFromKey(FAKE_PUBLISHABLE_KEY)).toBe(FAKE_ISSUER);
-    expect(issuerFromKey(DEFAULT_CLERK_PUBLISHABLE_KEY)).toBe('https://certain-walrus-4915.clerk.accounts.dev');
+    expect(issuerFromKey(DEFAULT_CLERK_PUBLISHABLE_KEY)).toBe('https://clerk.omni-os.app');
     expect(issuerFromKey(`pk_live_${Buffer.from('clerk.example.com$').toString('base64')}`)).toBe('https://clerk.example.com');
   });
 
