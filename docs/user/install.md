@@ -6,8 +6,9 @@ Omni runs on the Mac where your agents work. Set that machine up first; the Web 
 
 | Need | Check | Fix |
 | --- | --- | --- |
-| macOS | `uname` prints `Darwin` | The Mac app is Mac-only. The server and Web UI also run on Linux, with secrets in `data/secrets.json` ([Configuration](configuration.md#secrets)) |
-| Node 24+ and npm | `node -v` | `nvm install 24` or `brew install node` |
+| macOS, for the Mac app | `uname` prints `Darwin` | On Linux, skip the Mac app and run `scripts/install-linux.sh`. Secrets go in `data/secrets.json` ([Configuration](configuration.md#secrets)) |
+| Node 24+ and npm | `node -v` | `nvm install 24`, `mise use node@24`, or `brew install node` |
+| Chromium, for the Linux app | `command -v chromium` | Your distro's Chromium, Chrome or Brave. Omarchy already has one |
 | Claude Code, signed in | `claude --version` | `npm install -g @anthropic-ai/claude-code`, then `claude` and `/login` |
 | `gh`, signed in (GitHub panel, PR automations) | `gh auth status` | `brew install gh && gh auth login` |
 | Xcode (Mac app only) | `xcodebuild -version` | Install Xcode from the App Store, then `sudo xcode-select -s /Applications/Xcode.app` |
@@ -16,7 +17,7 @@ Command Line Tools alone are not enough: `xcodebuild` needs full Xcode. Codex an
 
 ## Agent instructions
 
-For an agent doing the setup (the README has the prompt to paste). Run each step, run its check, and stop on a failed check instead of working around it. Don't run `sudo`, don't install Xcode for the user, and never write secret values anywhere but the secret store (Keychain on a Mac, `data/secrets.json` on Linux).
+For an agent doing the setup (the README has the prompt to paste). Run each step, run its check, and stop on a failed check instead of working around it. Don't run `sudo`, don't install Xcode for the user, and never write secret values anywhere but the secret store (Keychain on a Mac, `data/secrets.json` on Linux). On Linux, skip the Xcode check and step 5. After step 4, run `scripts/install-linux.sh` and tell the user to open Omni from the app launcher.
 
 1. **Prerequisites.** Run every check in [What you need](#what-you-need). On a miss, give the user the fix and wait.
 
@@ -89,6 +90,7 @@ Running it again is safe: every answer defaults to what is saved. `npm run setup
 | How | Command | Notes |
 | --- | --- | --- |
 | Mac app | `scripts/build-mac.sh` | Release build, installs to `~/Applications/Omni.app`, opens it. Starts and stops the server itself |
+| Linux app | `scripts/install-linux.sh` | Builds the Web UI, installs `~/.local/share/applications/omni-os.desktop`. Open Omni from the app launcher. It starts the server, and stops it on quit only when this launch started it |
 | Development | `npm run dev` | Server on :4747, Web UI with hot reload on http://localhost:4748 |
 | Production | `npm run build && npm start` | One process, serves the built Web UI on http://127.0.0.1:4747 |
 
@@ -111,7 +113,8 @@ Pulls your existing Claude Code sessions into Omni as resumable threads.
 ```bash
 git pull                  # a fork: git fetch upstream && git merge upstream/main
 npm install --include=dev
-scripts/build-mac.sh      # rebuilds and reinstalls the Mac app
+scripts/build-mac.sh      # Mac: rebuilds and reinstalls the app
+scripts/install-linux.sh  # Linux: rebuilds the Web UI and the launcher
 ```
 
 Restart the server if you run it with `npm run dev` or `npm start`. The Mac app restarts its own. A fork merges cleanly as long as your settings stay in `data/`; see [FORKING.md](../../FORKING.md).

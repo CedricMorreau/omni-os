@@ -38,6 +38,12 @@
         "tests/**/*.test.ts"
       ]
     },
+    "apps/linux": {
+      "entry": [
+        "src/main.ts",
+        "tests/**/*.test.ts"
+      ]
+    },
     "apps/mac": {
       "entry": [
         "scripts/*.ts",

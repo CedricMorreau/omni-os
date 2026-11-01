@@ -151,6 +151,23 @@ describe('/api/auth', () => {
     expect(after.status).toBe(200);
   });
 
+  it('pairs the Linux app window from this machine, with the token only in the cookie', async () => {
+    const res = await app.request('/api/auth/desktop-pair', { headers: { authorization: '' } });
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get('location') ?? '', 'http://127.0.0.1').pathname).toBe('/');
+    const cookie = res.headers.get('set-cookie') ?? '';
+    expect(cookie).toContain(`${cookieName()}=${TOKEN}`);
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+    expect(cookie).not.toContain('Secure');
+    expect(await res.text()).not.toContain(TOKEN);
+    const proxied = await app.request('/api/auth/desktop-pair', {
+      headers: { authorization: '', 'x-forwarded-host': 'box.tail1234.ts.net', 'x-forwarded-for': '100.64.0.2' },
+    });
+    expect(proxied.status).toBe(403);
+    expect(proxied.headers.get('set-cookie')).toBeNull();
+  });
+
   it('will not pair without the token', async () => {
     const res = await app.request('/api/auth/pair', { method: 'POST', headers: { authorization: 'Bearer wrong' } });
     expect(res.status).toBe(401);

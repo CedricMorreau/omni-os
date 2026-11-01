@@ -9,11 +9,12 @@
 
 One local workspace for all agent work. Channels per client or project, a thread per task, a Conductor that hands work to a crew, and automations on a schedule or on GitHub PR events. Replaces hopping between Claude Desktop, Cursor cloud agents and a separate conductor bot.
 
-One Node server on your Mac runs everything (threads, harnesses, database, secrets, automations). Two clients sit on top of its `/api` and show the same channels and threads:
+One Node server runs everything (threads, harnesses, database, secrets, automations). The clients sit on top of its `/api` and show the same channels and threads:
 
 | Client | What | Where |
 | --- | --- | --- |
 | Mac app | Native SwiftUI app for the desk. Starts and stops the server itself | `apps/mac/` |
+| Linux app | Desktop launcher for Omarchy and other Linux desktops. Starts the server and opens the Web UI as an app window | `apps/linux/` |
 | Web UI | React app, in any browser and on your phone over Tailscale | `apps/web/` |
 
 ## What does it cost?
@@ -35,7 +36,7 @@ Nothing extra. Omni runs each thread through the official CLI of the harness you
 
 ## Quick start
 
-Needs macOS, Node 24+, `gh` signed in, and Xcode for the Mac app. The server and Web UI also run on Linux, without the Mac app; secrets go to a 0600 file there instead of the Keychain.
+Needs Node 24+ and `gh` signed in. The Mac app also needs macOS and Xcode. On Linux, `scripts/install-linux.sh` installs a desktop launcher. Secrets go to the Keychain on a Mac and a 0600 file on Linux.
 
 **Let an agent do it.** Open Claude Code, Codex or Cursor in an empty terminal and paste this. Swap `<you>` for your GitHub owner, or point it at an existing clone.
 
@@ -53,8 +54,9 @@ git clone https://github.com/<you>/omni-os.git ~/omni-os
 cd ~/omni-os
 npm install --include=dev
 npm run setup          # who you are and where your work lives; Enter takes each default
-scripts/build-mac.sh   # Mac app: builds, installs to ~/Applications/Omni.app and opens it
-npm run dev            # or the Web UI: server on :4747, UI on http://localhost:4748
+scripts/build-mac.sh      # Mac app: builds, installs to ~/Applications/Omni.app and opens it
+scripts/install-linux.sh  # Linux: builds the Web UI and installs the Omni launcher
+npm run dev               # or the Web UI: server on :4747, UI on http://localhost:4748
 ```
 
 Forking it for yourself? Read [FORKING.md](FORKING.md): everything personal lives in `data/`, so upstream updates merge cleanly.
