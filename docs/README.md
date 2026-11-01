@@ -13,7 +13,7 @@
 - [Link previews](user/link-previews.md)
 - [Mods](user/mods.md)
 - [Other ways in](user/entry-points.md): shell, Quick Prompt, history import, brain export
-- [Omni as an MCP server](user/external-mcp.md): use Omni from Claude Desktop, claude.ai, ChatGPT, Cursor, Codex or Grok
+- [Omni as an MCP server](user/external-mcp.md): use Omni from Claude Code, Codex, Cursor, Hermes, Claude Desktop, claude.ai, ChatGPT or Grok
 - [Known limits](user/limits.md), including Storage and worktree retention
 - [Forking Omni](../FORKING.md)
 

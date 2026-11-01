@@ -19,22 +19,102 @@ A thread started here has no parent, so its reply does not come back as a `[crew
 
 ## Let an agent install it
 
-Paste this into Claude Code, Codex, Cursor or any agent with a shell on the machine Omni runs on. Swap `~/omni-os` if your checkout is elsewhere. Grok Bot, claude.ai and ChatGPT run on their own servers and can't follow it: for Grok Bot see [Connect Grok Bot](#connect-grok-bot), for the other two [From anywhere else](#from-anywhere-else-http).
+Each harness below has its own prompt. Paste it into that harness, and it sets up Omni for itself. On the machine Omni runs on it uses the stdio server; on any other machine it uses the public URL from [From anywhere else](#from-anywhere-else-http), so swap `https://omni.example.com` for your `mcpPublicUrl` first.
+
+Every prompt finds Omni's checkout from the server running on port 4747, not from a fixed path: a machine can hold several checkouts, and only the one serving :4747 has the right data dir. Grok Bot, claude.ai and ChatGPT run on their own servers and can't follow a prompt: for Grok Bot see [Connect Grok Bot](#connect-grok-bot), for the other two [From anywhere else](#from-anywhere-else-http).
+
+### Claude Code
 
 ```text
-Install the Omni MCP server for me. Omni is checked out at ~/omni-os and its server runs on this machine.
-1. Run `cd ~/omni-os && npm run -s mcp:config` and read what it prints. Never print or paste the contents
+Add Omni's MCP server to Claude Code, for my user (all projects).
+1. Find Omni's checkout: the working directory of the process listening on 127.0.0.1:4747. If nothing
+   listens there, Omni does not run on this machine: go to step 4.
+2. In that checkout, run `npm run -s mcp:config` and read what it prints. Never print or paste the contents
    of data/api-token or data/mcp-token, and don't pass --show-token.
-2. Add the "omni" server to every MCP client installed here, using the stdio entry it printed:
+3. If `claude mcp get omni` finds one, remove it with `claude mcp remove omni --scope user`. Then run the
+   `claude mcp add --scope user omni ...` line it printed, exactly. Go to step 5.
+4. Run `claude mcp add --scope user --transport http omni https://omni.example.com/mcp`.
+   Tell me to run /mcp, pick omni and sign in with the Google account linked to Omni.
+5. Run `claude mcp get omni` and confirm it connects. Tell me to restart Claude Code so new sessions load
+   the omni tools.
+```
+
+### Codex
+
+```text
+Add Omni's MCP server to Codex.
+1. Find Omni's checkout: the working directory of the process listening on 127.0.0.1:4747. If nothing
+   listens there, Omni does not run on this machine: go to step 4.
+2. In that checkout, run `npm run -s mcp:config` and read what it prints. Never print or paste the contents
+   of data/api-token or data/mcp-token, and don't pass --show-token.
+3. If `codex mcp get omni` finds one, remove it with `codex mcp remove omni`. Then run the
+   `codex mcp add omni ...` line it printed, exactly. Go to step 5.
+4. Run `codex mcp add omni --url https://omni.example.com/mcp`, then `codex mcp login omni`, and tell me
+   to sign in with the Google account linked to Omni in the browser it opens.
+5. Run `codex mcp list` and confirm omni is there and enabled. Tell me to start a new Codex session to
+   load the omni tools.
+```
+
+### Cursor Agent and the Cursor editor
+
+Both read `~/.cursor/mcp.json`, so one setup covers both.
+
+```text
+Add Omni's MCP server to Cursor (cursor-agent and the editor share ~/.cursor/mcp.json).
+1. Find Omni's checkout: the working directory of the process listening on 127.0.0.1:4747. If nothing
+   listens there, Omni does not run on this machine: go to step 4.
+2. In that checkout, run `npm run -s mcp:config` and read what it prints. Never print or paste the contents
+   of data/api-token or data/mcp-token, and don't pass --show-token.
+3. Merge the "omni" entry from the "mcpServers" block it printed into ~/.cursor/mcp.json. Keep every other
+   server, replace only an existing "omni", and create the file if it is missing. Go to step 5.
+4. Merge "omni": { "url": "https://omni.example.com/mcp" } into the "mcpServers" of ~/.cursor/mcp.json
+   the same way, then run `cursor-agent mcp login omni` and tell me to sign in with the Google account
+   linked to Omni.
+5. Run `cursor-agent mcp enable omni`, then `cursor-agent mcp list-tools omni` and confirm list_channels
+   is there. Tell me to restart the Cursor editor if it is open.
+```
+
+### Hermes
+
+Hermes usually runs on its own Linux server ([Hermes remote](harnesses.md#hermes-remote)), where only the public URL reaches Omni.
+
+```text
+Add Omni's MCP server to Hermes.
+1. Find Omni's checkout: the working directory of the process listening on 127.0.0.1:4747. If nothing
+   listens there, Omni does not run on this machine: go to step 4.
+2. In that checkout, run `npm run -s mcp:config` and read what it prints. Never print or paste the contents
+   of data/api-token or data/mcp-token, and don't pass --show-token.
+3. If `hermes mcp list` shows omni, remove it with `hermes mcp remove omni`. Then add the stdio entry from
+   the "mcpServers" block it printed: `echo Y | hermes mcp add omni --command <its command> --args <its args>`,
+   with any env it lists passed as --env KEY=value before --args (the Y answers "Enable all tools?").
+   Go to step 5.
+4. Run `echo Y | hermes mcp add omni --url https://omni.example.com/mcp --auth oauth`, then `hermes mcp login omni`,
+   and tell me to sign in with the Google account linked to Omni at the URL it shows.
+5. Run `hermes mcp test omni` and confirm it lists the omni tools.
+```
+
+### Every client on this machine at once
+
+For Claude Desktop, which has no shell of its own, or to set up several clients in one go. Paste it into any agent with a shell on the machine Omni runs on.
+
+```text
+Install the Omni MCP server in every MCP client on this machine.
+1. Find Omni's checkout: the working directory of the process listening on 127.0.0.1:4747. If nothing
+   listens there, stop and tell me Omni is not running here.
+2. In that checkout, run `npm run -s mcp:config` and read what it prints. Never print or paste the contents
+   of data/api-token or data/mcp-token, and don't pass --show-token.
+3. Add the "omni" server to each client installed here, using the stdio entry it printed, and replace only
+   an existing "omni" entry:
    Claude Code: run the `claude mcp add` line. Codex: run the `codex mcp add` line.
    Claude Desktop and Cursor: merge the "omni" entry into the "mcpServers" of the config file it names,
-   keeping every other server. Create the file if it is missing.
-   Skip a client that is not installed, and if "omni" is already there, replace only that entry.
-3. Check it: if the omni tools are loaded in this session, call list_channels. Otherwise run
-   `claude mcp list` or `codex mcp list` and confirm omni shows as connected.
-4. Tell me which clients you set up, which ones need a restart, and the exact steps for the ones you
-   cannot set up from here: claude.ai and ChatGPT need the Cloudflare Tunnel from step 1 running
-   first, then the remote URL, and I sign in with Google there myself.
+   keeping every other server. Create the file if it is missing. Then run `cursor-agent mcp enable omni`
+   if cursor-agent is installed.
+   Hermes: `echo Y | hermes mcp add omni --command <command> --args <args>` from the same entry.
+   Skip a client that is not installed.
+4. Check each one: `claude mcp get omni`, `codex mcp list`, `cursor-agent mcp list-tools omni`,
+   `hermes mcp test omni`.
+5. Tell me which clients you set up, which need a restart, and that claude.ai, ChatGPT and Grok need the
+   Cloudflare Tunnel and the public URL instead, which I add there myself.
 ```
 
 ## Set it up by hand
