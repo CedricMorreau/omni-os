@@ -139,6 +139,11 @@ struct ConnectCard: View {
 struct ConnectMachineRow: View {
   let machine: ConnectMachine
 
+  private var statusText: String {
+    let state = machine.online ? "Online" : "Offline"
+    return machine.current ? "This Mac, \(state.lowercased())" : state
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: z(4)) {
       InfoRow(label: machine.name) {
