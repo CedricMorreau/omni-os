@@ -35,6 +35,9 @@
       },
       "web": {
         "dependencies": { "deny": ["@omni/mac"] }
+      },
+      "linux": {
+        "dependencies": { "deny": ["@omni/web", "@omni/mac", "@omni/server"] }
       }
     }
   }

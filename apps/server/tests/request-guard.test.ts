@@ -53,6 +53,15 @@ describe('requestGuard: the token', () => {
     expect((await get('/api/auth/proof/x')).status).toBe(401);
   });
 
+  it('lets GET /api/auth/desktop-pair through from this machine, and refuses a proxy or another site', async () => {
+    expect((await get('/api/auth/desktop-pair')).status).toBe(200);
+    expect((await get('/api/auth/desktop-pair', { 'x-forwarded-host': 'box.tail1234.ts.net' })).status).toBe(403);
+    expect((await get('/api/auth/desktop-pair', { authorization: `Bearer ${TOKEN}`, 'x-forwarded-for': '100.64.0.2' })).status).toBe(403);
+    expect((await get('/api/auth/desktop-pair', { 'sec-fetch-site': 'cross-site' })).status).toBe(403);
+    expect((await get('/api/auth/desktop-pair', { host: 'evil.example' })).status).toBe(403);
+    expect((await app.request('http://127.0.0.1:4747/api/auth/desktop-pair', { method: 'POST', headers: { host: '127.0.0.1:4747', authorization: '' } })).status).toBe(401);
+  });
+
   it('lets a POST to a GitHub webhook path through without one, and nothing else under /api/hooks', async () => {
     const hook = (path: string, headers: Record<string, string> = {}, method = 'POST') =>
       app.request(`http://127.0.0.1:4747${path}`, { method, body: method === 'POST' ? '{}' : undefined, headers: { host: '127.0.0.1:4747', authorization: '', 'content-type': 'application/json', ...headers } });

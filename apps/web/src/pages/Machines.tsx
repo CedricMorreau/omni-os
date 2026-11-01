@@ -4,12 +4,13 @@ import { RUN_ON_HINT, runOnOptions, useRunOnSetting } from '../components/RunOnP
 import { ErrorNote, Label, Picker, StatusDot } from '../components/ui.tsx';
 import { relTime } from '../format.ts';
 import { useApp } from '../store.tsx';
+import { GoogleAccountSection } from './GoogleAccount.tsx';
 import { Advanced, Card, InfoRow, PartHeading } from './settings-parts.tsx';
 import { StorageSection } from './Storage.tsx';
 import { PathMapEditor, SyncSection } from './Sync.tsx';
 
 // Settings, Machines: this machine (its name, which the sidebar footer showed before #405, and where new threads
-// run), then Sync and Storage, which were pages of their own. Advanced holds the developer items: the address, the
+// run), the Google account that signs new devices in, then Sync and Storage, which were pages of their own. Advanced holds the developer items: the address, the
 // feed, the thread counts and the sync path map. The Mac app's Machines tab shows the same, with its server's port,
 // repo, Node and log under its own Advanced.
 
@@ -27,6 +28,7 @@ export function MachinesSection() {
   return (
     <>
       <MachineCard state={setup.data ?? null} />
+      <GoogleAccountSection />
       <PartHeading title="Sync" subtitle="History across your machines, relayed through your own Supabase project." />
       <SyncSection />
       <PartHeading title="Storage" subtitle="The worktrees Omni made for threads, what they use, and which are safe to clean up." />

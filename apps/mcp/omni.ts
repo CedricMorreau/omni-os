@@ -414,6 +414,15 @@ async function deviceId(device: string | undefined): Promise<string | undefined>
 }
 
 server.registerTool(
+  'set_automations_machine',
+  {
+    description: 'Choose the synced machine for all scheduled and event-triggered automations. The choice syncs to other machines. Run now still uses the connected machine.',
+    inputSchema: { device: z.string().trim().min(1).describe('Machine id or name from list_devices, or here.') },
+  },
+  async ({ device }) => text(await call('/sync/automations-owner', { method: 'POST', body: JSON.stringify({ device: await deviceId(device) }) })),
+);
+
+server.registerTool(
   'list_devices',
   {
     description:
@@ -561,6 +570,19 @@ server.registerTool('worktree_storage', {
   description: 'Read-only inventory of the worktrees in data/worktrees: size, owning thread and why each is kept or eligible for cleanup, plus what a cleanup or this Mac\'s retention policy would remove and the last cleanup runs. With scan: true, starts a background scan first (it takes a minute); call again without it to read progress and the result. Deletes nothing: only Ben removes worktrees, in Settings > Machines.',
   inputSchema: { scan: z.boolean().optional() },
 }, async ({ scan }) => text(await call('/worktrees/scan', scan ? { method: 'POST' } : undefined)));
+
+server.registerTool('signed_in_devices', {
+  description: `The Google account linked to this Omni and the devices that signed in with it (browsers, phones, apps), most recently used first. Not the synced machines: those are list_devices. Linking or unlinking the account is ${USER}'s to do in Settings > Machines.`,
+  inputSchema: {},
+}, async () => {
+  const [account, devices] = await Promise.all([call('/auth/account'), call('/auth/devices')]);
+  return text({ account: account.owner, google_sign_in: account.available, devices: devices.devices });
+});
+
+server.registerTool('revoke_signed_in_device', {
+  description: `End one signed-in device's session, by id from signed_in_devices, only when ${USER} asks. That device has to sign in with Google again. Devices paired with the token are not on the list and keep working.`,
+  inputSchema: { device_id: z.string().min(1).max(100) },
+}, async ({ device_id }) => text(await call(`/auth/devices/${encodeURIComponent(device_id)}`, { method: 'DELETE' })));
 
 // #218: the conductor reads a thread Ben referenced in a message the same way every other thread does.
 registerReferencedThread(server);
