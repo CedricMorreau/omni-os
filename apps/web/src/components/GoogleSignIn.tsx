@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText } from '../api.ts';
+import { api, ApiError, errorText } from '../api.ts';
+import { isTransientStatus, POLL_RETRIES } from '../poll-retry.ts';
 import { Button, ErrorNote, LinkButton, Loader, type IconName } from './ui.tsx';
 
 // Google sign-in through Clerk's device-code flow (apps/server/google-auth.ts). The server asks Clerk for a code;
@@ -81,10 +82,12 @@ export function DeviceCodeSignIn<R extends { state: string }>({
     if (!flow) return;
     let timer: ReturnType<typeof setTimeout>;
     let alive = true;
+    let misses = 0;
     const poll = async () => {
       try {
         const r = await api.post<{ state: 'pending' } | Ended | R>(pollPath, { flow: flow.flow, secret: flow.secret });
         if (!alive) return;
+        misses = 0;
         if (r.state === 'pending') timer = setTimeout(poll, flow.interval * 1000);
         else {
           setFlow(null);
@@ -95,6 +98,11 @@ export function DeviceCodeSignIn<R extends { state: string }>({
         }
       } catch (err) {
         if (!alive) return;
+        // A dropped connection or a proxy's 502 is not the server's answer: poll again before giving up.
+        if (err instanceof ApiError && isTransientStatus(err.status) && ++misses <= POLL_RETRIES) {
+          timer = setTimeout(poll, flow.interval * 1000);
+          return;
+        }
         setFlow(null);
         setError(errorText(err));
       }
