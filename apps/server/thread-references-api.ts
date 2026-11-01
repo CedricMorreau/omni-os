@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { shortId } from '@omni/shared/message-context-thread.ts';
 import { db, threads } from './db.ts';
-import { PAGE_ROWS_MAX, readReferenced } from './thread-history.ts';
+import { PAGE_ROWS_MAX, readReferenced, readConversation } from './thread-history.ts';
 
 /** Matches in one answer. */
 export const PICK_LIMIT = 20;
@@ -91,4 +91,12 @@ referencedHistoryApi.get('/:id/references/:ref/history', (c) => {
   const q = pageQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!q.success) return c.json({ error: q.error.issues[0]?.message ?? 'invalid page' }, 400);
   return c.json(readReferenced(id, c.req.param('ref'), q.data));
+});
+
+/** Any thread's conversation, a page at a time, as read_referenced_thread pages it. For the external MCP server's read_thread. */
+referencedHistoryApi.get('/:id/conversation', (c) => {
+  const q = pageQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!q.success) return c.json({ error: q.error.issues[0]?.message ?? 'invalid page' }, 400);
+  const page = readConversation(c.req.param('id'), q.data);
+  return page ? c.json(page) : c.json({ error: 'not found' }, 404);
 });
