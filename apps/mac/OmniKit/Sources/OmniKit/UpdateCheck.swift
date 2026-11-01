@@ -14,6 +14,12 @@ public struct UpdateNotices: Hashable, Sendable {
 }
 
 public enum UpdateCheck {
+  /// The line that says why build-mac.sh or sync-main.sh failed: the last of their own error lines, else the
+  /// last line with text.
+  public static func failureLine(_ tail: [String]) -> String? {
+    tail.last { $0.hasPrefix("build-mac:") || $0.hasPrefix("sync-main:") } ?? tail.last { !$0.isEmpty }
+  }
+
   /// Two commit ids name the same commit: equal, or one is an abbreviation of the other (7 characters or more).
   public static func same(_ a: String, _ b: String) -> Bool {
     let (a, b) = (a.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), b.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())

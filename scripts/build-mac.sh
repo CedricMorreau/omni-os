@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Builds the Mac app in Release, installs it to ~/Applications/Omni.app and opens it.
 #
-#   scripts/build-mac.sh [--no-open] [-- app arguments]
+#   scripts/build-mac.sh [--no-open] [--no-sync] [-- app arguments]
 #
 #   --no-open   install, but do not open the app
+#   --no-sync   build the checkout as it is, without scripts/sync-main.sh first
 #   --          the rest goes to the app, like: -- -serverPort 4759
 #
+# In the main checkout it first runs scripts/sync-main.sh, so the app is built from main, level with
+# origin. A worktree builds its own branch.
 # It stamps the commit into Info.plist as OmniGitCommit (Settings shows it) and a build number as
 # CFBundleVersion, and signs with the "Apple Development" identity when the keychain has one, ad hoc
 # otherwise. A running copy of the installed app is quit first, and the old copy goes to the Trash
@@ -21,11 +24,14 @@ PLISTBUDDY=/usr/libexec/PlistBuddy
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 open_app=1
+sync=1
+args=("$@")
 app_args=()
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; }
 while (($#)); do
   case "$1" in
     --no-open) open_app=0; shift ;;
+    --no-sync) sync=0; shift ;;
     --) shift; app_args=("$@"); break ;;
     -h|--help) usage; exit 0 ;;
     *) echo "build-mac: unknown option $1" >&2; usage >&2; exit 2 ;;
@@ -33,6 +39,16 @@ while (($#)); do
 done
 
 say() { printf '==> %s\n' "$*"; }
+
+# 0. Put the checkout on main. Bash reads this file as it runs and the switch may change it, so the
+# rest runs from a fresh read of the new copy.
+if ((sync)); then
+  say "Updating the checkout to main"
+  "$ROOT/scripts/sync-main.sh"
+  # A main from before --no-sync existed builds without syncing anyway.
+  if grep -q -- '--no-sync)' "$ROOT/scripts/build-mac.sh"; then args=(--no-sync ${args[@]+"${args[@]}"}); fi
+  exec "$ROOT/scripts/build-mac.sh" ${args[@]+"${args[@]}"}
+fi
 
 # 1. Build.
 say "Building Omni (Release)"

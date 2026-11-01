@@ -32,4 +32,12 @@ import OmniKit
     #expect(!UpdateCheck.same("32593", main))
     #expect(!UpdateCheck.same("3259342", main))
   }
+
+  @Test func failureLinePrefersTheScriptsOwnErrorLines() {
+    let tail = ["==> Updating the checkout to main", "sync-main: the checkout has uncommitted changes on wip. Commit or stash them, then try again.", ""]
+    #expect(UpdateCheck.failureLine(tail) == tail[1])
+    #expect(UpdateCheck.failureLine(["build-mac: the build failed. Full log: x", "** BUILD FAILED **"]) == "build-mac: the build failed. Full log: x")
+    #expect(UpdateCheck.failureLine(["something else", ""]) == "something else")
+    #expect(UpdateCheck.failureLine([]) == nil)
+  }
 }
