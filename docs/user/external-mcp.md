@@ -33,7 +33,7 @@ Install the Omni MCP server for me. Omni is checked out at ~/omni-os and its ser
 3. Check it: if the omni tools are loaded in this session, call list_channels. Otherwise run
    `claude mcp list` or `codex mcp list` and confirm omni shows as connected.
 4. Tell me which clients you set up, which ones need a restart, and the exact steps for the ones you
-   cannot set up from here: claude.ai and ChatGPT need the `tailscale funnel` lines from step 1 run
+   cannot set up from here: claude.ai and ChatGPT need the Cloudflare Tunnel from step 1 running
    first, then the remote URL, and I sign in with Google there myself.
 ```
 
@@ -53,20 +53,39 @@ The server has to be running (`npm start`, `npm run dev` or the Mac app). The st
 
 ### From anywhere else (HTTP)
 
-Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai and ChatGPT call it from their own servers, so your tailnet alone is not enough. Expose `/mcp` and the sign-in metadata, and nothing else, with Tailscale Funnel:
+Omni serves the same tools at `/mcp` over Streamable HTTP. claude.ai, ChatGPT and Grok call it from their own servers, so it has to be on the internet. Put `/mcp` and the sign-in metadata, and nothing else, behind a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/) on a domain whose DNS is on Cloudflare. `omni.example.com` stands for that name below.
 
-```bash
-tailscale funnel --bg --set-path /mcp http://127.0.0.1:4747/mcp
-tailscale funnel --bg --set-path /.well-known http://127.0.0.1:4747/.well-known
-```
+1. Install `cloudflared`, then run `cloudflared tunnel login` and `cloudflared tunnel create omni`. The second prints the tunnel id and writes its credentials file.
+2. Put this in `~/.cloudflared/config.yml` (`npm run mcp:config` prints it filled in):
+
+   ```yaml
+   tunnel: <tunnel-id>
+   credentials-file: <your home>/.cloudflared/<tunnel-id>.json
+   ingress:
+     - hostname: omni.example.com
+       path: ^/(mcp|\.well-known)(/.*)?$
+       service: http://127.0.0.1:4747
+     - service: http_status:404
+   ```
+
+3. Run `cloudflared tunnel route dns omni omni.example.com`, then keep `cloudflared tunnel run omni` running (or install it as a service).
+4. Set the name in `data/omni.config.json`, and Omni picks it up without a restart:
+
+   ```json
+   "integrations": { "mcpPublicUrl": "https://omni.example.com" }
+   ```
+
+   Until it is set, `/mcp` refuses the tunnel's name. `OMNI_MCP_PUBLIC_URL` overrides it.
+
+Leave Cloudflare Access off for this hostname: claude.ai, ChatGPT and Grok can't get past its login. Omni's own checks below are the gate.
 
 With a Google account linked (Settings, Machines, Google account; see [Sign in with Google](remote-access.md#sign-in-with-google)), clients sign in with Google through Clerk and hold no Omni token:
 
-- **claude.ai** (also reaches Claude Desktop and the Claude phone app): Settings, Connectors, Add custom connector, with `https://<your-mac>.<tailnet>.ts.net/mcp`. Choose Connect and sign in with the linked Google account.
+- **claude.ai** (also reaches Claude Desktop and the Claude phone app): Settings, Connectors, Add custom connector, with `https://omni.example.com/mcp`. Choose Connect and sign in with the linked Google account.
 - **ChatGPT**: turn on developer mode, then create a connector (app) with the same URL and OAuth authentication.
-- **Claude Code, Cursor or Codex on another machine**: add `https://<your-mac>.<tailnet>.ts.net/mcp` as an HTTP server. They sign in the same way on first use.
+- **Claude Code, Cursor or Codex on another machine**: add `https://omni.example.com/mcp` as an HTTP server. They sign in the same way on first use.
 
-A client that cannot do OAuth uses the MCP token that `npm run mcp:config -- --show-token` prints instead: `https://<your-mac>.<tailnet>.ts.net/mcp/<mcp-token>` where only a URL fits, or `/mcp` with the header `Authorization: Bearer <mcp-token>` (the xAI API, or any client that sends headers).
+A client that cannot do OAuth uses the MCP token that `npm run mcp:config -- --show-token` prints instead: `https://omni.example.com/mcp/<mcp-token>` where only a URL fits, or `/mcp` with the header `Authorization: Bearer <mcp-token>` (the xAI API, or any client that sends headers).
 
 The Mac has to be awake for any of these to answer.
 
@@ -76,18 +95,17 @@ Google sign-in for devices already needs a public OAuth application with the dev
 
 ## Connect Grok Bot
 
-Grok Bot runs on xAI's servers. It can't run commands on your Mac, so it can't follow the install prompt above. Grok adds Omni as a custom connector: an MCP server at a public URL, which Grok calls from its servers and offers in every chat (see [xAI's connector docs](https://docs.x.ai/grok/connectors)). Grok rejects private addresses, so `/mcp` has to be on the internet through Tailscale Funnel. Setup has three steps.
+Grok Bot runs on xAI's servers. It can't run commands on your Mac, so it can't follow the install prompt above. Grok adds Omni as a custom connector: an MCP server at a public URL, which Grok calls from its servers and offers in every chat (see [xAI's connector docs](https://docs.x.ai/grok/connectors)). Grok rejects private addresses, so `/mcp` has to be on the internet through the Cloudflare Tunnel in [From anywhere else](#from-anywhere-else-http). Setup has three steps.
 
 **1. Open `/mcp` and get the URL.** Paste this into Claude Code, Codex or Cursor on the machine Omni runs on:
 
 ```text
 Get Omni's MCP server ready for a Grok custom connector. Omni is checked out at ~/omni-os and its server
 runs on this machine.
-1. Run `tailscale funnel status`. Forward whichever of these is missing (use Omni's port if it is not 4747):
-   `tailscale funnel --bg --set-path /mcp http://127.0.0.1:4747/mcp`
-   `tailscale funnel --bg --set-path /.well-known http://127.0.0.1:4747/.well-known`
+1. Run `cloudflared tunnel list` and check a tunnel for Omni exists. If not, stop and tell me to set one up
+   (docs/user/external-mcp.md, "From anywhere else").
 2. Run `cd ~/omni-os && npm run -s mcp:config`. Note the remote /mcp URL and whether it says Google sign-in
-   is on. Never print or paste the contents of data/mcp-token or data/api-token, and don't pass --show-token.
+   is on. If it says to set mcpPublicUrl, tell me instead of going on. Never print or paste the contents of data/mcp-token or data/api-token, and don't pass --show-token.
 3. Check it from outside: `curl -s -o /dev/null -w '%{http_code}' -X POST <that URL>` should print 401
    (reachable, no token). Anything else, tell me what you saw.
 4. Tell me the URL and whether Google sign-in is on.
@@ -95,8 +113,8 @@ runs on this machine.
 
 **2. Add the connector in Grok.** At [grok.com/connectors](https://grok.com/connectors), choose New Connector, then Custom, and enter the MCP server URL:
 
-- **Google sign-in on** (a Google account linked in Settings, Machines, and dynamic client registration turned on in Clerk, see [What the Clerk instance needs](#what-the-clerk-instance-needs)): enter `https://<your-mac>.<tailnet>.ts.net/mcp` and sign in with the linked Google account when Grok asks.
-- **Otherwise**: enter `https://<your-mac>.<tailnet>.ts.net/mcp/<mcp-token>`, with the token you copy yourself from `data/mcp-token`. Anyone with that URL can start threads on your Mac, so treat it like a password.
+- **Google sign-in on** (a Google account linked in Settings, Machines, and dynamic client registration turned on in Clerk, see [What the Clerk instance needs](#what-the-clerk-instance-needs)): enter `https://omni.example.com/mcp` and sign in with the linked Google account when Grok asks.
+- **Otherwise**: enter `https://omni.example.com/mcp/<mcp-token>`, with the token you copy yourself from `data/mcp-token`. Anyone with that URL can start threads on your Mac, so treat it like a password.
 
 On Grok Business or Enterprise, a team admin has to allow the connector in xAI's cloud console first.
 
@@ -126,6 +144,6 @@ Three things open `/mcp`, each checked on every request:
 
 A 401 from `/mcp` names the protected resource metadata (`/.well-known/oauth-protected-resource/mcp`, RFC 9728), which points clients at Clerk. Omni also serves Clerk's own authorization server metadata at `/.well-known/oauth-authorization-server`, for clients on the older MCP spec. Both answer 404 until a Google account is linked.
 
-Through Funnel, the `integrations.tailscaleLogin` check that guards `/api` does not apply, since Funnel requests carry no Tailscale login. Only `/mcp` and `/.well-known` are forwarded, and the tools reach `/api` in-process through the usual request guard. `/mcp` and the metadata also refuse a `Host` outside the allowed names, and `/mcp` refuses a browser `Origin` from another site: the same DNS-rebinding checks as `/api` (see [Remote access and security](remote-access.md)).
+Through the tunnel, the `integrations.tailscaleLogin` check that guards `/api` does not apply, since tunnel requests carry no Tailscale login. The ingress rule forwards only `/mcp` and `/.well-known`, and `/api` refuses the tunnel's name even if a rule forwards more: the tools reach `/api` in-process through the usual request guard. `/mcp` and the metadata refuse a `Host` that is neither one of `/api`'s allowed names nor `mcpPublicUrl`'s, and `/mcp` refuses a browser `Origin` from another site: the same DNS-rebinding checks as `/api` (see [Remote access and security](remote-access.md)).
 
 The server is stateless: each request gets a fresh MCP server, so a restart drops no session.

@@ -11,7 +11,7 @@
 // - The API token, as a header only, never in the path.
 // Its tools then call /api in-process with the API token, so every request still passes requestGuard.
 //
-// No Tailscale login check: Funnel, the way claude.ai and ChatGPT reach a Mac, carries none.
+// No Tailscale login check: the Cloudflare Tunnel that claude.ai, ChatGPT and Grok reach the Mac through carries none.
 import { join } from 'node:path';
 import { Hono, type Context } from 'hono';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -20,7 +20,7 @@ import { mcpHttp } from '@omni/mcp/external/http.ts';
 import { apiToken, loadToken, tokenMatches } from './api-token.ts';
 import { paths } from './config.ts';
 import { ClerkUnreachable, isOwnerToken, mcpIssuer, resourceMetadataUrl } from './mcp-oauth.ts';
-import { hostAllowed } from './request-guard.ts';
+import { mcpHostAllowed } from './request-guard.ts';
 
 export const mcpTokenPath = () => join(paths.data, 'mcp-token');
 
@@ -71,11 +71,12 @@ export function mcpApi(request: (path: string, init: RequestInit) => Response | 
   const router = new Hono();
 
   router.all('/:token?', async (c) => {
-    // DNS rebinding: a page on an attacker's name pointed at this Mac. Funnel and tailscale serve keep the .ts.net name.
-    if (!hostAllowed(hostnameOf(c.req.header('host') ?? new URL(c.req.url).host))) return refuse('Forbidden: host not allowed', 403);
+    // DNS rebinding: a page on an attacker's name pointed at this Mac. cloudflared keeps the tunnel's public name
+    // (integrations.mcpPublicUrl), tailscale serve the .ts.net one.
+    if (!mcpHostAllowed(hostnameOf(c.req.header('host') ?? new URL(c.req.url).host))) return refuse('Forbidden: host not allowed', 403);
     // claude.ai and ChatGPT call from their servers with no Origin. A browser page on another site would send one.
     const origin = c.req.header('origin');
-    if (origin !== undefined && !hostAllowed(hostnameOf(origin.replace(/^[a-z]+:\/\//i, '')))) return refuse('Forbidden: origin not allowed', 403);
+    if (origin !== undefined && !mcpHostAllowed(hostnameOf(origin.replace(/^[a-z]+:\/\//i, '')))) return refuse('Forbidden: origin not allowed', 403);
     const inPath = c.req.param('token');
     if (inPath !== undefined) {
       // A URL holds only the MCP token: never the API token, and never an OAuth token, which a header carries.

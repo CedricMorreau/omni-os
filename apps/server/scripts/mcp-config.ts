@@ -1,8 +1,8 @@
 // Prints how to add the external Omni MCP server (apps/mcp/external/) to each client, for this checkout and data dir.
 //
-//   npm run mcp:config -- [--url <https://your-mac.tailnet.ts.net>] [--show-token]
+//   npm run mcp:config -- [--url <https://omni.example.com>] [--show-token]
 //
-//   --url         the public base URL clients outside this Mac use (tailscale funnel). Default: this Mac's MagicDNS name.
+//   --url         the public base URL clients outside this Mac use (a Cloudflare Tunnel). Default: integrations.mcpPublicUrl.
 //   --show-token  print the remote URLs with the MCP token in them. Without it, they show <mcp-token> and where it is.
 //
 // Local clients start the stdio server with this Node and read data/api-token themselves, so no token goes into their
@@ -15,7 +15,7 @@ import { ROOT, config, paths } from '../config.ts';
 import { owner } from '../google-auth.ts';
 import { mcpToken, mcpTokenPath } from '../mcp-api.ts';
 import { mcpIssuer } from '../mcp-oauth.ts';
-import { tailnet } from '../tailscale.ts';
+import { configPath, resolved } from '../user-config.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -37,8 +37,9 @@ const moved = {
   ...(paths.data !== join(ROOT, 'data') && { OMNI_TOKEN_FILE: tokenPath() }),
 };
 const env = Object.keys(moved).length ? moved : undefined;
-const dnsName = (await tailnet())?.self.dnsName;
-const base = (flag('--url') ?? (dnsName ? `https://${dnsName}` : 'https://<your-mac>.<tailnet>.ts.net')).replace(/\/+$/, '');
+const publicUrl = resolved.mcpPublicUrl();
+const base = (flag('--url') ?? (publicUrl || 'https://<your-domain>')).replace(/\/+$/, '');
+const hostname = base.replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
 const token = mcpToken();
 const oauth = mcpIssuer();
 const shown = args.includes('--show-token') ? token : '<mcp-token>';
@@ -59,11 +60,25 @@ Codex:        codex mcp add omni${env ? envFlags.replace(/ -e /g, ' --env ') : '
 
 FROM ANYWHERE ELSE (Streamable HTTP)
 
-Expose /mcp and its sign-in metadata to the internet (claude.ai and ChatGPT call from their own servers):
+Expose /mcp and its sign-in metadata to the internet with a Cloudflare Tunnel (claude.ai, ChatGPT and Grok call
+from their own servers). In ~/.cloudflared/config.yml:
 
-  tailscale funnel --bg --set-path /mcp http://127.0.0.1:${config.port}/mcp
-  tailscale funnel --bg --set-path /.well-known http://127.0.0.1:${config.port}/.well-known
+  tunnel: <tunnel-id>
+  credentials-file: ${join(homedir(), '.cloudflared')}/<tunnel-id>.json
+  ingress:
+    - hostname: ${hostname}
+      path: ^/(mcp|\\.well-known)(/.*)?$
+      service: http://127.0.0.1:${config.port}
+    - service: http_status:404
 
+then \`cloudflared tunnel route dns <tunnel> ${hostname}\` and keep \`cloudflared tunnel run <tunnel>\` running.
+${
+  publicUrl
+    ? ''
+    : `Then set "mcpPublicUrl": "https://${hostname}" under "integrations" in ${configPath()}: until it is
+set, /mcp refuses the tunnel's name.
+`
+}
 ${
   oauth
     ? `Google sign-in is on (${oauth}), for ${owner()?.email ?? owner()?.sub}. Add this URL and sign in with that account:

@@ -16,6 +16,7 @@
     "hermesUrl": "",
     "centralBrainDir": "",
     "tailscaleLogin": "ada@example.com",
+    "mcpPublicUrl": "",
     "clerkPublishableKey": "",
     "clerkClientId": ""
   },
