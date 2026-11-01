@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { HELP, appUrl, browserCommand, installPlan, windowArgs } from './desktop.ts';
 import {
   checkoutMessage, checkoutProblem, childEnv, decide, fallbackPath, formatVersion, nodeDirFirst,
-  orderedNodeBins, parseNodeVersion, pickNode, probePort, serverArgs, tokenFile, waitForReady,
+  orderedNodeBins, parseNodeVersion, pickNode, probePort, serverArgs, settleProbe, tokenFile, waitForReady,
 } from './launch.ts';
 import {
   acquireInstance, browserProfile, commandPath, focusWindow, installedNodes, isExecutable,
@@ -173,7 +173,7 @@ export async function run(argv: string[], io: Io = { log: (line) => console.log(
   process.once('SIGTERM', onSignal);
 
   try {
-    const decision = decide(await probe(), parsed.port);
+    const decision = decide(await settleProbe(probe, (ms) => new Promise((resolve) => setTimeout(resolve, ms))), parsed.port);
     if (decision.action === 'fail') {
       io.error(decision.message);
       return 1;

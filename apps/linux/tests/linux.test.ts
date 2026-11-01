@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { appUrl, browserCommand, desktopEntry, escapeDesktop, execOfDesktop, installPlan, windowArgs } from '../src/desktop.ts';
 import {
   checkoutMessage, checkoutProblem, childEnv, classifyAnswer, decide, extractPath, formatVersion,
-  orderedNodeBins, parseNodeVersion, pickNode, probePort, proofFor, tokenFile, waitForReady,
+  orderedNodeBins, parseNodeVersion, pickNode, probePort, proofFor, settleProbe, tokenFile, waitForReady,
 } from '../src/launch.ts';
 import { acquireInstance, releaseInstance, stopGroup } from '../src/process.ts';
 import { parseArgs, run } from '../src/run.ts';
@@ -100,6 +100,16 @@ describe('decide', () => {
     const foreign = decide({ kind: 'not-omni', detail: 'the answer was not an Omni proof' }, 9);
     expect(foreign.action).toBe('fail');
     if (foreign.action === 'fail') expect(foreign.message).toContain('Port 9');
+  });
+
+  it('retries a slow answer, so a busy or just-restarted server is attached to, not refused', async () => {
+    let n = 0;
+    const settled = await settleProbe(async () => (n++ < 3 ? { kind: 'slow' } : { kind: 'omni' }), async () => {});
+    expect(settled).toEqual({ kind: 'omni' });
+    expect(decide(settled, 4747)).toEqual({ action: 'attach' });
+    const stuck = await settleProbe(async () => ({ kind: 'slow' }), async () => {}, 4);
+    expect(stuck).toEqual({ kind: 'slow' });
+    expect(decide(stuck, 4747).action).toBe('fail');
   });
 
   it('names a missing checkout, install and build', () => {
@@ -229,5 +239,7 @@ describe('probe', () => {
     refused.cause = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
     const fetchRefused: typeof fetch = async () => { throw refused; };
     expect((await probePort(9, token, fetchRefused)).kind).toBe('free');
+    const fetchTimeout: typeof fetch = async () => { throw new DOMException('timed out', 'TimeoutError'); };
+    expect((await probePort(9, token, fetchTimeout)).kind).toBe('slow');
   });
 });

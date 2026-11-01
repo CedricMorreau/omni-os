@@ -108,6 +108,12 @@ app.route('/.well-known', oauthMetadataApi);
 // ---------- web ----------
 
 if (existsSync(paths.webDist)) {
+  // index.html names this build's hashed assets, so a browser revalidates it on every load and picks up a rebuild.
+  // Without a Cache-Control header it guessed from Last-Modified and could keep showing the old Web UI.
+  app.use('/*', async (c, next) => {
+    await next();
+    if (c.res.headers.get('content-type')?.startsWith('text/html')) c.res.headers.set('Cache-Control', 'no-cache');
+  });
   app.use('/*', serveStatic({ root: paths.webDist }));
   app.get('*', (c) => c.html(readFileSync(`${paths.webDist}/index.html`, 'utf8')));
 }
