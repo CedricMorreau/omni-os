@@ -130,6 +130,27 @@ export const SETTING_FIELDS = [
     default: '',
     max: 500,
   },
+  {
+    // The Clerk instance Google sign-in goes through (apps/server/clerk.ts), by its publishable key. Empty: the shared
+    // instance in DEFAULT_CLERK_PUBLISHABLE_KEY. Public, like a URL: it only says where the instance lives.
+    section: 'integrations',
+    key: 'clerkPublishableKey',
+    label: 'Clerk publishable key',
+    input: 'text',
+    page: null,
+    default: '',
+    max: 200,
+  },
+  {
+    // The public OAuth application in that instance, by client id. Empty: DEFAULT_CLERK_CLIENT_ID.
+    section: 'integrations',
+    key: 'clerkClientId',
+    label: 'Clerk OAuth client id',
+    input: 'text',
+    page: null,
+    default: '',
+    max: 200,
+  },
 ] as const satisfies readonly SettingField[];
 
 type Field = (typeof SETTING_FIELDS)[number];

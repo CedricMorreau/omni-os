@@ -211,6 +211,8 @@ export const resolved = {
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+  clerkPublishableKey: () => (process.env.OMNI_CLERK_PUBLISHABLE_KEY ?? userConfig().integrations.clerkPublishableKey).trim(),
+  clerkClientId: () => (process.env.OMNI_CLERK_CLIENT_ID ?? userConfig().integrations.clerkClientId).trim(),
 };
 
 /** How prompts refer to the person: their name, or "the user" until one is set. */

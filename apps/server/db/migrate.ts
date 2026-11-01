@@ -513,4 +513,25 @@ export function migrate() {
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS transitions_thread ON transitions(thread_id, created_at);`);
+  // Google sign-in through Clerk (apps/server/google-auth.ts): the one Clerk user who owns this install, and the
+  // sessions it handed to devices that signed in as that user. Local, never synced: each machine links its owner
+  // and issues and revokes its own sessions. A session keeps only its token's SHA-256.
+  db.exec(`CREATE TABLE IF NOT EXISTS auth_owner (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    issuer TEXT NOT NULL,
+    sub TEXT NOT NULL,
+    email TEXT,
+    name TEXT,
+    linked_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS device_sessions (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sub TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT
+  );`);
 }
