@@ -117,4 +117,4 @@ scripts/build-mac.sh      # Mac: rebuilds and reinstalls the app
 scripts/install-linux.sh  # Linux: rebuilds the Web UI and the launcher
 ```
 
-Restart the server if you run it with `npm run dev` or `npm start`. The Mac app restarts its own. A fork merges cleanly as long as your settings stay in `data/`; see [FORKING.md](../../FORKING.md).
+Restart the server if you run it with `npm run dev` or `npm start`. The Mac app restarts its own. On a Mac, Rebuild and Relaunch, Restart Server and `scripts/build-mac.sh` first run `scripts/sync-main.sh`, which puts the checkout on `main`, level with origin. It refuses when tracked files have changes, and leaves worktrees alone. Pass `--no-sync` to `build-mac.sh` to build the branch you are on. A fork merges cleanly as long as your settings stay in `data/`; see [FORKING.md](../../FORKING.md).

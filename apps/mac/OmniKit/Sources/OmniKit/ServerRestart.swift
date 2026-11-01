@@ -39,7 +39,7 @@ public final class ServerRestart {
       switch self {
       case .idle: nil
       case .waitingForIdle(let n): n == 1 ? "Waiting for 1 running turn to finish" : "Waiting for \(n) running turns to finish"
-      case .building: "Building the Web UI"
+      case .building: "Updating to main and building the Web UI"
       case .stopping: "Stopping the server"
       case .starting: "Starting the server"
       case .failed(let message): message

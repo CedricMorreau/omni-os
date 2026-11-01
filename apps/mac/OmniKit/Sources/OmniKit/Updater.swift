@@ -129,8 +129,7 @@ public final class Updater {
       "/bin/bash", [script.path], environment: env, directory: repo, log: Self.appRebuildLog, timeout: .seconds(30 * 60)
     )
     guard let run, run.code == 0 else {
-      let line = run?.tail.last { $0.hasPrefix("build-mac:") } ?? run?.tail.last { !$0.isEmpty }
-      return rebuild = .failed("The rebuild failed. " + (line ?? "See the log."))
+      return rebuild = .failed("The rebuild failed. " + (run.flatMap { UpdateCheck.failureLine($0.tail) } ?? "See the log."))
     }
     rebuild = .idle
     await check()
@@ -164,6 +163,20 @@ public final class Updater {
 
     func buildWeb() async -> String? {
       guard let model, let vite = viteBinary else { return "The app is closing." }
+      // The server restarts from main, level with origin: the same step Rebuild and Relaunch takes first.
+      let sync = model.settings.config.repo.appending(path: "scripts/sync-main.sh")
+      if FileManager.default.fileExists(atPath: sync.path) {
+        let path = await LoginShell().path() ?? ServerEnvironment.fallbackPath()
+        var env = ServerEnvironment.minimal(ProcessInfo.processInfo.environment)
+        env["PATH"] = path
+        let run = await ToolRun.run(
+          "/bin/bash", [sync.path], environment: env, directory: model.settings.config.repo,
+          log: Updater.webBuildLog, timeout: .seconds(600)
+        )
+        guard let run, run.code == 0 else {
+          return "Updating to main failed. " + (run.flatMap { UpdateCheck.failureLine($0.tail) } ?? "See the log.")
+        }
+      }
       let launch: ServerLaunch
       do throws(ServerStartError) {
         launch = try await ServerLauncher().prepare(model.settings.config)
