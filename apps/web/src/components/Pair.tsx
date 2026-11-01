@@ -8,7 +8,7 @@ import { Button, ErrorNote, Label } from './ui.tsx';
 // The server takes only requests that carry this install's token (apps/server/request-guard.ts), and serves this
 // page without it. A browser pairs once: the token, pasted here or arriving as `?pair=` in a link from
 // `scripts/omni.sh --pair`, goes to POST /api/auth/pair, which answers with an HttpOnly cookie. The page keeps nothing.
-// Once an owner's Google account is linked (Settings, Machines), the screen also offers Google sign-in, which gets
+// Once an owner's Google account is linked (Settings, Sharing & access), the screen also offers Google sign-in, which gets
 // this browser a session of its own, also in an HttpOnly cookie (GoogleSignIn.tsx). On this machine's Omni Connect
 // address, it offers Open with Omni Connect, and #/connect lands here from the relay (connect-key.ts).
 

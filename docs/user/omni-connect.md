@@ -17,11 +17,11 @@ Turning Connect on links the relay's Google account as this Omni's owner if none
 - Bookmark `<relay URL>/connect` (Settings, Omni Connect shows it). Sign in with Google there once. The relay keeps you signed in for 30 days. Tap Open next to a machine.
 - Or open the machine's own `https://<name>-xxxxxx.omni-os.app` address and choose Open with Omni Connect on the pairing screen.
 
-Either way the machine signs that browser in. The browser gets an ordinary signed-in device session, listed in Settings, Machines with the other signed-in devices. Revoke it there like any other. Opening again later makes a new session.
+Either way the machine signs that browser in. The browser gets an ordinary signed-in device session, listed in Settings, Sharing & access with the other signed-in devices. Revoke it there like any other. Opening again later makes a new session.
 
 ## What to know
 
 - The machine must be awake with Omni running. The Connect page shows a machine as offline when it does not answer within 5 seconds.
 - The Connect hostname needs the token or a session on every route, as a `.ts.net` name does. The Tailscale login check (`integrations.tailscaleLogin`) does not apply there, because that request did not come through Tailscale.
 - Turning Connect off deletes the machine's tunnel and DNS record on Cloudflare. Sessions it already made stay until you revoke them.
-- Signing out of sync (Sign Out in Settings, Machines) also deletes the machine's tunnel on the relay.
+- Signing out of sync (Sign Out in Settings, Sync) also deletes the machine's tunnel on the relay.

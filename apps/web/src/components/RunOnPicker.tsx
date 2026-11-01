@@ -61,6 +61,8 @@ export function useRunOnSetting(setup?: SetupState | null) {
     offered: offersRunOn(devices.data),
     loading: !state || !devices.data,
     pick: settingPick(saved ?? state?.config.runOn?.device, list),
+    /** The saved setting: a machine's sync id, or '' for this one (the built-in default). */
+    device: saved ?? state?.config.runOn?.device ?? '',
     save,
     saving,
     error: error ?? devices.error,

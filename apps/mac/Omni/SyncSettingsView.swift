@@ -2,7 +2,7 @@ import AppKit
 import OmniKit
 import SwiftUI
 
-/// The Sync part of the Machines tab (a tab of its own before #404), like the Web UI's Settings, Machines, Sync. A new
+/// The Sync section (part of the Machines tab from #404 until the grouped layout), like the Web UI's Settings, Sync. A new
 /// model per client and per visit; a sign-in still waiting for Clerk stops when the tab or the window closes. The
 /// status reloads every 5 seconds while it shows.
 struct SyncSettings: View {
@@ -207,7 +207,7 @@ struct SyncForm: View {
   }
 }
 
-/// The sync path map, under the Machines tab's Advanced since #405, as the web's `PathMapEditor`. Its own model,
+/// The sync path map, under the Sync section's Advanced, as the web's `PathMapEditor`. Its own model,
 /// loaded once: the Sync part above polls the status. Shown once sync is set up.
 struct SyncPathMap: View {
   let model: AppModel

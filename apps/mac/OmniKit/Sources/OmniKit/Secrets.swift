@@ -183,6 +183,21 @@ public final class SecretsModel {
     return order.sorted(by: Self.precedes).map { SecretGroup(scope: $0, rows: byScope[$0] ?? []) }
   }
 
+  /// What a channel's threads get, for Settings' channel scope: its own secrets first, then the global ones whose names
+  /// it does not set. nil is every scope, as `groups`. The web's SecretsSection does the same.
+  public func groups(in channel: String?) -> [SecretGroup] {
+    guard let channel else { return groups }
+    let own = rows.filter { $0.scope == .channel(channel) }
+    let names = Set(own.map(\.name))
+    let inherited = rows.filter { $0.scope == .global && !names.contains($0.name) }
+    return [SecretGroup(scope: .channel(channel), rows: own), SecretGroup(scope: .global, rows: inherited)].filter { !$0.rows.isEmpty }
+  }
+
+  /// A channel secret that replaces a global one with the same name.
+  public func overridesGlobal(_ row: SecretRow) -> Bool {
+    row.scope != .global && rows.contains { $0.scope == .global && $0.name == row.name }
+  }
+
   private static func precedes(_ a: SecretScope, _ b: SecretScope) -> Bool {
     if a == .global { return b != .global }
     if b == .global { return false }

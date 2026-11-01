@@ -1005,6 +1005,16 @@ describe('Swift wire types follow @omni/shared', () => {
     expect(swiftKeys(src, 'UserConfig').filter((k) => k !== 'onboardedAt' && !configKeys.includes(k))).toEqual([]);
   });
 
+  it('Setup.swift reads the server options and which env var overrides a field', async () => {
+    const src = omniKitSource('Setup.swift');
+    const { serverOptions } = await import('../server-options.ts');
+    // `default` is a Swift keyword, written in backticks, which swiftKeys does not read.
+    const keys = Object.keys(serverOptions({})[0]).filter((k) => k !== 'default');
+    expect(swiftKeys(src, 'ServerOption').sort()).toEqual(keys.sort());
+    expect(src).toContain('public let `default`: String');
+    expect(swiftKeys(src, 'SetupState')).toContain('env');
+  });
+
   it('ProfileSettingsView.swift shows each field with the shared label, hint and placeholder', () => {
     const src = macAppSource('ProfileSettingsView.swift');
     const missing: string[] = [];

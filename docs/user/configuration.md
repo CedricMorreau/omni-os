@@ -12,7 +12,20 @@ Everything personal lives in `data/` (gitignored) or the secret store. Tracked f
 | `.env` | Server options (port, model defaults, concurrency). Example: `.env.example`. An env var wins over the config file |
 | Secret store | Secret values: the Keychain on a Mac, `data/secrets.json` on Linux. The database keeps their names only |
 
-`npm run setup` or the first-run screens write `data/omni.config.json` ([Install](install.md#set-up-by-hand)). Change it later in Settings, the same sections on desktop web, phone web and the Mac app: General (you, theme, notifications, run setup again), Workspace (your folders, GitHub owner, and the integrations under Advanced), Machines (this machine and its name, where new threads run, the Google account that signs devices in, Sync, Storage, and under Advanced the address, feed and sync path map; the Mac app adds its server port, repo, Node and log there) and Secrets. On the web, Settings is `#/settings` and each section has its own hash (`#/settings/machines`); the old `#/secrets`, `#/sync` and `#/storage` still open the section that holds them. Automations stays a page of its own. Your name goes into the Home greeting and every agent's prompt.
+`npm run setup` or the first-run screens write `data/omni.config.json` ([Install](install.md#set-up-by-hand)). Change it later in Settings, which has the same sections on desktop web, phone web and the Mac app (`packages/shared/settings-catalog.ts`):
+
+| Group | Sections |
+| --- | --- |
+| | General (you, run setup again; Quick Prompt on the Mac), Appearance, Notifications |
+| Agents | Harnesses & models (each harness, the default model per channel, the model options from `.env`), Threads (run new threads on, sessions and usage limits from `.env`, a link to Automations) |
+| Code | Channels (each channel's settings and actions), Workspace (your folders, GitHub owner), Worktrees (storage and cleanup) |
+| Connections | Machines (this machine; the Mac app adds its server port, repo, Node and log), Sync, Sharing & access (Google account, signed-in devices, Omni Connect, Tailscale logins, public MCP URL), Integrations (Hermes, central brain), Secrets |
+| | About (version, build, where the files live) |
+
+- Search at the top of the nav finds a single setting and scrolls to it.
+- Notifications, Harnesses & models, Channels, Workspace, Worktrees and Secrets have a scope picker: Every channel shows this machine's values, a channel shows what it sets and what it inherits. The pick stays as you move between sections.
+- A chip beside each value says where it comes from: built-in default, set in `.env`, set on this machine, set on a channel, inherited, or this device only. Reset beside a saved value puts the default back. Values from `.env` are read-only there: change `.env` and restart the server.
+- On the web, Settings is `#/settings` and each section has its own hash (`#/settings/threads`). The old `#/secrets`, `#/sync` and `#/storage` still open the section that holds them. The Conductor reads the same values with its `settings` tool. Your name goes into the Home greeting and every agent's prompt.
 
 An install from before the config file existed writes one at its first boot from the old defaults and skips onboarding, so it keeps behaving as before.
 
@@ -54,7 +67,7 @@ A channel's settings list its named actions: a name, a command, the secrets it n
 
 ## Worktree storage
 
-Storage, under Settings > Machines, inventories worktrees and explains why each is kept or eligible for cleanup. Review the scan before removing them, or turn on automatic retention for this Mac. Retention is off by default and stays local in `data/omni.config.json`; the old `OMNI_WORKTREE_SWEEP` option no longer controls cleanup. The guards and what survives removal are in [Known limits](limits.md).
+Settings > Worktrees inventories worktrees and explains why each is kept or eligible for cleanup. Review the scan before removing them, or turn on automatic retention for this Mac. Retention is off by default and stays local in `data/omni.config.json`; the old `OMNI_WORKTREE_SWEEP` option no longer controls cleanup. The guards and what survives removal are in [Known limits](limits.md).
 
 ## Grok Bot
 

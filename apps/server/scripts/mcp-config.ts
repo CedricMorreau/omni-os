@@ -89,7 +89,7 @@ ${
   ChatGPT:   Settings > Apps > Developer mode > Create, with OAuth
   Grok:      grok.com/connectors > New Connector > Custom
   Claude Code, Cursor or Codex elsewhere: add it as an HTTP server`
-    : `Google sign-in is off: link a Google account in Settings > Machines to let claude.ai and ChatGPT sign in
+    : `Google sign-in is off: link a Google account in Settings > Sharing & access to let claude.ai and ChatGPT sign in
 with it. Until then they use the MCP token in the URL.`
 }
 

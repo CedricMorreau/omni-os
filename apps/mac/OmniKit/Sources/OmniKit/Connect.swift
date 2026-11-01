@@ -100,7 +100,7 @@ extension OmniClient {
   }
 }
 
-/// The Omni Connect card of the Machines tab: the switch, this Mac's public URL and tunnel, the relay's Connect page,
+/// The Omni Connect card of the Sharing & access section: the switch, this Mac's public URL and tunnel, the relay's Connect page,
 /// and the machines on Connect, each opened in the browser. The app stays a client of its own server (ADR 0002).
 @MainActor @Observable
 public final class ConnectModel {

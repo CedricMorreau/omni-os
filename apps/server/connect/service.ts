@@ -185,10 +185,10 @@ export async function enableConnect(): Promise<ConnectStatus> {
   if (!sub) throw new ConnectError('Sign in to sync again: this relay token is from an older relay', 409);
   const o = owner();
   if (o && o.sub !== sub)
-    throw new ConnectError(`This Omni is linked to ${o.email ?? 'another Google account'}, and the relay to a different one. Link the same account in Settings, Machines`, 409);
+    throw new ConnectError(`This Omni is linked to ${o.email ?? 'another Google account'}, and the relay to a different one. Link the same account in Settings, Sharing & access`, 409);
   if (!o) {
     const clerk = clerkConfig();
-    if (!clerk) throw new ConnectError('Google sign-in is not set up on this Omni. Set the Clerk app in Settings, Machines first', 409);
+    if (!clerk) throw new ConnectError('Google sign-in is not set up on this Omni. Set the Clerk app in Settings, Sharing & access first', 409);
     linkOwner({ issuer: clerk.issuer, sub, email: null, name: null });
   }
   const { connectorToken } = await register();

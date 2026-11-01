@@ -41,7 +41,7 @@ public struct SyncStatus: Decodable, Hashable, Sendable {
     case paused, syncing, failing, starting, waiting, upToDate
   }
 
-  /// Where sync stands, as the Web UI's Settings, Machines words it.
+  /// Where sync stands, as the Web UI's Settings, Sync words it.
   public var phase: Phase {
     if !enabled { return .paused }
     if running { return .syncing }
@@ -101,7 +101,7 @@ public struct SyncPathMapping: Hashable, Sendable, Identifiable {
   }
 }
 
-/// The Sync part of the Machines tab, like the Web UI's Settings, Machines: the status, sync now, pause, sign in and out, and the path map.
+/// The Sync section, like the Web UI's Settings, Sync: the status, sync now, pause, sign in and out, and the path map.
 /// Sign-in is the relay URL, then Google through Clerk's device-code page, as the Google account card links one.
 @MainActor @Observable
 public final class SyncModel {

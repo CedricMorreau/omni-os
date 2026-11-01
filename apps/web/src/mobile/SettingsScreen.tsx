@@ -1,7 +1,10 @@
+import { useState } from 'react';
+import { searchSettings, sectionDef, sectionsIn, SETTINGS_GROUPS, type SettingsSectionId } from '@omni/shared/settings-catalog.ts';
 import { useApi, type Automation, type SyncStatus } from '../api.ts';
 import { DeviceLabel } from '../components/DeviceLabel.tsx';
+import { Icon, type IconName } from '../components/ui.tsx';
 import { relTime } from '../format.ts';
-import { href, SETTINGS_LABEL, type SettingsSection } from '../router.ts';
+import { href } from '../router.ts';
 import { useApp, useNow, useSecretStoreLabel } from '../store.tsx';
 import { MoGroup, MoHeader, MoListRow, MoScroll, MoSection } from './parts.tsx';
 import { useShell } from './shell.tsx';
@@ -15,8 +18,9 @@ function syncSub(s: SyncStatus | undefined, now: number) {
 }
 
 /**
- * Settings, pushed from the avatar on Channels: the same sections as the desktop's nav and the Mac's tabs, each
- * opening its own page under a back bar, then Automations. Plan usage sits on the Activity screen.
+ * Settings, pushed from the avatar on Channels: a search over every setting, then the same groups of sections as the
+ * desktop nav and the Mac's sidebar (@omni/shared/settings-catalog.ts), each opening its own page under a back bar,
+ * then Automations. A search result opens its section scrolled to it. Plan usage sits on the Activity screen.
  */
 export function SettingsScreen() {
   const shell = useShell();
@@ -26,8 +30,18 @@ export function SettingsScreen() {
   const automations = useApi<Automation[]>('/automations');
   const host = status?.device?.name || location.hostname;
   const secretStore = useSecretStoreLabel();
-  const open = (section: SettingsSection) => shell.open(href.settingsSection(section));
+  const [q, setQ] = useState('');
+  const hits = searchSettings(q, 'web');
+  const open = (section: SettingsSectionId, focus?: string) => shell.open(href.settingsSection(section, focus));
   const automationsSub = automations.error ?? (automations.data ? (automations.data.length ? `${automations.data.length} on this Mac` : 'None yet') : 'Loading');
+
+  // A live line for the sections that have one; the rest show their blurb.
+  const live: Partial<Record<SettingsSectionId, string>> = {
+    general: profile?.name ? `${profile.name} · setup` : undefined,
+    machines: host || undefined,
+    sync: syncSub(sync.data, now),
+    secrets: `Names only; values stay in ${secretStore}`,
+  };
 
   return (
     <>
@@ -42,19 +56,54 @@ export function SettingsScreen() {
         }
       />
       <MoScroll className="pt-2">
-        <MoSection title="Settings">
-          <MoGroup>
-            <MoListRow icon="sliders" label={SETTINGS_LABEL.general} sub={profile?.name ? `${profile.name} · theme and notifications` : 'You, theme and notifications'} onClick={() => open('general')} />
-            <MoListRow icon="folder" label={SETTINGS_LABEL.workspace} sub="Folders, GitHub owner and integrations" onClick={() => open('workspace')} />
-            <MoListRow icon="monitor" label={SETTINGS_LABEL.machines} sub={`${host || 'Omni'} · ${syncSub(sync.data, now)}`} onClick={() => open('machines')} />
-            <MoListRow icon="key" label={SETTINGS_LABEL.secrets} sub={`Names only; values stay in ${secretStore}`} onClick={() => open('secrets')} last />
-          </MoGroup>
-        </MoSection>
-        <MoSection title="Features">
-          <MoGroup>
-            <MoListRow icon="zap" label="Automations" sub={automationsSub} onClick={() => shell.open(href.automations())} last />
-          </MoGroup>
-        </MoSection>
+        <div className="px-4">
+          <label className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3.5 text-fg-3">
+            <Icon name="search" size={16} />
+            <input
+              type="text"
+              inputMode="search"
+              enterKeyHint="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              className="min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-4"
+            />
+          </label>
+        </div>
+        {q.trim() ? (
+          <MoSection title="Matching settings" count={hits.length}>
+            {hits.length === 0 ? (
+              <p className="m-0 px-1 text-[14px] text-fg-3">No setting matches.</p>
+            ) : (
+              <MoGroup>
+                {hits.map((e, i) => (
+                  <MoListRow key={e.id} icon={sectionDef(e.section).icon as IconName} label={e.title} sub={sectionDef(e.section).title} onClick={() => open(e.section, e.id)} last={i === hits.length - 1} />
+                ))}
+              </MoGroup>
+            )}
+          </MoSection>
+        ) : (
+          <>
+            {SETTINGS_GROUPS.map((g) => {
+              const list = sectionsIn(g.id);
+              return (
+                <MoSection key={g.id} title={g.title || (g.id === 'omni' ? 'Omni' : 'App')}>
+                  <MoGroup>
+                    {list.map((d, i) => (
+                      <MoListRow key={d.id} icon={d.icon as IconName} label={d.title} sub={live[d.id as SettingsSectionId] ?? d.blurb} onClick={() => open(d.id as SettingsSectionId)} last={i === list.length - 1} />
+                    ))}
+                  </MoGroup>
+                </MoSection>
+              );
+            })}
+            <MoSection title="Features">
+              <MoGroup>
+                <MoListRow icon="zap" label="Automations" sub={automationsSub} onClick={() => shell.open(href.automations())} last />
+              </MoGroup>
+            </MoSection>
+          </>
+        )}
       </MoScroll>
     </>
   );

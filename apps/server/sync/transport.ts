@@ -143,7 +143,7 @@ const SILENT_MS = 75_000;
 export class SyncSignedOutError extends Error {
   readonly code = 'signed_out';
   constructor(detail: string) {
-    super(`signed out of the relay (${detail}): sign in again in Settings, Machines`);
+    super(`signed out of the relay (${detail}): sign in again in Settings, Sync`);
   }
 }
 

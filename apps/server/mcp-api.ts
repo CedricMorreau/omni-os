@@ -4,7 +4,7 @@
 // Three ways in:
 // - Google sign-in through Clerk (mcp-oauth.ts): a Clerk OAuth access token for this install's owner, as
 //   `Authorization: Bearer`. A 401 names the protected resource metadata, so claude.ai, ChatGPT and other OAuth
-//   clients find Clerk and sign in by themselves. On only while a Google account is linked (Settings, Machines).
+//   clients find Clerk and sign in by themselves. On only while a Google account is linked (Settings, Sharing & access).
 // - data/mcp-token, apart from the API token: the URL goes into other companies' connector settings, and rotating it
 //   (delete the file, restart) must not unpair every browser. As a Bearer header, or in the path as /mcp/<mcp-token>
 //   for a client that only takes a URL.

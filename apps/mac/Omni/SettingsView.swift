@@ -2,82 +2,155 @@ import AppKit
 import OmniKit
 import SwiftUI
 
-/// The Settings window: General, Workspace, Machines and Secrets, the same four sections as the Web UI's Settings
-/// page and the phone's Settings list (#404). ⌘, and the sidebar's Settings row both open General.
+/// The Settings window: a searchable sidebar of grouped sections beside one section at a time, the same sections,
+/// groups and order as the Web UI's Settings nav and the phone's Settings screen (SettingsCatalog.swift, from
+/// packages/shared/settings-catalog.ts). A scoped section shows the channel picker under its title; the picked channel
+/// stays picked from section to section. ⌘, and the sidebar's Settings row both open General.
 struct SettingsView: View {
+  @Bindable var model: AppModel
+  let appearance: AppearanceSettings
+  let quickPrompt: QuickPromptController
+  @State private var query = ""
+
+  var body: some View {
+    NavigationSplitView {
+      SettingsSidebar(model: model, query: $query)
+        .navigationSplitViewColumnWidth(min: z(200), ideal: z(224), max: z(280))
+    } detail: {
+      SettingsDetail(model: model, appearance: appearance, quickPrompt: quickPrompt)
+    }
+    .frame(minWidth: z(820), idealWidth: z(900), minHeight: 600, idealHeight: 760)
+  }
+}
+
+/// The groups of sections, or the settings a search finds. Picking a result opens its section.
+private struct SettingsSidebar: View {
+  @Bindable var model: AppModel
+  @Binding var query: String
+
+  var body: some View {
+    let hits = SettingsCatalog.search(query)
+    List(selection: Binding<SettingsTab?>(get: { model.settingsTab }, set: { if let tab = $0 { model.settingsTab = tab } })) {
+      if query.trimmingCharacters(in: .whitespaces).isEmpty {
+        ForEach(SettingsCatalog.groups) { group in
+          if group.title.isEmpty {
+            rows(group.id)
+          } else {
+            Section(group.title) { rows(group.id) }
+          }
+        }
+      } else if hits.isEmpty {
+        Text("No setting matches.").font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
+      } else {
+        ForEach(hits) { e in
+          Button {
+            if let tab = SettingsTab(rawValue: e.section) { model.settingsTab = tab }
+            query = ""
+          } label: {
+            VStack(alignment: .leading, spacing: z(1)) {
+              Text(e.title).font(.omni(size: 13)).foregroundStyle(Tok.fg)
+              Text(SettingsCatalog.section(e.section).title).font(.omni(size: 11.5)).foregroundStyle(Tok.fg3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+        }
+      }
+    }
+    .listStyle(.sidebar)
+    .searchable(text: $query, placement: .sidebar, prompt: "Search settings")
+  }
+
+  @ViewBuilder private func rows(_ group: String) -> some View {
+    ForEach(SettingsCatalog.sections(in: group)) { s in
+      if let tab = SettingsTab(rawValue: s.id) {
+        Label {
+          Text(s.title)
+        } icon: {
+          OmniIcon(name: s.icon, size: 15)
+        }
+        .tag(tab)
+      }
+    }
+  }
+}
+
+/// The section's title, its one line, the scope picker when it has one, and the section itself.
+private struct SettingsDetail: View {
   @Bindable var model: AppModel
   let appearance: AppearanceSettings
   let quickPrompt: QuickPromptController
 
   var body: some View {
-    TabView(selection: $model.settingsTab) {
-      Tab("General", systemImage: "person", value: .general) {
-        GeneralSettingsPage(model: model, appearance: appearance, quickPrompt: quickPrompt)
-          .frame(width: z(560), height: 720)
+    let section = model.settingsTab.section
+    VStack(alignment: .leading, spacing: 0) {
+      VStack(alignment: .leading, spacing: z(6)) {
+        Text(section.title).font(.omni(size: 24, weight: .medium)).tracking(-0.24).foregroundStyle(Tok.fg)
+        Text(section.blurb).font(.omni(size: 13)).foregroundStyle(Tok.fg3)
+        if section.scoped == true {
+          SettingsScopeBar(model: model).padding(.top, z(8))
+        }
       }
-      Tab("Workspace", systemImage: "folder", value: .workspace) {
-        SettingsPage { ProfileSettings(model: model, part: .workspace) }
-          .frame(width: z(560), height: 560)
+      .padding(.horizontal, z(24))
+      .padding(.top, z(20))
+      .padding(.bottom, z(4))
+      .frame(maxWidth: .infinity, alignment: .leading)
+      content
+    }
+    .background(Tok.bg)
+  }
+
+  @ViewBuilder private var content: some View {
+    switch model.settingsTab {
+    case .general:
+      SettingsPage {
+        ProfileSettings(model: model, part: .general)
+        QuickPromptSettingsView(controller: quickPrompt, settings: quickPrompt.settings)
       }
-      Tab("Machines", systemImage: "desktopcomputer", value: .machines) {
-        MachinesSettingsPage(settings: model.settings, model: model)
-          .frame(width: z(560), height: 720)
+    case .appearance:
+      SettingsPage {
+        AppearanceSettingsView(appearance: appearance, zoom: UIZoom.settings)
+        Text("Appearance and zoom stay on this Mac and never sync.").font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
       }
-      Tab("Secrets", systemImage: "key", value: .secrets) {
-        SecretsSettings(model: model)
-          .frame(width: z(560), height: 680)
-      }
+    case .notifications:
+      SettingsPage { NotificationSettingsView(model: model, attention: model.attention, scoped: model.scopedChannel?.id) }
+    case .models: ModelsSection(model: model)
+    case .threads: ThreadsSection(model: model)
+    case .channels: ChannelsSection(model: model)
+    case .workspace: WorkspaceSection(model: model)
+    case .worktrees: WorktreesSection(model: model)
+    case .machines: MachinesSettingsPage(settings: model.settings, model: model)
+    case .sync: SyncSection(model: model)
+    case .access: AccessSection(model: model)
+    case .integrations: SettingsPage { ProfileSettings(model: model, part: .integrations) }
+    case .secrets: SecretsSettings(model: model, scoped: model.scopedChannel?.id)
+    case .about: AboutSection(model: model)
     }
   }
 }
 
-/// The General tab: who you are and Run setup again (the Profile tab before #404), then this Mac's appearance,
-/// notifications and Quick Prompt, which were tabs of their own. The last three stay on this Mac and never sync.
-struct GeneralSettingsPage: View {
-  let model: AppModel
-  let appearance: AppearanceSettings
-  let quickPrompt: QuickPromptController
-
-  var body: some View {
-    SettingsPage {
-      ProfileSettings(model: model, part: .general)
-      AppearanceSettingsView(appearance: appearance, zoom: UIZoom.settings)
-      NotificationSettingsView(model: model, attention: model.attention)
-      QuickPromptSettingsView(controller: quickPrompt, settings: quickPrompt.settings)
-      SettingsIntro(
-        icon: "info",
-        text: Text("Your name and email live in \(Text("data/omni.config.json").monospaced()) on this Mac with the Workspace tab's folders, and never go into git. Appearance, notifications and Quick Prompt stay on this Mac.")
-      )
-    }
-  }
-}
-
-/// The Machines tab: this Mac's name (the sidebar footer's before #405), where new threads run and the Google account
-/// that signs new devices in, then Sync with Omni Connect (which uses its sign-in) and
-/// Storage, which were tabs of their own. Advanced holds the developer items: this Mac's server (port, repo, Node),
-/// its status and log, and the sync path map. The model follows the settings, so a change applies at once: a new
-/// port reconnects, and any change checks the server again.
+/// The Machines section: this Mac (its name and the server's state), the port, repo and Node the app runs the server
+/// with, its log and build, and the server options from .env. The model follows the settings, so a change applies at
+/// once: a new port reconnects, and any change checks the server again. Sync, Sharing & access and Worktrees were
+/// parts of this tab before; they are sections of their own now.
 struct MachinesSettingsPage: View {
   @Bindable var settings: ServerSettings
   let model: AppModel
 
   var body: some View {
     SettingsPage {
-      RunOnCard(model: model)
-      GoogleAccountSettings(model: model)
-
-      SettingsPart(title: "Sync", note: "History across your machines, relayed through your own Cloudflare relay.")
-      SyncSettings(model: model)
-      ConnectSettings(model: model)
-
-      SettingsPart(title: "Storage", note: "The worktrees Omni made for threads, what they use, and which are safe to clean up.")
-      StorageSettings(model: model)
-
-      AdvancedFold(summary: "Port, repo, Node, status and the sync path map") {
+      SettingsCard(title: "This Mac", note: "The machine this app runs Omni on, as other machines and the sync list name it.") {
+        InfoRows {
+          if let name = model.store.status?.device?.name { InfoRow("Machine", value: name) }
+          InfoRow("Server", value: model.supervisor.state.label)
+        }
+      }
+      AdvancedFold(summary: "Port, repo, Node, log and build") {
         serverCard
         statusCard
-        SyncPathMap(model: model)
       }
+      ServerOptionsFold(model: model, section: "machines", title: "Server port and host")
     }
   }
 
@@ -144,52 +217,6 @@ struct MachinesSettingsPage: View {
     case .connecting: "Connecting"
     case .reconnecting: "Reconnecting"
     case .closed: "Closed"
-    }
-  }
-}
-
-/// Settings' default machine for new threads, saved on pick through PUT /api/setup. With no other machine synced
-/// there is nothing to pick, unless a saved machine has dropped out of sync: then This Mac stays pickable.
-private struct RunOnCard: View {
-  let model: AppModel
-
-  var body: some View {
-    let devices = model.devices.devices
-    let saved = model.runOn.saved
-    SettingsCard(title: "This Mac", note: "The machine this app runs Omni on, as other machines and the sync list name it.") {
-      // The name, which the sidebar footer showed before #405.
-      if let name = model.store.status?.device?.name {
-        InfoRows {
-          InfoRow("Machine", value: name)
-        }
-      }
-      VStack(alignment: .leading, spacing: 0) {
-        FieldLabel(text: "Run new threads on", hint: "New threads run there unless the composer picks another machine. Replies and Stop follow the thread wherever it runs.")
-        VStack(alignment: .leading, spacing: z(10)) {
-          HStack(spacing: z(8)) {
-            // A saved machine sync no longer lists shows as This Mac, where the server runs it.
-            RunOnMenu(devices: devices, pick: RunOnRules.resolved(saved, devices: devices)) { device in Task { await model.runOn.save(device) } }
-              .disabled((devices.isEmpty && saved.isEmpty) || model.runOn.saving)
-              .opacity(devices.isEmpty && saved.isEmpty ? 0.45 : 1)
-            if model.runOn.saving { Loader(size: 14) }
-          }
-          if devices.isEmpty {
-            Text(
-              saved.isEmpty
-                ? "No other machine is synced, so threads run on this Mac. Set up Sync on both machines to pick one."
-                : "The saved machine isn't synced now, so new threads can't start there. Pick This Mac, or check Sync."
-            )
-            .font(.omni(size: 12))
-            .foregroundStyle(Tok.fg3)
-            .fixedSize(horizontal: false, vertical: true)
-          }
-          if let error = model.runOn.error { ErrorNote(text: error) }
-        }
-      }
-    }
-    .task(id: model.client.baseURL) {
-      await model.runOn.load()
-      await model.devices.refresh()
     }
   }
 }

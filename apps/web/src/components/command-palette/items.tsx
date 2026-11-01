@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { SETTINGS_SECTION_DEFS } from '@omni/shared/settings-catalog.ts';
 import type { ChannelWithRunning, Thread, ThreadStub } from '../../api.ts';
 import { relTime } from '../../format.ts';
 import { href, navigate, startNewThread, type Route } from '../../router.ts';
@@ -38,10 +39,16 @@ export function paletteItems(q: string, channels: ChannelWithRunning[], recent: 
     { id: 'p:home', group: 'Go to', label: 'Home', lead: lead('home'), run: () => go(href.home()) },
     { id: 'p:artifacts', group: 'Go to', label: 'Artifacts', lead: lead('layers'), run: () => go(href.artifacts()) },
     { id: 'p:automations', group: 'Go to', label: 'Automations', lead: lead('zap'), run: () => go(href.automations()) },
-    { id: 'p:settings', group: 'Go to', label: 'Settings', sub: 'General: you, theme, notifications', lead: lead('sliders'), run: () => go(href.settingsPage()) },
-    { id: 'p:workspace', group: 'Go to', label: 'Workspace', sub: 'Settings: folders and GitHub owner', lead: lead('folder'), run: () => go(href.settingsSection('workspace')) },
-    { id: 'p:machines', group: 'Go to', label: 'Machines', sub: 'Settings: this machine, sync and storage', lead: lead('monitor'), run: () => go(href.settingsSection('machines')) },
-    { id: 'p:secrets', group: 'Go to', label: 'Secrets', sub: 'Settings', lead: lead('key'), run: () => go(href.settingsSection('secrets')) },
+    { id: 'p:settings', group: 'Go to', label: 'Settings', sub: 'General: you and setup', lead: lead('sliders'), run: () => go(href.settingsPage()) },
+    // Every other Settings section by name, as the Settings nav lists them.
+    ...SETTINGS_SECTION_DEFS.filter((d) => d.id !== 'general').map<Item>((d) => ({
+      id: `p:${d.id}`,
+      group: 'Go to',
+      label: d.title,
+      sub: 'Settings',
+      lead: lead(d.icon as IconName),
+      run: () => go(href.settingsSection(d.id)),
+    })),
     { id: 'p:new-channel', group: 'Go to', label: 'Add channel', lead: lead('hash'), run: () => go(href.newChannel()) },
     ...channels.map<Item>((c) => ({
       id: `c:${c.id}`,

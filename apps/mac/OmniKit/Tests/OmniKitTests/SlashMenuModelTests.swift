@@ -109,7 +109,7 @@ private final class FakeCommandsAPI: CommandsAPI {
     #expect(m.reply?.label == "Rename" && m.reply?.armed == true)
     #expect(m.hint == nil)
     m.update(text: "/model", caret: 6)
-    #expect(m.hint == "Switch the model and effort with the pills below. The next turn uses them.")
+    #expect(m.hint == "Opens the model pill below. The next turn runs on what you pick.")
     let (n, _) = model(ready, where: .newThread)
     n.update(text: "/clear", caret: 6)
     #expect(n.reply == nil)

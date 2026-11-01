@@ -1,9 +1,10 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api, errorText, useApi, type SecretRow } from '../api.ts';
 import { Button, Empty, ErrorNote, Icon, InlineConfirm, Label, Loading, Picker, StatusDot, type PickerOption } from '../components/ui.tsx';
 import { relTime } from '../format.ts';
 import { href } from '../router.ts';
 import { useApp, useSecretStoreLabel } from '../store.tsx';
+import { Origin } from './settings-parts.tsx';
 
 const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 
@@ -20,14 +21,17 @@ function scopeLabel(scope: string, name: (id: string) => string | undefined) {
   return `#${name(id) ?? id}`;
 }
 
-// Settings, Secrets: the names by scope, a form that adds or replaces one, and the known global ones. The Mac app's
-// Secrets tab (apps/mac/Omni/SecretsSettingsView.swift) shows the same.
-export function SecretsSection() {
+// Settings, Secrets: the names by scope, a form that adds or replaces one, and the known global ones. With a channel
+// in Settings' scope (`scoped`), the list is what that channel's threads get: its own secrets, each marked where it
+// overrides a global one, then the global ones it inherits; the form saves to that channel. The Mac app's Secrets
+// section (apps/mac/Omni/SecretsSettingsView.swift) shows the same.
+export function SecretsSection({ scoped }: { scoped?: string }) {
   const { channels, channel, status, reloadStatus } = useApp();
   const res = useApi<SecretRow[]>('/secrets');
   const store = useSecretStoreLabel();
 
-  const [scope, setScope] = useState('global');
+  const [scope, setScope] = useState(scoped ? `channel:${scoped}` : 'global');
+  useEffect(() => setScope(scoped ? `channel:${scoped}` : 'global'), [scoped]);
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -40,14 +44,21 @@ export function SecretsSection() {
 
   const groups = useMemo(() => {
     const m = new Map<string, SecretRow[]>();
-    for (const s of res.data ?? []) {
+    // A channel in scope: its own rows, then the global ones whose names it does not set.
+    const all = res.data ?? [];
+    const own = scoped ? all.filter((s) => s.scope === `channel:${scoped}`) : null;
+    const rowsShown = own ? [...own, ...all.filter((s) => s.scope === 'global' && !own.some((o) => o.name === s.name))] : all;
+    for (const s of rowsShown) {
       const list = m.get(s.scope) ?? [];
       list.push(s);
       m.set(s.scope, list);
     }
     // Global first, then channels alphabetically.
-    return [...m.entries()].sort(([a], [b]) => (a === 'global' ? -1 : b === 'global' ? 1 : a.localeCompare(b)));
-  }, [res.data]);
+    const sorted = [...m.entries()].sort(([a], [b]) => (a === 'global' ? -1 : b === 'global' ? 1 : a.localeCompare(b)));
+    // In a channel's scope its own come first.
+    return own ? sorted.reverse() : sorted;
+  }, [res.data, scoped]);
+  const globalNames = useMemo(() => new Set((res.data ?? []).filter((s) => s.scope === 'global').map((s) => s.name)), [res.data]);
 
   const nameValid = NAME_RE.test(name);
   const exists = (res.data ?? []).some((s) => s.scope === scope && s.name === name);
@@ -200,7 +211,7 @@ export function SecretsSection() {
       ) : !res.data ? (
         <Loading />
       ) : groups.length === 0 ? (
-        <Empty icon="key" title="No secrets yet">
+        <Empty icon="key" title={scoped ? 'No secrets reach this channel' : 'No secrets yet'}>
           Add a token above, for example a Shopify Admin API token scoped to the client's channel.
         </Empty>
       ) : (
@@ -209,7 +220,7 @@ export function SecretsSection() {
             <section key={sc}>
               <h3 className="caption mb-2 flex items-center gap-2 px-2">
                 {sc === 'global' ? (
-                  'Global'
+                  scoped ? 'Inherited from Global' : 'Global'
                 ) : (
                   <a href={href.channel(sc.replace(/^channel:/, ''))} className="hover:text-fg">
                     {scopeLabel(sc, channelName)}
@@ -227,6 +238,12 @@ export function SecretsSection() {
                           <Icon name="key" size={13} />
                         </span>
                         <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{s.name}</span>
+                        {scoped &&
+                          (s.scope === 'global' ? (
+                            <Origin of="inherited" label="Global" />
+                          ) : (
+                            <Origin of="channel" label={globalNames.has(s.name) ? 'Overrides global' : 'Set on this channel'} />
+                          ))}
                         <span className="hidden shrink-0 font-num text-[11px] text-fg-4 sm:inline" title={s.updated_at}>
                           {relTime(s.updated_at)}
                         </span>

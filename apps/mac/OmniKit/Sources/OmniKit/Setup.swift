@@ -1,6 +1,6 @@
 import Foundation
 
-// The user config behind onboarding and Settings' General and Workspace tabs, as the Web UI's Onboarding.tsx and Settings.tsx read it:
+// The user config behind onboarding and Settings' General, Workspace, Integrations and Sharing & access sections, as the Web UI's Onboarding.tsx and Settings.tsx read it:
 // GET and PUT /api/setup, POST /api/setup/complete (apps/server/setup-api.ts). Empty strings mean "use the default".
 // The contract is packages/shared/settings.ts; apps/server/tests/mac-fixtures.test.ts checks these structs hold each
 // field Settings shows.
@@ -19,10 +19,36 @@ public struct UserConfig: Codable, Hashable, Sendable {
     public var githubOwner = ""
     public init() {}
   }
+  /// Hermes and the central brain are edited in Settings. The network access fields are shown read-only (only the
+  /// file or their env var sets them), so encoding leaves them out and a save never sends them back.
   public struct Integrations: Codable, Hashable, Sendable {
     public var hermesUrl = ""
     public var centralBrainDir = ""
+    public var tailscaleLogin = ""
+    public var mcpPublicUrl = ""
+    public var clerkPublishableKey = ""
+    public var clerkClientId = ""
     public init() {}
+
+    enum CodingKeys: String, CodingKey {
+      case hermesUrl, centralBrainDir, tailscaleLogin, mcpPublicUrl, clerkPublishableKey, clerkClientId
+    }
+
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      hermesUrl = try c.decodeIfPresent(String.self, forKey: .hermesUrl) ?? ""
+      centralBrainDir = try c.decodeIfPresent(String.self, forKey: .centralBrainDir) ?? ""
+      tailscaleLogin = try c.decodeIfPresent(String.self, forKey: .tailscaleLogin) ?? ""
+      mcpPublicUrl = try c.decodeIfPresent(String.self, forKey: .mcpPublicUrl) ?? ""
+      clerkPublishableKey = try c.decodeIfPresent(String.self, forKey: .clerkPublishableKey) ?? ""
+      clerkClientId = try c.decodeIfPresent(String.self, forKey: .clerkClientId) ?? ""
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: CodingKeys.self)
+      try c.encode(hermesUrl, forKey: .hermesUrl)
+      try c.encode(centralBrainDir, forKey: .centralBrainDir)
+    }
   }
   /// Where new threads run unless the composer picks another machine (RunOn.swift).
   public struct RunOn: Codable, Hashable, Sendable {
@@ -99,6 +125,8 @@ public struct SetupState: Decodable, Hashable, Sendable {
   public let resolved: Resolved
   public let fallbacks: Fallbacks
   public let omniRepo: String?
+  /// The fields an environment variable overrides now, by `section.key`, with its name. nil from older servers.
+  public let env: [String: String]?
   /// POST /api/setup/complete only: the #conductor thread with the welcome message, on the first run.
   public let threadId: String?
 }
@@ -149,7 +177,31 @@ extension String {
   fileprivate var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 
+/// One .env option, as GET /api/setup/server lists it (`ServerOption` in packages/shared/settings.ts): read-only in
+/// Settings, with its value, default and where it came from.
+public struct ServerOption: Decodable, Hashable, Sendable, Identifiable {
+  public let env: String
+  public let label: String
+  public let hint: String
+  /// The Settings section that shows it: models, threads, worktrees or machines.
+  public let section: String
+  public let value: String
+  public let `default`: String
+  /// "env" when the variable is set, "default" for Omni's built-in value.
+  public let source: String
+  public var id: String { env }
+  public var fromEnv: Bool { source == "env" }
+}
+
+public struct ServerOptionsState: Decodable, Hashable, Sendable {
+  public let options: [ServerOption]
+}
+
 extension OmniClient {
+  public func serverOptions() async throws(OmniAPIError) -> ServerOptionsState {
+    try await send("GET", "/api/setup/server")
+  }
+
   public func setup() async throws(OmniAPIError) -> SetupState {
     try await send("GET", "/api/setup")
   }

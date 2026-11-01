@@ -5,7 +5,7 @@ import { Button, ErrorNote, LinkButton, Loader, type IconName } from './ui.tsx';
 
 // Google sign-in through Clerk's device-code flow (apps/server/google-auth.ts). The server asks Clerk for a code;
 // this shows it and links to Clerk's page, where the person signs in with Google and approves; then it polls the
-// server until Clerk answers. The pairing screen uses it to sign a new device in as the owner, Settings, Machines to
+// server until Clerk answers. The pairing screen uses it to sign a new device in as the owner, Settings, Sharing & access to
 // link the owner's account, and Sync to sign this machine in to the relay (POST /api/sync/setup). A browser that
 // signs in gets an HttpOnly cookie from the last poll and never holds the session itself.
 

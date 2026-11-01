@@ -1,4 +1,4 @@
-// Why this machine cannot tell another one anything right now, said as Settings, Machines would. One text for every
+// Why this machine cannot tell another one anything right now, said as Settings, Sync would. One text for every
 // path that needs the other machine (a handoff, a Take over, a thread sent to run elsewhere), with the words each
 // path uses for the two machines and for what it was trying to do.
 import { syncStatus } from './worker.ts';
@@ -21,6 +21,6 @@ export const RUN_ON_NEEDS: SyncNeed = { here: 'machine', other: 'machine', needs
 export function syncProblem(need: SyncNeed): string {
   const status = syncStatus();
   if (!status.machineId || !status.configured) return `Sync is not set up on this ${need.here}. ${need.needs} needs sync on both.`;
-  if (!status.enabled) return `Sync is paused on this ${need.here}. Resume it in Settings, Machines to ${need.to}.`;
-  return `Sync is set up on this ${need.here} but not running, so the other ${need.other} cannot be told. Check Settings, Machines, then try again.`;
+  if (!status.enabled) return `Sync is paused on this ${need.here}. Resume it in Settings, Sync to ${need.to}.`;
+  return `Sync is set up on this ${need.here} but not running, so the other ${need.other} cannot be told. Check Settings, Sync, then try again.`;
 }

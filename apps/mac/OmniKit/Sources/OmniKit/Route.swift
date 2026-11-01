@@ -65,10 +65,12 @@ public enum Route: Hashable, Sendable {
     case ("search", _): self = .search(query: query.first("q") ?? "")
     case ("automations", nil): self = .automations
     case ("secrets", nil): self = .settings(.secrets)
-    case ("sync", nil), ("storage", nil): self = .settings(.machines)
+    case ("sync", nil): self = .settings(.sync)
+    case ("storage", nil): self = .settings(.worktrees)
     case ("settings", nil): self = .settings(.general)
     case ("settings", let name?) where c == nil:
-      if let tab = SettingsTab(rawValue: name) {
+      // An old section name opens the section that holds it now, as the web's router does.
+      if let tab = SettingsTab(named: name) {
         self = .settings(tab)
       } else {
         self = .notFound(path: pathPart)

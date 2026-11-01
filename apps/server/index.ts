@@ -81,7 +81,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   startTriggerDeliveries();
   startPRWatch();
   startCatalogRefresh();
-  // With this Mac's retention policy on (Settings > Machines), removes idle worktrees that hold nothing unsaved, now and daily.
+  // With this Mac's retention policy on (Settings > Worktrees), removes idle worktrees that hold nothing unsaved, now and daily.
   startWorktreeRetention();
   // The Mac stays awake while the server runs, as the old LaunchAgent's caffeinate kept it: phones reach it over the
   // tailnet. -w ends caffeinate with this process. OMNI_CAFFEINATE=0 turns it off.

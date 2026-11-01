@@ -5,7 +5,7 @@ import { Button, CopyButton, ErrorNote, Icon, InlineConfirm, Label, Loading, Sta
 import { plural, relTime } from '../format.ts';
 import { useSecretStoreLabel } from '../store.tsx';
 
-// Settings, Machines, Sync: sign in to the Cloudflare relay with Google (through Clerk), see what is waiting, sync now, pause and sign out. The
+// Settings, Sync: sign in to the Cloudflare relay with Google (through Clerk), see what is waiting, sync now, pause and sign out. The
 // path map sits under Machines' Advanced. The Mac app's Machines tab (apps/mac/Omni/SyncSettingsView.swift) shows the same.
 
 type Status = SyncStatus;

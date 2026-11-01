@@ -4,7 +4,7 @@
 //   npm run relay:config
 //
 // The relay trusts the Clerk app that signs machines in, and only the Clerk users on ALLOWED_USERS. Run it on the
-// Omni whose Google account is linked (Settings, Machines); every machine that syncs must use that same Clerk app.
+// Omni whose Google account is linked (Settings, Sharing & access); every machine that syncs must use that same Clerk app.
 // Omni Connect (docs/adr/0009-omni-connect.md) adds four optional Cloudflare secrets, printed at the end.
 import { join } from 'node:path';
 import { clerkConfig } from '../clerk.ts';
@@ -14,11 +14,11 @@ import { owner } from '../google-auth.ts';
 const clerk = clerkConfig();
 const who = owner();
 if (!clerk) {
-  console.error('Google sign-in is not set up on this Omni: set integrations.clerkClientId (Settings, Machines) first.');
+  console.error('Google sign-in is not set up on this Omni: set integrations.clerkClientId (Settings, Sharing & access) first.');
   process.exit(1);
 }
 if (!who) {
-  console.error('No Google account is linked to this Omni yet. Link it in Settings, Machines, then run this again.');
+  console.error('No Google account is linked to this Omni yet. Link it in Settings, Sharing & access, then run this again.');
   process.exit(1);
 }
 
@@ -34,7 +34,7 @@ console.log(`Deploy the Omni sync relay to your Cloudflare account. Run these on
   npx wrangler deploy
   echo '${secrets}' | npx wrangler secret bulk
 
-wrangler deploy prints the relay's URL (https://omni-relay.<account>.workers.dev). Paste it in Settings, Machines,
+wrangler deploy prints the relay's URL (https://omni-relay.<account>.workers.dev). Paste it in Settings, Sync,
 Sync on each machine and sign in with Google as ${who.email ?? who.sub}.
 
 To let another Clerk user in, or take one out, edit ALLOWED_USERS (comma-separated) with:

@@ -13,8 +13,10 @@ import { z } from 'zod';
 import {
   isTimezone,
   NAME_MAX,
+  SETTING_FIELDS,
   SETTING_SECTIONS,
   sectionFields,
+  settingId,
   settingProblem,
   type SettingField,
   type SettingSection,
@@ -58,7 +60,7 @@ const schema = z.object({
   /** Per machine, like the rest of this file (apps/server/run-on.ts). */
   runOn: z.object({ device: z.string().trim().max(100).default('') }).prefault({}),
   automations: z.record(z.string(), automationOverride).default({}),
-  /** Off until turned on in Settings > Machines. */
+  /** Off until turned on in Settings > Worktrees. */
   worktrees: z
     .object({
       retention: z
@@ -216,6 +218,20 @@ export const resolved = {
   clerkPublishableKey: () => (process.env.OMNI_CLERK_PUBLISHABLE_KEY ?? userConfig().integrations.clerkPublishableKey).trim(),
   clerkClientId: () => (process.env.OMNI_CLERK_CLIENT_ID ?? userConfig().integrations.clerkClientId).trim(),
 };
+
+/**
+ * The fields an environment variable overrides now, by `section.key`, as `resolved` reads them: a variable read with ??
+ * wins even when empty, one read with || only when it holds something.
+ */
+export function envOverrides(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of SETTING_FIELDS as readonly SettingField[]) {
+    if (!f.env) continue;
+    const v = process.env[f.env.name];
+    if (f.env.emptyWins ? v !== undefined : !!v) out[settingId(f)] = f.env.name;
+  }
+  return out;
+}
 
 /** How prompts refer to the person: their name, or "the user" until one is set. */
 export const userName = () => resolved.name() || 'the user';

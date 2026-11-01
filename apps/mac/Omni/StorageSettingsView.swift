@@ -1,7 +1,7 @@
 import OmniKit
 import SwiftUI
 
-/// The Storage part of the Machines tab (a tab of its own before #404), like the Web UI's Settings, Machines, Storage:
+/// The Worktrees section (part of the Machines tab from #404 until the grouped layout), like the Web UI's Settings, Worktrees:
 /// the inventory of data/worktrees, the cleanup of what can go and this Mac's retention policy. A new model per client
 /// and per visit. It shows the last scan and scans only when Scan is pressed; closing the tab stops following a
 /// running scan or cleanup.

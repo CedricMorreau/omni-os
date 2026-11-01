@@ -1,14 +1,14 @@
 import { useSyncExternalStore } from 'react';
+import { SETTINGS_SECTION_DEFS, SETTINGS_SECTION_IDS, settingsSectionNamed, type SettingsSectionId } from '@omni/shared/settings-catalog.ts';
 import type { NewThreadPreset } from './new-thread-preset.ts';
 
 export type ChannelTab = 'threads' | 'prs' | 'settings';
 
-/** The Settings sections, the same four on desktop, phone and Mac. Automations stays a page of its own. */
-export const SETTINGS_SECTIONS = ['general', 'workspace', 'machines', 'secrets'] as const;
-export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
-const isSettingsSection = (s: string | undefined): s is SettingsSection => (SETTINGS_SECTIONS as readonly string[]).includes(s ?? '');
+/** The Settings sections, the same on desktop, phone and Mac (@omni/shared/settings-catalog.ts). Automations stays a page of its own. */
+export const SETTINGS_SECTIONS = SETTINGS_SECTION_IDS;
+export type SettingsSection = SettingsSectionId;
 /** The pages Settings replaced (#404). Their hashes still work and land on the section that holds them now. */
-const LEGACY_SETTINGS: Record<string, SettingsSection> = { secrets: 'secrets', sync: 'machines', storage: 'machines' };
+const LEGACY_SETTINGS: Record<string, SettingsSection> = { secrets: 'secrets', sync: 'sync', storage: 'worktrees' };
 
 /** What a thread link can open on its own screen in the phone layout. The desktop shows the thread itself. */
 export const THREAD_VIEWS = ['steps', 'changes', 'pr', 'browser', 'terminal', 'actions', 'details'] as const;
@@ -24,8 +24,11 @@ export type Route =
   | { name: 'thread'; id: string; artifact?: number; view?: ThreadView; turn?: number; at?: number }
   | { name: 'search'; q: string }
   | { name: 'automations' }
-  /** No section is the Settings hub: General on the desktop, the list of sections on a phone. */
-  | { name: 'settings'; section?: SettingsSection }
+  /**
+   * No section is the Settings hub: General on the desktop, the list of sections on a phone. `focus`: a search
+   * result's entry (@omni/shared/settings-catalog.ts) to scroll to.
+   */
+  | { name: 'settings'; section?: SettingsSection; focus?: string }
   | { name: 'artifacts' }
   | { name: 'new-channel' }
   | { name: 'notfound'; path: string };
@@ -70,7 +73,11 @@ export function parseHash(hash: string): Route {
   if (a === 'automations' && !b) return { name: 'automations' };
   if (Object.hasOwn(LEGACY_SETTINGS, a) && !b) return { name: 'settings', section: LEGACY_SETTINGS[a] };
   if (a === 'settings' && !b) return { name: 'settings' };
-  if (a === 'settings' && isSettingsSection(b) && !c) return { name: 'settings', section: b };
+  if (a === 'settings' && b && !c) {
+    // An old section name (the Mac's tab names before this layout) opens the section that holds it now.
+    const section = settingsSectionNamed(b);
+    if (section) return { name: 'settings', section, focus: q.get('focus') || undefined };
+  }
   if (a === 'artifacts' && !b) return { name: 'artifacts' };
   if (a === 'new-channel' && !b) return { name: 'new-channel' };
   return { name: 'notfound', path: pathPart };
@@ -102,10 +109,11 @@ export function pageTitle(route: Route, channelName: (id: string) => string | un
   }
 }
 
-export const SETTINGS_LABEL: Record<SettingsSection, string> = { general: 'General', workspace: 'Workspace', machines: 'Machines', secrets: 'Secrets' };
+export const SETTINGS_LABEL = Object.fromEntries(SETTINGS_SECTION_DEFS.map((s) => [s.id, s.title])) as Record<SettingsSection, string>;
 
-/** The one hash for a settings route, so a legacy `#/sync` can be replaced with it. */
-export const settingsHash = (section?: SettingsSection) => (section ? `#/settings/${section}` : '#/settings');
+/** The one hash for a settings route, so a legacy `#/sync` can be replaced with it. `focus`: an entry to scroll to. */
+export const settingsHash = (section?: SettingsSection, focus?: string) =>
+  section ? `#/settings/${section}${focus ? `?focus=${encodeURIComponent(focus)}` : ''}` : '#/settings';
 
 const subscribe = (cb: () => void) => {
   window.addEventListener('hashchange', cb);
@@ -150,7 +158,7 @@ export const href = {
   /** The Settings hub. A channel's own settings tab is `settings(id)`. */
   settingsPage: () => settingsHash(),
   /** One Settings section: General, Workspace, Machines or Secrets. */
-  settingsSection: (section: SettingsSection) => settingsHash(section),
+  settingsSection: (section: SettingsSection, focus?: string) => settingsHash(section, focus),
   artifacts: () => '#/artifacts',
   newChannel: () => '#/new-channel',
 };

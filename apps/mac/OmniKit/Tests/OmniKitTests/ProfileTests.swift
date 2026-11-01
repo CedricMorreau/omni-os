@@ -66,6 +66,28 @@ import Testing
     #expect(t.requests.first?.url?.absoluteString == "http://127.0.0.1:4799/api/setup")
   }
 
+  @Test func aSaveNeverSendsTheReadOnlyNetworkFields() async throws {
+    var c = UserConfig()
+    c.integrations.hermesUrl = " http://100.64.0.1:8642 "
+    c.integrations.tailscaleLogin = "ada@example.com"
+    let t = StubTransport(body: Self.state)
+    _ = try await OmniClient(port: 4799, transport: t).saveSetup(SetupPatch(integrations: SetupPatch.cleaned(c).integrations))
+    guard case .object(let body) = try bodyJSON(try #require(t.requests.first)), case .object(let i) = body["integrations"] else {
+      Issue.record("not an object")
+      return
+    }
+    #expect(i["hermesUrl"] == .string("http://100.64.0.1:8642"))
+    #expect(i["tailscaleLogin"] == nil)
+  }
+
+  @Test func readsWhichEnvVarOverridesAField() async throws {
+    let withEnv = Self.state.replacingOccurrences(of: #""omniRepo":"ada/omni-os""#, with: #""omniRepo":"ada/omni-os","env":{"user.timezone":"OMNI_TZ"}"#)
+    let s = try await OmniClient(port: 4799, transport: StubTransport(body: withEnv)).setup()
+    #expect(s.env?["user.timezone"] == "OMNI_TZ")
+    // An older server sends none.
+    #expect(try await OmniClient(port: 4799, transport: StubTransport(body: Self.state)).setup().env == nil)
+  }
+
   @Test func onboardingShowsOnlyWhenTheServerSaysSo() {
     #expect(Profile(name: "", onboarded: false).needsOnboarding)
     #expect(!Profile(name: "Ada", onboarded: true).needsOnboarding)

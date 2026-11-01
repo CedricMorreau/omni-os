@@ -4,7 +4,7 @@ Optional. Each Mac keeps its own SQLite as the source of truth. A relay you depl
 
 ## One-time relay setup
 
-You need a Cloudflare account (the free plan is enough) and Google sign-in set up in Omni, with your Google account linked in Settings > Machines ([remote access](remote-access.md)).
+You need a Cloudflare account (the free plan is enough) and Google sign-in set up in Omni, with your Google account linked in Settings > Sharing & access ([remote access](remote-access.md)).
 
 1. Run `npm run relay:config` on that Omni. It prints the steps with your Clerk app and user id filled in: `wrangler login`, create the `omni-relay` R2 bucket, `wrangler deploy` from `apps/relay`, then set the Worker's three secrets (`CLERK_ISSUER`, `CLERK_CLIENT_ID`, `ALLOWED_USERS`). It also prints the four optional Cloudflare secrets [Omni Connect](omni-connect.md) needs.
 2. `wrangler deploy` prints the relay's URL, like `https://omni-relay.<account>.workers.dev`. Opening `<url>/v1/info` shows the Clerk app it trusts.
@@ -13,7 +13,7 @@ Later updates are `npx wrangler deploy` from `apps/relay` again. The secrets sta
 
 ## On each Mac
 
-Open Settings > Machines (web `#/settings/machines`, where the old `#/sync` also lands; the Mac app's Machines tab; on the phone, Settings, Machines). Under Sync, paste the relay URL and press Sign in with Google. Omni shows a code and opens Clerk's page. Check the page shows the same code, then approve as the Google account on `ALLOWED_USERS`. The first sign-in queues this Mac's existing history, and the other Mac pulls it.
+Open Settings > Sync (web `#/settings/sync`, where the old `#/sync` also lands; the Mac app's Sync section; on the phone, Settings, Sync). Paste the relay URL and press Sign in with Google. Omni shows a code and opens Clerk's page. Check the page shows the same code, then approve as the Google account on `ALLOWED_USERS`. The first sign-in queues this Mac's existing history, and the other Mac pulls it.
 
 Omni keeps the relay URL and this machine's relay token in the secret store: the Keychain on a Mac, `data/secrets.json` on Linux. They are global and never passed to threads. The Google sign-in itself is not kept. Sign Out ends this machine's token on the relay and removes both, and the relay deletes the machine's [Omni Connect](omni-connect.md) tunnel. Pause keeps them. Omni Connect uses this same relay sign-in.
 
@@ -21,9 +21,9 @@ Every machine has to use the Clerk app the relay trusts. If they differ, setup s
 
 ### Moving from Supabase
 
-Before this, the relay was a Supabase project. A machine that still holds the Supabase credentials says "Sync moved to Cloudflare" in Settings > Machines. Sign in to the new relay once on each machine. The sign-in removes the Supabase credentials, and the machine's history is queued again for the new relay, so nothing is lost. Once every machine has moved, you can delete the Supabase project.
+Before this, the relay was a Supabase project. A machine that still holds the Supabase credentials says "Sync moved to Cloudflare" in Settings > Sync. Sign in to the new relay once on each machine. The sign-in removes the Supabase credentials, and the machine's history is queued again for the new relay, so nothing is lost. Once every machine has moved, you can delete the Supabase project.
 
-- Path map: paths travel with the home folder as `~`. When the other Mac keeps a folder somewhere else, map it under Advanced in Settings > Machines, like `~/work` to `~/code`.
+- Path map: paths travel with the home folder as `~`. When the other Mac keeps a folder somewhere else, map it under Advanced in Settings > Sync, like `~/work` to `~/code`.
 - Files: after a Mac's first sync, Omni uploads the files and session files of every thread it wrote last, in the background (the log counts progress every 50 threads). After that, a thread's files go up after each turn. The bucket fills a few minutes after the rows.
 - Before a thread resumes, Omni downloads its latest session file. When that download fails or takes over 15 seconds, the thread does not resume the copy on this Mac, which may miss turns the other Mac ran. A "Session not up to date" card says why, and your message waits. Try again downloads it again; Start with fresh context starts a new session that reads the thread so far. Both are on desktop, phone and the Mac app.
 - `npm run sync:backfill`: queue every existing row again, for instance after restoring a database. It is idempotent and skips rows the other Mac wrote last.
@@ -34,7 +34,7 @@ Before this, the relay was a Supabase project. A machine that still holds the Su
 - Published-page and GitHub webhook deliveries sync as `trigger_delivery`. Only the Mac that owns automations starts their runs. Signing secrets stay in each Mac's secret store. See [Automations](automations.md#event-automations).
 - Channel actions and worktree retention stay per Mac; sync does not copy them. See [Configuration](configuration.md#channel-actions) and [Known limits](limits.md).
 - A thread runs on one Mac at a time. Its row names the Mac running it (`run_machine`), so the other Mac shows it read-only until the run ends there, and an edit from the other Mac mid-run (a rename) never changes its status. After a crash, only the Mac that ran it marks it failed.
-- Scheduled automations run on one Mac: Sync in Settings > Machines says which, and "Run them here" moves them. The first Mac to finish a sync with no owner set takes them. Manual runs work on either Mac.
+- Scheduled automations run on one Mac: Settings > Sync says which, and "Run them here" moves them. The first Mac to finish a sync with no owner set takes them. Manual runs work on either Mac.
 - Copying `data/` to another Mac is fine: the folder remembers the Mac it was set up on (its hardware UUID), and on the next start the copy takes a new sync id and pulls the history again, logging one `[sync] this data folder was copied from another Mac` line. It never overwrites the Mac it came from, and scheduled automations stay there until you press "Run them here".
 
 
@@ -43,7 +43,7 @@ Before this, the relay was a Supabase project. A machine that still holds the Su
 Pick where a new thread runs: this machine, or any other synced machine, such as a Linux box with more CPU and memory. The machine you talk to stays the hub. The thread is made there, goes to the other machine with its first message, runs there, and syncs back as it goes, so you watch it from the hub as usual (a few seconds behind).
 
 - A machine whose sync state was reset comes back under a new id. Every picker lists one entry per Tailscale node, the newest, so the old id no longer shows. Threads still assigned to the old id stay on it until they are handed off.
-- The default is Settings > Machines, Run new threads on (`runOn.device` in `data/omni.config.json`, per machine). The new-thread composer's Machine chip ("On This Mac", next to the model pill) overrides it per thread, on desktop, phone and the Mac app; it is hidden while this is the only machine. The Conductor's `delegate` takes `device` too (a machine's name or id, or `here`).
+- The default is Settings > Threads, Run new threads on (`runOn.device` in `data/omni.config.json`, per machine). The new-thread composer's Machine chip ("On This Mac", next to the model pill) overrides it per thread, on desktop, phone and the Mac app; it is hidden while this is the only machine. The Conductor's `delegate` takes `device` too (a machine's name or id, or `here`).
 - An offline default stays selected in the composer. Sending reports why it cannot run there; choose This Mac explicitly to run locally.
 - The other machine cuts a worktree thread's worktree itself, from the channel's repo at the same path (or through its path map), so the repo must be cloned there.
 - Your later messages and Stop go to the machine running the thread. Skills and file mentions resolve on that machine, and attached text context goes with replies. Accepted replies do not replay after Take over. Each reply, Stop and limit action is a command the other machine answers; one it does not take within a day (two minutes for a Stop) shows in the transcript as not delivered, with why, so nothing you sent goes missing in silence. A thread the Conductor delegated there reports back to the Conductor on the hub. Threads that a thread on the other machine delegates run there too, and your messages and Stop reach them the same way.

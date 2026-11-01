@@ -1,19 +1,16 @@
 import { useApi, type SetupState, type SyncStatus } from '../api.ts';
 import { DeviceLabel } from '../components/DeviceLabel.tsx';
 import { RUN_ON_HINT, runOnOptions, useRunOnSetting } from '../components/RunOnPicker.tsx';
-import { ErrorNote, Label, Picker, StatusDot } from '../components/ui.tsx';
+import { HERE } from '../run-on.ts';
+import { ErrorNote, Picker, StatusDot } from '../components/ui.tsx';
 import { relTime } from '../format.ts';
 import { useApp } from '../store.tsx';
-import { GoogleAccountSection } from './GoogleAccount.tsx';
-import { Advanced, Card, InfoRow, PartHeading } from './settings-parts.tsx';
-import { ConnectSection } from './Connect.tsx';
-import { StorageSection } from './Storage.tsx';
-import { PathMapEditor, SyncSection } from './Sync.tsx';
+import { Card, InfoRow, Origin, ServerOptions } from './settings-parts.tsx';
 
-// Settings, Machines: this machine (its name, which the sidebar footer showed before #405, and where new threads
-// run), the Google account that signs new devices in, then Sync with Omni Connect under it, and Storage, which were pages of their own. Advanced holds the developer items: the address, the
-// feed, the thread counts and the sync path map. The Mac app's Machines tab shows the same, with its server's port,
-// repo, Node and log under its own Advanced.
+// Settings, Machines: this machine (its name, sync state, the address this browser uses, the feed and the thread
+// counts) and the server options from .env (port and host). Where new threads run is under Threads (RunOnCard);
+// Sync, Sharing & access and Worktrees are sections of their own. The Mac app's Machines section shows the same,
+// with its server's port, repo, Node and log.
 
 function syncLine(s: SyncStatus | undefined, now: number): { dot: string; text: string } {
   if (!s) return { dot: 'settled', text: 'Reading sync' };
@@ -25,74 +22,59 @@ function syncLine(s: SyncStatus | undefined, now: number): { dot: string; text: 
 }
 
 export function MachinesSection() {
-  const setup = useApi<SetupState>('/setup');
+  const { status, feedLive } = useApp();
+  const sync = useApi<SyncStatus>('/sync/status');
+  const synced = syncLine(sync.data, Date.now());
   return (
     <>
-      <MachineCard state={setup.data ?? null} />
-      <GoogleAccountSection />
-      <PartHeading title="Sync" subtitle="History across your machines, relayed through your own Cloudflare Worker." />
-      <SyncSection />
-      <ConnectSection />
-      <PartHeading title="Storage" subtitle="The worktrees Omni made for threads, what they use, and which are safe to clean up." />
-      <StorageSection />
-      <Advanced summary="Address, feed, threads and the sync path map">
-        <ServerRows />
-        <PathMapEditor />
-      </Advanced>
+      <Card entry="this-machine" title="This machine" subtitle="The machine Omni runs on, as your other machines and the sync list name it.">
+        <div className="space-y-2 text-[13px]">
+          {status?.device && (
+            <InfoRow label="Machine">
+              <DeviceLabel device={status.device} />
+            </InfoRow>
+          )}
+          <InfoRow label="Sync">
+            <StatusDot status={synced.dot} size={7} />
+            <span className="min-w-0 truncate">{synced.text}</span>
+          </InfoRow>
+          <InfoRow label="Address">
+            <span className="truncate font-mono text-[12.5px]">{location.origin}</span>
+          </InfoRow>
+          <InfoRow label="Feed">
+            <StatusDot status={feedLive ? 'done' : 'needs'} size={7} />
+            <span>{feedLive ? 'Connected' : 'Reconnecting'}</span>
+          </InfoRow>
+          {status && (
+            <InfoRow label="Threads">
+              <span className="font-num">
+                {status.running} running, {status.queued} queued
+              </span>
+            </InfoRow>
+          )}
+        </div>
+      </Card>
+      <ServerOptions section="machines" entry="server" title="Server port and host" />
     </>
   );
 }
 
-function MachineCard({ state }: { state: SetupState | null }) {
-  const { status } = useApp();
+/** Threads' default machine for new threads, saved on pick through PUT /api/setup. */
+export function RunOnCard({ state }: { state: SetupState | null }) {
   const runOn = useRunOnSetting(state);
-  const sync = useApi<SyncStatus>('/sync/status');
-  const synced = syncLine(sync.data, Date.now());
+  const saved = runOn.device;
   return (
-    <Card title="This machine" subtitle="The machine Omni runs on. Its port, repo and Node live in .env and the Mac app's Machines tab.">
-      <div className="space-y-2 text-[13px]">
-        {status?.device && (
-          <InfoRow label="Machine">
-            <DeviceLabel device={status.device} />
-          </InfoRow>
-        )}
-        <InfoRow label="Sync">
-          <StatusDot status={synced.dot} size={7} />
-          <span className="min-w-0 truncate">{synced.text}</span>
-        </InfoRow>
+    <Card
+      entry="run-on"
+      title="Run new threads on"
+      subtitle={runOn.offered ? RUN_ON_HINT : 'Only this machine for now. Sync another machine with this one to run threads there.'}
+      origin={state && <Origin of={saved ? 'machine' : 'default'} label={saved ? undefined : 'Built-in default: this machine'} onReset={() => void runOn.save(HERE)} busy={runOn.saving} />}
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <Picker label="Run new threads on" value={runOn.pick} options={runOnOptions(runOn.rows)} onChange={(v) => void runOn.save(v)} disabled={runOn.loading || runOn.saving || !runOn.offered} />
+        {runOn.saving && <span className="text-[12.5px] text-fg-3">Saving</span>}
       </div>
-      <div>
-        <Label hint={runOn.offered ? RUN_ON_HINT : 'Only this machine for now. Sync another machine with this one to run threads there.'}>Run new threads on</Label>
-        <div className="flex flex-wrap items-center gap-3">
-          <Picker label="Run new threads on" value={runOn.pick} options={runOnOptions(runOn.rows)} onChange={(v) => void runOn.save(v)} disabled={runOn.loading || runOn.saving || !runOn.offered} />
-          {runOn.saving && <span className="text-[12.5px] text-fg-3">Saving</span>}
-        </div>
-        {runOn.error && <ErrorNote className="mt-2">{runOn.error}</ErrorNote>}
-      </div>
+      {runOn.error && <ErrorNote className="mt-2">{runOn.error}</ErrorNote>}
     </Card>
-  );
-}
-
-/** What this browser talks to: the server's address, the live feed and the thread counts. */
-function ServerRows() {
-  const { feedLive, status } = useApp();
-  return (
-    <div className="space-y-2 text-[13px]">
-      <InfoRow label="Address">
-        <span className="truncate font-mono text-[12.5px]">{location.origin}</span>
-      </InfoRow>
-      <InfoRow label="Feed">
-        <StatusDot status={feedLive ? 'done' : 'needs'} size={7} />
-        <span>{feedLive ? 'Connected' : 'Reconnecting'}</span>
-      </InfoRow>
-      {status && (
-        <InfoRow label="Threads">
-          <span className="font-num">
-            {status.running} running, {status.queued} queued
-          </span>
-          <span className="text-fg-3">· up to {status.maxConcurrent} at once</span>
-        </InfoRow>
-      )}
-    </div>
   );
 }

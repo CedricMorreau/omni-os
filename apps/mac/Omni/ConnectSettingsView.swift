@@ -2,7 +2,7 @@ import AppKit
 import OmniKit
 import SwiftUI
 
-/// The Omni Connect card of the Machines tab (docs/adr/0009-omni-connect.md): the switch for this Mac, its public URL
+/// The Omni Connect card of the Sharing & access section (docs/adr/0009-omni-connect.md): the switch for this Mac, its public URL
 /// and tunnel, the relay's Connect page, and the machines on Connect, each opened in the default browser. A new model
 /// per client and per visit. The status reloads every 5 seconds while it shows, the machines every 30 and whenever
 /// the tunnel changes state.

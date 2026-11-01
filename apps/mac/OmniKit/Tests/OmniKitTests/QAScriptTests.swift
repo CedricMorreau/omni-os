@@ -198,9 +198,9 @@ import OmniKit
   @Test func opensATabOfSettings() throws {
     let script = try QAScript(json: Data(#"[{"settings": "general"}, {"settings": "workspace"}, {"settings": "machines"}, {"settings": "secrets"}]"#.utf8))
     #expect(script.steps == [.settings(.general), .settings(.workspace), .settings(.machines), .settings(.secrets)])
-    // The eight tabs before #404 open the tab that holds that page now; "connection" is Server's name before that.
+    // Older tab names open the section that holds that page now; "connection" is Server's name before that.
     let old = try QAScript(json: Data(#"[{"settings": "sync"}, {"settings": "storage"}, {"settings": "appearance"}, {"settings": "server"}, {"settings": "profile"}, {"settings": "connection"}]"#.utf8))
-    #expect(old.steps == [.settings(.machines), .settings(.machines), .settings(.general), .settings(.machines), .settings(.general), .settings(.machines)])
+    #expect(old.steps == [.settings(.sync), .settings(.worktrees), .settings(.appearance), .settings(.machines), .settings(.general), .settings(.machines)])
     #expect(throws: QAScriptError.self) { try QAScript(json: Data(#"[{"settings": "garage"}]"#.utf8)) }
   }
 

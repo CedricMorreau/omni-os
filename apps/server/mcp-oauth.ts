@@ -126,7 +126,7 @@ oauthMetadataApi.use('*', async (c, next) => {
 
 const protectedResource = (c: Context) => {
   const issuer = mcpIssuer();
-  if (!issuer) return c.json({ error: 'Google sign-in for MCP is off: link a Google account in Settings, Machines' }, 404);
+  if (!issuer) return c.json({ error: 'Google sign-in for MCP is off: link a Google account in Settings, Sharing & access' }, 404);
   return c.json({
     resource: `${publicBase(c)}/mcp`,
     authorization_servers: [issuer],
