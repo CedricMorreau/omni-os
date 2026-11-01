@@ -126,15 +126,18 @@ public final class ConnectModel {
     await loadMachines()
   }
 
-  /// Loads the status again. When loads overlap, the latest one's answer wins.
+  /// Loads the status again. When loads overlap, the latest one's answer wins. A changed tunnel state lists the
+  /// machines again: the relay sees this Mac as offline until its tunnel is up.
   public func refresh() async {
     loads += 1
     let load = loads
     do throws(OmniAPIError) {
       let s = try await client.connectStatus()
       guard load == loads else { return }
+      let before = status?.tunnel.state
       status = s
       loadError = nil
+      if let before, before != s.tunnel.state { await loadMachines() }
     } catch {
       guard load == loads, error != .cancelled else { return }
       if status == nil { loadError = error.message }

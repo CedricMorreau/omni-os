@@ -79,6 +79,18 @@ private final class ConnectServer: Sendable {
     #expect(server.calls == ["GET /api/connect", "GET /api/connect/machines"])
   }
 
+  @Test func aTunnelThatComesUpListsTheMachinesAgain() async throws {
+    let server = try ConnectServer()
+    let m = ConnectModel(client: server.client)
+    await m.load()
+    await m.refresh()
+    #expect(server.calls.filter { $0 == "GET /api/connect/machines" }.count == 1)
+    server.status(try fixture("connect-status.json").replacingOccurrences(of: #""state": "missing""#, with: #""state": "connected""#))
+    await m.refresh()
+    #expect(m.status?.tunnel.state == .connected)
+    #expect(server.calls.filter { $0 == "GET /api/connect/machines" }.count == 2)
+  }
+
   @Test func signedOutListsNoMachines() async throws {
     let server = try ConnectServer()
     server.status(try fixture("connect-status.json").replacingOccurrences(of: #""signedIn": true"#, with: #""signedIn": false"#))

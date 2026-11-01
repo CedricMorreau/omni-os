@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConnectMachine, ConnectStatus } from '@omni/server/connect/service.ts';
 import { api, errorText, useApi } from '../api.ts';
 import { Button, Chip, ErrorNote, Loading, StatusDot } from '../components/ui.tsx';
@@ -76,14 +76,29 @@ export function ConnectSection() {
       )}
       {s.enabled && problem && <p className="text-[12.5px] text-fg-3">{problem}</p>}
       {error && <ErrorNote>{error}</ErrorNote>}
-      {s.enabled && <MachineList connectPage={s.connectPage} />}
+      {s.enabled && <MachineList connectPage={s.connectPage} tunnelState={s.tunnel.state} />}
     </Card>
   );
 }
 
-function MachineList({ connectPage }: { connectPage: string | null }) {
+function MachineList({ connectPage, tunnelState }: { connectPage: string | null; tunnelState: ConnectStatus['tunnel']['state'] }) {
   const res = useApi<{ machines: ConnectMachine[] }>('/connect/machines');
   const list = res.data?.machines ?? [];
+  const { reload } = res;
+
+  // The relay asks every machine over its tunnel, so check again when this machine's tunnel changes (it is offline
+  // to the relay until the tunnel is up), and every 30 seconds for the others, as the Mac app does.
+  const lastTunnel = useRef(tunnelState);
+  useEffect(() => {
+    if (lastTunnel.current === tunnelState) return;
+    lastTunnel.current = tunnelState;
+    reload();
+  }, [tunnelState, reload]);
+  useEffect(() => {
+    const t = setInterval(() => document.visibilityState === 'visible' && reload(), 30_000);
+    return () => clearInterval(t);
+  }, [reload]);
+
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-3">
