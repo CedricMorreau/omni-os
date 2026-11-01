@@ -1,0 +1,181 @@
+import { afterAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { startRunner } from './runner-boot.ts';
+
+// The external Omni MCP server (apps/mcp/external/) as clients outside Omni reach it: /mcp over Streamable HTTP with
+// the MCP token in the URL or a header, and the stdio entry started with plain `node`, both against the real API.
+
+const MCP_TOKEN = 'mcp-test-token-0123456789abcdef0123456789abcd';
+process.env.OMNI_MCP_TOKEN = MCP_TOKEN;
+const API_TOKEN = process.env.OMNI_TOKEN!;
+
+const h = await startRunner();
+const { app } = await import('../app.ts');
+const { ROOT } = await import('../config.ts');
+const { serve } = await import('@hono/node-server');
+const T = { timeout: 30_000 };
+
+const make = (title: string, status = 'done') =>
+  h.db.threads.create({ id: randomUUID(), channel_id: 'scratch', title, status, role: null, model: null, session_id: randomUUID(), cwd: h.paths.data, branch: null, parent_id: null, task_id: null, source: 'manual', automation: null } as any);
+
+let rpcId = 0;
+/** One JSON-RPC request to /mcp. `headers` replaces the API token tests/setup.ts would add; '' sends none. */
+const post = (path: string, method: string, params: unknown = {}, headers: Record<string, string> = {}) =>
+  app.request(`http://127.0.0.1:4747${path}`, {
+    method: 'POST',
+    headers: { host: '127.0.0.1:4747', 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: '', ...headers },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
+  });
+
+const tool = async (name: string, args: Record<string, unknown> = {}) => {
+  const res = await post(`/mcp/${MCP_TOKEN}`, 'tools/call', { name, arguments: args });
+  expect(res.status).toBe(200);
+  const { result } = (await res.json()) as { result: { isError?: boolean; content: { text: string }[] } };
+  const raw = result.content[0].text;
+  return { isError: !!result.isError, raw, body: result.isError ? null : JSON.parse(raw) };
+};
+
+describe('/mcp: who gets in', () => {
+  const init = { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } };
+
+  it('takes the MCP token in the URL or as a Bearer header, and the API token only as a header', async () => {
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init)).status).toBe(200);
+    expect((await post('/mcp', 'initialize', init, { authorization: `Bearer ${MCP_TOKEN}` })).status).toBe(200);
+    expect((await post('/mcp', 'initialize', init, { authorization: `Bearer ${API_TOKEN}` })).status).toBe(200);
+    expect((await post(`/mcp/${API_TOKEN}`, 'initialize', init)).status).toBe(401);
+  });
+
+  it('refuses no token or a wrong one with 401 and a Bearer challenge', async () => {
+    const none = await post('/mcp', 'initialize', init);
+    expect(none.status).toBe(401);
+    expect(none.headers.get('www-authenticate')).toBe('Bearer');
+    expect((await post('/mcp/nope', 'initialize', init)).status).toBe(401);
+    expect((await post('/mcp', 'initialize', init, { authorization: 'Bearer nope' })).status).toBe(401);
+  });
+
+  it('refuses a host outside the allowed names and a cross-site origin, token or not', async () => {
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { host: 'evil.example' })).status).toBe(403);
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { origin: 'https://evil.example' })).status).toBe(403);
+    // Funnel and tailscale serve keep the MagicDNS name.
+    expect((await post(`/mcp/${MCP_TOKEN}`, 'initialize', init, { host: 'mac.tail1234.ts.net', 'tailscale-funnel-request': '?1' })).status).toBe(200);
+  });
+
+  it('is stateless: GET and DELETE answer 405', async () => {
+    const get = await app.request(`http://127.0.0.1:4747/mcp/${MCP_TOKEN}`, { headers: { host: '127.0.0.1:4747', accept: 'text/event-stream' } });
+    expect(get.status).toBe(405);
+  });
+});
+
+describe('/mcp: the tools', () => {
+  it('lists the external tools and none of the Conductor-only ones', async () => {
+    const res = await post(`/mcp/${MCP_TOKEN}`, 'tools/list');
+    const { result } = (await res.json()) as { result: { tools: { name: string }[] } };
+    expect(result.tools.map((t) => t.name).sort()).toEqual(
+      ['get_thread', 'list_channels', 'list_crew', 'list_harnesses', 'list_threads', 'mark_thread_done', 'message_thread', 'read_thread', 'search_threads', 'start_thread', 'stop_thread'].sort(),
+    );
+  });
+
+  it('lists channels and threads through /api', T, async () => {
+    const t = make('An external one');
+    expect((await tool('list_channels')).body.map((c: any) => c.id)).toContain('scratch');
+    expect((await tool('list_threads', { channel: 'scratch' })).body.map((x: any) => x.id)).toContain(t.id);
+  });
+
+  it('reads a thread conversation a page at a time, and says not found for an unknown thread', T, async () => {
+    const t = make('Talky');
+    for (let i = 0; i < 60; i++) h.db.events.add(t.id, i % 2 ? 'assistant_text' : 'user', { text: `line ${i}` });
+    const page = await tool('read_thread', { thread_id: t.id });
+    expect(page.body.rows).toHaveLength(40);
+    expect(page.body.rows.at(-1).text).toBe('line 59');
+    const older = await tool('read_thread', { thread_id: t.id, before: page.body.older });
+    expect(older.body.rows[0].text).toBe('line 0');
+    expect(older.body.older).toBeNull();
+    const missing = await tool('read_thread', { thread_id: randomUUID() });
+    expect(missing).toMatchObject({ isError: true, raw: expect.stringContaining('not found') });
+  });
+
+  it('starts a thread and waits for its reply with get_thread', T, async () => {
+    const started = await tool('start_thread', { channel: 'scratch', prompt: 'say hi', harness: 'claude-code' });
+    expect(started.isError).toBe(false);
+    const got = await tool('get_thread', { thread_id: started.body.id, wait_seconds: 20 });
+    expect(got.body).toMatchObject({ id: started.body.id, still_working: false });
+    expect(got.body.status).not.toMatch(/queued|running/);
+  });
+
+  it('marks a thread done', T, async () => {
+    const t = make('Finished', 'failed');
+    expect((await tool('mark_thread_done', { thread_id: t.id })).body.done_at).toBeTruthy();
+  });
+});
+
+/** Just enough of an MCP client over stdio (newline-delimited JSON-RPC). */
+class StdioClient {
+  private id = 0;
+  private waiting = new Map<number, (r: any) => void>();
+  constructor(private child: ChildProcess) {
+    createInterface({ input: child.stdout! }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      this.waiting.get(msg.id)?.(msg);
+    });
+  }
+  request(method: string, params: unknown = {}): Promise<any> {
+    const id = ++this.id;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no answer to ${method}`)), 20_000);
+      this.waiting.set(id, (msg) => {
+        clearTimeout(timer);
+        if (msg.error) reject(new Error(msg.error.message));
+        else resolve(msg.result);
+      });
+      this.child.stdin!.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+    });
+  }
+  close() {
+    this.child.kill('SIGTERM');
+  }
+}
+
+describe('stdio entry', () => {
+  const server = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }) as Server;
+  const clients: StdioClient[] = [];
+  afterAll(() => {
+    for (const c of clients) c.close();
+    server.close();
+    server.closeAllConnections();
+  });
+
+  const connect = async (env: Record<string, string>) => {
+    if (!server.listening) await once(server, 'listening');
+    const port = (server.address() as AddressInfo).port;
+    // Plain node, the way npm run mcp:config tells a client to start it: no tsx.
+    const child = spawn(process.execPath, [join(ROOT, 'apps/mcp/external/stdio.ts')], {
+      env: { PATH: process.env.PATH ?? '', OMNI_URL: `http://127.0.0.1:${port}`, ...env },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    const client = new StdioClient(child);
+    clients.push(client);
+    await client.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
+    return client;
+  };
+
+  it('runs under plain node and calls the API with OMNI_TOKEN', T, async () => {
+    const t = make('Seen over stdio');
+    const client = await connect({ OMNI_TOKEN: API_TOKEN });
+    const r = await client.request('tools/call', { name: 'list_threads', arguments: { channel: 'scratch', limit: 100 } });
+    expect(r.isError).toBeFalsy();
+    expect(JSON.parse(r.content[0].text).map((x: any) => x.id)).toContain(t.id);
+  });
+
+  it('answers a call with the API error when it has no usable token', T, async () => {
+    const client = await connect({ OMNI_TOKEN_FILE: join(h.paths.data, 'no-such-token') });
+    const r = await client.request('tools/call', { name: 'list_channels', arguments: {} });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/Unauthorized/);
+  });
+});

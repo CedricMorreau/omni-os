@@ -44,6 +44,7 @@ Every `/api` request needs this install's token. The server makes it on first st
 | `scripts/omni.sh`, `npm run setup` | `OMNI_TOKEN`, else `data/api-token` |
 | Threads | `OMNI_TOKEN` in their environment, next to `OMNI_URL`. Omni's MCP servers (`apps/mcp/omni.ts`, `apps/mcp/ask.ts`) get `OMNI_TOKEN_FILE`, a path, so no token is written into `mcp.json` |
 | Web UI | Pairs once (below), then holds the token in a cookie |
+| MCP clients outside Omni | On this Mac, `apps/mcp/external/stdio.ts` reads `data/api-token`. Over HTTP, `/mcp` takes its own token, `data/mcp-token`, as a header or in the URL. See [Omni as an MCP server](external-mcp.md) |
 
 The Web UI and its assets are served without the token and never contain it, so opening the page gets you only the pairing screen. Pairing sends the token once to `POST /api/auth/pair`, which answers with an `HttpOnly`, `SameSite=Strict` cookie on `/api` (`Secure` behind HTTPS). Page scripts never see it, and `EventSource` streams and images carry it. The token gets to a browser one of two ways:
 

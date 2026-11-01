@@ -30,7 +30,8 @@
       "entry": [
         "omni.ts",
         "ask.ts",
-        "threads.ts"
+        "threads.ts",
+        "external/stdio.ts"
       ]
     },
     "apps/web": {

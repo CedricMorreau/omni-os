@@ -24,6 +24,7 @@ import { automationDeliveriesApi } from './automation-deliveries-api.ts';
 import { prWatchApi } from './pr-watch/api.ts';
 import { grokbotApi } from './grokbot.ts';
 import { linksApi } from './links-api.ts';
+import { mcpApi } from './mcp-api.ts';
 import { metaApi } from './meta-api.ts';
 import { setupApi } from './setup-api.ts';
 import { syncApi } from './sync-api.ts';
@@ -90,6 +91,10 @@ api.route('/worktrees', worktreesApi);
 api.all('*', (c) => c.json({ error: 'Not found' }, 404));
 
 app.route('/api', api);
+
+// The external MCP server, outside /api: it checks its own token (apps/server/mcp-api.ts) and its tools come back in
+// through /api, guard and all.
+app.route('/mcp', mcpApi((path, init) => app.request(path, init)));
 
 // ---------- web ----------
 
