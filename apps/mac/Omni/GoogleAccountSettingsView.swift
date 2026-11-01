@@ -69,7 +69,7 @@ struct GoogleAccountCard: View {
           .buttonStyle(.pill(.ghost, height: 28))
       }
     } else if let flow = google.linking {
-      linkingPanel(flow)
+      DeviceCodePanel(flow: flow) { google.cancelLink() }
     } else if account.via == "token" {
       HStack(spacing: z(8)) {
         Button("Link Google Account") {
@@ -85,30 +85,6 @@ struct GoogleAccountCard: View {
     if let error = google.actionError {
       ErrorNote(text: error)
     }
-  }
-
-  private func linkingPanel(_ flow: GoogleFlowStart) -> some View {
-    VStack(alignment: .leading, spacing: z(10)) {
-      Text("Your browser opened the sign-in page. Choose Google, and check it shows this code before you approve.")
-        .font(.omni(size: 13)).foregroundStyle(Tok.fg2)
-        .fixedSize(horizontal: false, vertical: true)
-      Text(flow.userCode)
-        .font(.omni(size: 22, design: .monospaced)).tracking(2.6)
-        .foregroundStyle(Tok.fg)
-        .textSelection(.enabled)
-      HStack(spacing: z(8)) {
-        Button("Open Sign-in Page") { if let url = flow.pageURL { NSWorkspace.shared.open(url) } }
-          .buttonStyle(.pill(.primary, height: 28))
-        Button("Cancel") { google.cancelLink() }
-          .buttonStyle(.pill(.ghost, height: 28))
-        Spacer(minLength: 0)
-        Loader(size: 12)
-        Text("Waiting for approval").font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
-      }
-    }
-    .padding(z(14))
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .omniCard(16)
   }
 
   @ViewBuilder
@@ -136,5 +112,36 @@ struct GoogleAccountCard: View {
         }
       }
     }
+  }
+}
+
+/// A Google sign-in through Clerk's device-code page, waiting for approval: the code to compare, a button that opens
+/// the page again, and Cancel. Linking the owner's account and signing in to the sync relay both show it.
+struct DeviceCodePanel: View {
+  let flow: GoogleFlowStart
+  let onCancel: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: z(10)) {
+      Text("Your browser opened the sign-in page. Choose Google, and check it shows this code before you approve.")
+        .font(.omni(size: 13)).foregroundStyle(Tok.fg2)
+        .fixedSize(horizontal: false, vertical: true)
+      Text(flow.userCode)
+        .font(.omni(size: 22, design: .monospaced)).tracking(2.6)
+        .foregroundStyle(Tok.fg)
+        .textSelection(.enabled)
+      HStack(spacing: z(8)) {
+        Button("Open Sign-in Page") { if let url = flow.pageURL { NSWorkspace.shared.open(url) } }
+          .buttonStyle(.pill(.primary, height: 28))
+        Button("Cancel", action: onCancel)
+          .buttonStyle(.pill(.ghost, height: 28))
+        Spacer(minLength: 0)
+        Loader(size: 12)
+        Text("Waiting for approval").font(.omni(size: 12.5)).foregroundStyle(Tok.fg3)
+      }
+    }
+    .padding(z(14))
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .omniCard(16)
   }
 }

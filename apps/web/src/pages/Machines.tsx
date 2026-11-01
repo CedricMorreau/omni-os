@@ -16,7 +16,7 @@ import { PathMapEditor, SyncSection } from './Sync.tsx';
 
 function syncLine(s: SyncStatus | undefined, now: number): { dot: string; text: string } {
   if (!s) return { dot: 'settled', text: 'Reading sync' };
-  if (!s.configured) return { dot: 'idle', text: 'Off' };
+  if (!s.configured) return s.legacyRelay ? { dot: 'needs', text: 'Moved to Cloudflare: sign in again' } : { dot: 'idle', text: 'Off' };
   if (s.signedOut) return { dot: 'needs', text: 'Signed out' };
   if (s.lastError) return { dot: 'needs', text: `Failing: ${s.lastError}` };
   if (!s.enabled) return { dot: 'idle', text: 'Paused' };
@@ -29,7 +29,7 @@ export function MachinesSection() {
     <>
       <MachineCard state={setup.data ?? null} />
       <GoogleAccountSection />
-      <PartHeading title="Sync" subtitle="History across your machines, relayed through your own Supabase project." />
+      <PartHeading title="Sync" subtitle="History across your machines, relayed through your own Cloudflare Worker." />
       <SyncSection />
       <PartHeading title="Storage" subtitle="The worktrees Omni made for threads, what they use, and which are safe to clean up." />
       <StorageSection />

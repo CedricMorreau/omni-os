@@ -2,7 +2,7 @@
 //
 //   npm run sync:backfill
 //
-// For after moving to a new Supabase project, or when the relay lost history. The first sync on a machine already
+// For after moving to a new relay, or when the relay lost history. The first sync on a machine already
 // sends everything, so a normal setup never needs this. Idempotent: a row already waiting is not queued twice.
 // Only queues; the running server pushes on its next sync (within a minute), or press Sync now in Settings.
 

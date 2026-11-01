@@ -1,31 +1,37 @@
 # Sync between two Macs
 
-Optional. Each Mac keeps its own SQLite as the source of truth; a Supabase project you own relays the changes between them (channels, sidebar folders, threads, events, artifacts, automation runs and event deliveries, settings) and holds thread files in a private bucket. With no credentials sync is off and Omni behaves as before. Why a relay and not a shared database: [ADR 0004](../adr/0004-supabase-sync.md).
+Optional. Each Mac keeps its own SQLite as the source of truth. A relay you deploy to your own Cloudflare account carries the changes between them (channels, sidebar folders, threads, events, artifacts, automation runs and event deliveries, settings) and keeps thread files in R2. With no relay signed in, sync is off and Omni behaves as before. Why a relay and not a shared database: [ADR 0004](../adr/0004-supabase-sync.md). Why Cloudflare and Clerk: [ADR 0008](../adr/0008-cloudflare-relay.md).
 
-## One-time Supabase setup
+## One-time relay setup
 
-1. Create a Supabase project (the free tier is enough).
-2. SQL Editor: paste `supabase/migrations/0001_changes.sql` and run it. It is safe to run again. Check that it worked:
-   - Table Editor shows `changes`, with RLS on.
-   - Storage shows a private bucket `omni`.
-   - Database, Publications, `supabase_realtime` includes `changes`.
-3. Authentication, Users, Add user: create the one user both Macs sign in as (tick Auto Confirm). Then, under Sign In / Providers, turn off "Allow new users to sign up".
-4. Only if you want to sign in with an emailed code rather than a password: Authentication, Emails, Magic Link template, add `{{ .Token }}` to the body so the email carries the 6-digit code.
-5. Project Settings, API: copy the Project URL and the anon (or publishable) key. Never use the service-role or secret key; Omni refuses one.
+You need a Cloudflare account (the free plan is enough) and Google sign-in set up in Omni, with your Google account linked in Settings > Machines ([remote access](remote-access.md)).
+
+1. Run `npm run relay:config` on that Omni. It prints the steps with your Clerk app and user id filled in: `wrangler login`, create the `omni-relay` R2 bucket, `wrangler deploy` from `apps/relay`, then set the Worker's three secrets (`CLERK_ISSUER`, `CLERK_CLIENT_ID`, `ALLOWED_USERS`).
+2. `wrangler deploy` prints the relay's URL, like `https://omni-relay.<account>.workers.dev`. Opening `<url>/v1/info` shows the Clerk app it trusts.
+
+Later updates are `npx wrangler deploy` from `apps/relay` again. The secrets stay. To let another Clerk user in, or take one out, run `npx wrangler secret put ALLOWED_USERS` with the ids separated by commas. Taking a user out signs out all of that user's machines at once.
 
 ## On each Mac
 
-Open Settings > Machines (web `#/settings/machines`, the old `#/sync` still lands there; the Mac app's Machines tab; the phone's Settings, Machines). Under Sync, paste the URL and key, sign in as that same user. The first sign-in queues this Mac's existing history, and the other Mac pulls it. The URL, the key and the sign-in token go to the secret store, the Keychain on a Mac and `data/secrets.json` on Linux (global scope, never passed to threads); the password is used once and not stored. Sign Out stops syncing and removes them; Pause keeps them.
+Open Settings > Machines (web `#/settings/machines`, where the old `#/sync` also lands; the Mac app's Machines tab; on the phone, Settings, Machines). Under Sync, paste the relay URL and press Sign in with Google. Omni shows a code and opens Clerk's page. Check the page shows the same code, then approve as the Google account on `ALLOWED_USERS`. The first sign-in queues this Mac's existing history, and the other Mac pulls it.
+
+Omni keeps the relay URL and this machine's relay token in the secret store: the Keychain on a Mac, `data/secrets.json` on Linux. They are global and never passed to threads. The Google sign-in itself is not kept. Sign Out ends this machine's token on the relay and removes both. Pause keeps them.
+
+Every machine has to use the Clerk app the relay trusts. If they differ, setup says so before it asks Clerk. A Google account that is not on `ALLOWED_USERS` is refused with its Clerk user id, so you can add it.
+
+### Moving from Supabase
+
+Before this, the relay was a Supabase project. A machine that still holds the Supabase credentials says "Sync moved to Cloudflare" in Settings > Machines. Sign in to the new relay once on each machine. The sign-in removes the Supabase credentials, and the machine's history is queued again for the new relay, so nothing is lost. Once every machine has moved, you can delete the Supabase project.
 
 - Path map: paths travel with the home folder as `~`. When the other Mac keeps a folder somewhere else, map it under Advanced in Settings > Machines, like `~/work` to `~/code`.
 - Files: after a Mac's first sync, Omni uploads the files and session files of every thread it wrote last, in the background (the log counts progress every 50 threads). After that, a thread's files go up after each turn. The bucket fills a few minutes after the rows.
 - Before a thread resumes, Omni downloads its latest session file. When that download fails or takes over 15 seconds, the thread does not resume the copy on this Mac, which may miss turns the other Mac ran. A "Session not up to date" card says why, and your message waits. Try again downloads it again; Start with fresh context starts a new session that reads the thread so far. Both are on desktop, phone and the Mac app.
 - `npm run sync:backfill`: queue every existing row again, for instance after restoring a database. It is idempotent and skips rows the other Mac wrote last.
-- Signing in to a different project or user starts that relay from the beginning and queues the history again.
-- Sidebar folders sync, along with which folder each thread sits in. Whether a folder shows open or closed stays per Mac. A relay set up before folders synced refuses them: paste `0001_changes.sql` in the SQL Editor again. Until then the rest keeps syncing and folders wait, counted as held.
-- Needs you is the same on both Macs: a result reviewed on one leaves the other's after the next sync, and a newer result stays unread. A relay set up before this refuses results and reads: paste `0001_changes.sql` again, as for folders. A thread marked done is done on both Macs, and a run on either brings it back.
+- Signing in to a different relay or user starts that relay from the beginning and queues the history again.
+- Sidebar folders sync, along with which folder each thread sits in. Whether a folder shows open or closed stays per Mac.
+- Needs you is the same on both Macs: a result reviewed on one leaves the other's after the next sync, and a newer result stays unread. A thread marked done is done on both Macs, and a run on either brings it back.
 - Auto's routing reason and a model or harness switch queued for the next turn sync with the thread. A switch still waits for the running turn and its background tasks to end.
-- Published-page and GitHub webhook deliveries sync as `trigger_delivery`. A relay set up before these events existed needs `0001_changes.sql` run again, or deliveries wait as held while the rest keeps syncing. Only the Mac that owns automations starts their runs. Signing secrets stay in each Mac's secret store. See [Automations](automations.md#event-automations).
+- Published-page and GitHub webhook deliveries sync as `trigger_delivery`. Only the Mac that owns automations starts their runs. Signing secrets stay in each Mac's secret store. See [Automations](automations.md#event-automations).
 - Channel actions and worktree retention stay per Mac; sync does not copy them. See [Configuration](configuration.md#channel-actions) and [Known limits](limits.md).
 - A thread runs on one Mac at a time. Its row names the Mac running it (`run_machine`), so the other Mac shows it read-only until the run ends there, and an edit from the other Mac mid-run (a rename) never changes its status. After a crash, only the Mac that ran it marks it failed.
 - Scheduled automations run on one Mac: Sync in Settings > Machines says which, and "Run them here" moves them. The first Mac to finish a sync with no owner set takes them. Manual runs work on either Mac.

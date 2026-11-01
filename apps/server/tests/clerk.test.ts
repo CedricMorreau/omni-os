@@ -39,6 +39,8 @@ describe('ClerkClient: the device authorization grant', () => {
     expect(await client.pollDevice(code.deviceCode)).toEqual({
       state: 'done',
       identity: { issuer: FAKE_ISSUER, sub: 'user_ada', email: 'ada@example.com', name: 'Ada' },
+      // The token itself too, for the sync relay to check on its own.
+      idToken: expect.stringMatching(/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/),
     });
   });
 

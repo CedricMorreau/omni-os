@@ -184,27 +184,6 @@ describe('offline', () => {
     expect(row(a, 't-5')).toEqual(rowA);
     expect(row(b, 't-5')).toEqual(rowB);
   });
-
-  it('a relay set up before results synced holds them and the reads, then sends both once it takes them', async () => {
-    relay.refuse.add('completion');
-    relay.refuse.add('result_read');
-    started(a, 't-6');
-    await exchange();
-    const c = turn(a, 't-6');
-    a.db.resultReads.read(c.uid);
-    await exchange();
-    expect(a.worker.status().refused).toEqual(expect.arrayContaining(['completion', 'result_read']));
-    // B has the turn's status but no result: it waits for A's rather than writing its own.
-    expect(b.db.threads.get('t-6')).toMatchObject({ status: 'done' });
-    expect(results(b, 't-6')).toEqual([]);
-
-    relay.refuse.clear();
-    await exchange();
-    expect(a.worker.status()).toMatchObject({ refused: [], held: 0 });
-    expect(results(b, 't-6')).toEqual(results(a, 't-6'));
-    expect(watermark(b, 't-6')).toBe(c.uid);
-    expect(unread(b, 't-6')).toBeNull();
-  });
 });
 
 describe('a question an agent asked', () => {

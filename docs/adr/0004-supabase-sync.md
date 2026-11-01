@@ -1,5 +1,7 @@
 # Two Macs sync through a change-log relay; each keeps its own SQLite
 
+The relay has since moved from Supabase to a Cloudflare Worker, with sign-in through Clerk: see [ADR 0008](0008-cloudflare-relay.md). The rest of this ADR still holds.
+
 Ben runs Omni on two Macs and wants the same channels, threads and history on both. Each Mac keeps its own SQLite database as the source of truth, and the server keeps working the same way as before. When a row changes, the write that changes it also records it in a local outbox, in the same transaction. A worker pushes the outbox to an append-only `changes` table in a Supabase project Ben owns, and pulls the other Mac's changes by sequence number. It applies them locally, with last-writer-wins by timestamp for rows both Macs edit (a thread's title, a setting) and plain inserts for append-only rows (events). Thread files and harness session files go to a private storage bucket, addressed by content hash. Realtime on `changes` tells the other Mac to pull at once. It signs in with the anon key and Ben's own user, and row level security scopes every row and object to that user. No service-role key exists on either Mac.
 
 Sync is off until Ben signs in from Settings. Until the first sign-in nothing is recorded for pushing and nothing reaches the network, so a Mac that never signs in behaves exactly as it did before.

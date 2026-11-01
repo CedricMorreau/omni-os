@@ -77,7 +77,7 @@ Forking it for yourself? Read [FORKING.md](FORKING.md): everything personal live
 - **GitHub panel** per repo channel: PRs, checks, diff and merge. Watch PR wakes the thread for failing checks or new review feedback
 - **Conductor and crew**: one front agent that delegates to roles (builder, researcher, store-ops, inbox), alone or as a team
 - **Automations**: YAML on a cron schedule, GitHub PR event, published page or signed GitHub webhook; every run is its own thread
-- **Sync** between two Macs through a Supabase project you own (optional), with handoff of a running thread to the other Mac
+- **Sync** between two Macs through a relay on your own Cloudflare account (optional), with handoff of a running thread to the other Mac
 - **Phone layout** with Activity, Channels and Library tabs, a new-thread sheet and full-screen thread panels. Save it to the iPhone home screen over Tailscale
 
 ## Documentation
@@ -88,7 +88,7 @@ Start at [docs/](docs/README.md). The most used pages:
 - [Your config, `.env` and secrets](docs/user/configuration.md)
 - [Threads: Needs you, sending, context chips and Watch PR](docs/user/threads.md)
 - [Harnesses](docs/user/harnesses.md) · [Crew and Conductor](docs/user/crew.md) · [Automations](docs/user/automations.md)
-- [Sync between two Macs](docs/user/sync.md), with the one-time Supabase setup
+- [Sync between two Macs](docs/user/sync.md), with the one-time relay setup
 - [Remote access and security](docs/user/remote-access.md)
 - [Known limits](docs/user/limits.md)
 

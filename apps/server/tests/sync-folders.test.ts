@@ -104,27 +104,7 @@ describe('folders', () => {
   });
 });
 
-describe('a relay set up before folders synced', () => {
-  it('holds the folders and syncs the rest, then files the threads once the relay takes folders', async () => {
-    relay.refuse.add('folder');
-    const f = a.db.folders.create({ channel_id: 'volero', name: 'Later' });
-    a.db.threads.create(thread('t-3'));
-    a.db.folders.moveThread('t-3', f.id);
-    await exchange();
-    expect(a.worker.status()).toMatchObject({ refused: ['folder'], held: 1 });
-    // The thread came, its folder did not: B shows it ungrouped for now, and sends it on with the folder it waits for.
-    expect(folderOf(b, 't-3')).toBeNull();
-    b.db.threads.update('t-3', { title: 'renamed while waiting' });
-    await exchange();
-    expect(folderOf(a, 't-3')).toBe(f.id);
-
-    relay.refuse.clear();
-    await exchange();
-    expect(a.worker.status()).toMatchObject({ refused: [], held: 0 });
-    expect(b.db.folders.get(f.id)).toMatchObject({ name: 'Later' });
-    expect(folderOf(b, 't-3')).toBe(f.id);
-  });
-
+describe('folders from before folders synced', () => {
   it('a Mac that synced before this build sends its folders and the threads in them once', async () => {
     // As an older build left it: a folder and a filed thread that were never queued.
     a.db.db.prepare(`INSERT INTO folders (id, channel_id, name) VALUES ('f-old', 'volero', 'From before')`).run();

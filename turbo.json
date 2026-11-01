@@ -38,6 +38,9 @@
       },
       "linux": {
         "dependencies": { "deny": ["@omni/web", "@omni/mac", "@omni/server"] }
+      },
+      "relay": {
+        "dependencies": { "deny": ["@omni/web", "@omni/mac", "@omni/server", "@omni/shared", "@omni/mcp"] }
       }
     }
   }

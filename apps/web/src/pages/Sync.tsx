@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, errorText, useApi, type SyncSetupResult, type SyncStatus } from '../api.ts';
-import { Button, CopyButton, ErrorNote, Icon, InlineConfirm, Label, Loading, Segmented, StatusDot } from '../components/ui.tsx';
+import { useEffect, useState, type ReactNode } from 'react';
+import { api, errorText, useApi, type SyncSignedIn, type SyncStatus } from '../api.ts';
+import { DeviceCodeSignIn, type FlowStart } from '../components/GoogleSignIn.tsx';
+import { Button, CopyButton, ErrorNote, Icon, InlineConfirm, Label, Loading, StatusDot } from '../components/ui.tsx';
 import { plural, relTime } from '../format.ts';
 import { useSecretStoreLabel } from '../store.tsx';
 
-// Settings, Machines, Sync: sign in to the Supabase relay, see what is waiting, sync now, pause and sign out. The
+// Settings, Machines, Sync: sign in to the Cloudflare relay with Google (through Clerk), see what is waiting, sync now, pause and sign out. The
 // path map sits under Machines' Advanced. The Mac app's Machines tab (apps/mac/Omni/SyncSettingsView.swift) shows the same.
 
 type Status = SyncStatus;
@@ -37,9 +38,9 @@ export function SyncSection() {
           <Icon name="refresh" size={15} />
         </span>
         <div>
-          Channels, threads, transcripts, artifacts, automation runs and settings go through an append-only change log. Each Mac keeps its own database; Supabase
-          only relays. Secrets, browser profiles, worktrees and logs never leave this Mac. The URL, anon key and sign-in token live in {store}; the password is
-          used once and dropped.
+          Channels, threads, transcripts, artifacts, automation runs and settings go through an append-only change log. Each Mac keeps its own database; your own
+          Cloudflare relay (a Worker) only carries the changes. Secrets, browser profiles, worktrees and logs never leave this Mac. You sign in with the Google
+          account linked above, and the relay URL and this machine&rsquo;s relay token live in {store}.
         </div>
       </div>
 
@@ -50,7 +51,7 @@ export function SyncSection() {
       ) : (
         <>
           {s.configured && <StatusCard s={s} onChange={reload} />}
-          {(!s.configured || s.signedOut) && <SignInForm again={s.configured} onDone={reload} />}
+          {(!s.configured || s.signedOut) && <SignInForm again={s.configured} legacy={s.legacyRelay} onDone={reload} />}
         </>
       )}
     </>
@@ -169,118 +170,46 @@ function StatusCard({ s, onChange }: { s: Status; onChange: () => void }) {
   );
 }
 
-type Method = 'password' | 'code';
-
-function SignInForm({ again, onDone }: { again: boolean; onDone: () => void }) {
+function SignInForm({ again, legacy, onDone }: { again: boolean; legacy: boolean; onDone: () => void }) {
   const [url, setUrl] = useState('');
-  const [anonKey, setAnonKey] = useState('');
-  const [email, setEmail] = useState('');
-  const [method, setMethod] = useState<Method>('password');
-  const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
-  const [sentTo, setSentTo] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const needCode = method === 'code' && !sentTo;
-  const ready = !!url && !!anonKey && !!email && (method === 'password' ? !!password : needCode || !!code);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!ready) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const secret = method === 'password' ? { password } : needCode ? {} : { code };
-      const r = await api.post<SyncSetupResult>('/sync/setup', { url, anonKey, email, ...secret });
-      if (r.state === 'code_sent') {
-        setSentTo(r.email);
-        return;
-      }
-      setPassword('');
-      setCode('');
-      onDone();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
-    <form onSubmit={submit} className="space-y-4 rounded-[24px] p-5 shadow-[inset_0_0_0_1px_var(--line)]" autoComplete="off">
+    <section className="space-y-4 rounded-[24px] p-5 shadow-[inset_0_0_0_1px_var(--line)]">
       <div>
         <h2 className="font-display text-[16px]">{again ? 'Sign in again' : 'Sign in to your relay'}</h2>
         <p className="mt-1 text-[12.5px] text-fg-3">
           {again
             ? 'The relay no longer takes this Mac’s sign-in. Nothing is lost: changes wait here until you sign in.'
-            : 'The Supabase project and user from the one-time setup in the README. Use the same project and user on every Mac.'}
+            : 'The address of the Worker you deployed from apps/relay. Use the same relay and Google account on every machine.'}
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="sync-url">Project URL</Label>
-          <input id="sync-url" className="field font-mono !text-[13px]" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://abcd.supabase.co" spellCheck={false} />
+      {legacy && !again && (
+        <div className="flex gap-2 rounded-2xl bg-surface p-3 text-[12.5px] leading-relaxed text-fg-2">
+          <Icon name="info" size={15} className="mt-0.5 shrink-0 text-fg-3" />
+          <span>Sync moved from Supabase to a Cloudflare relay. Sign in once on each machine. Its history is queued again, so nothing is lost.</span>
         </div>
-        <div>
-          <Label htmlFor="sync-key">Anon key</Label>
-          <input
-            id="sync-key"
-            type="password"
-            className="field font-mono !text-[13px]"
-            value={anonKey}
-            onChange={(e) => setAnonKey(e.target.value)}
-            placeholder="eyJ… or sb_publishable_…"
-            spellCheck={false}
-            autoComplete="off"
-            data-1p-ignore
-            data-lpignore="true"
-          />
-        </div>
+      )}
+      <div>
+        <Label htmlFor="sync-url">Relay URL</Label>
+        <input
+          id="sync-url"
+          className="field font-mono !text-[13px]"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://omni-relay.<you>.workers.dev"
+          spellCheck={false}
+          autoComplete="off"
+        />
       </div>
-      <div className="grid gap-3 sm:grid-cols-[1.2fr_1fr]">
-        <div>
-          <Label htmlFor="sync-email">Email</Label>
-          <input id="sync-email" type="email" className="field" value={email} onChange={(e) => (setEmail(e.target.value), setSentTo(null))} placeholder="you@example.com" />
-        </div>
-        <div>
-          <Label>Sign in with</Label>
-          <Segmented<Method>
-            radio
-            size="sm"
-            label="Sign in with"
-            value={method}
-            onChange={(m) => (setMethod(m), setError(null))}
-            options={[
-              { id: 'password', label: 'Password' },
-              { id: 'code', label: 'Email code' },
-            ]}
-          />
-        </div>
-      </div>
-      {method === 'password' ? (
-        <div>
-          <Label htmlFor="sync-password" hint="Used once to get a sign-in token. Omni never stores it.">Password</Label>
-          <input id="sync-password" type="password" autoComplete="current-password" className="field" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </div>
-      ) : sentTo ? (
-        <div>
-          <Label htmlFor="sync-code" hint={`Sent to ${sentTo}. The code is in the sign-in email.`}>Code</Label>
-          <input id="sync-code" inputMode="numeric" autoComplete="one-time-code" className="field font-num" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" />
-        </div>
-      ) : null}
-      {error && <ErrorNote>{error}</ErrorNote>}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" variant="primary" icon={needCode ? 'message' : 'lock'} busy={busy} disabled={!ready}>
-          {needCode ? 'Email me a code' : 'Sign in and sync'}
-        </Button>
-        {sentTo && method === 'code' && (
-          <Button variant="ghost" size="sm" onClick={() => (setSentTo(null), setCode(''))}>
-            Send another code
-          </Button>
-        )}
-      </div>
-    </form>
+      <DeviceCodeSignIn<SyncSignedIn>
+        label="Sign in with Google"
+        icon="lock"
+        disabled={!url.trim()}
+        start={() => api.post<FlowStart>('/sync/setup', { url: url.trim() })}
+        pollPath="/sync/setup/poll"
+        onDone={onDone}
+      />
+    </section>
   );
 }
 

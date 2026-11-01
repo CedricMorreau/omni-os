@@ -66,7 +66,7 @@ struct MachinesSettingsPage: View {
       RunOnCard(model: model)
       GoogleAccountSettings(model: model)
 
-      SettingsPart(title: "Sync", note: "History across your Macs, relayed through your own Supabase project.")
+      SettingsPart(title: "Sync", note: "History across your machines, relayed through your own Cloudflare relay.")
       SyncSettings(model: model)
 
       SettingsPart(title: "Storage", note: "The worktrees Omni made for threads, what they use, and which are safe to clean up.")

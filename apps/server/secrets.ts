@@ -7,8 +7,10 @@ import { secretStore } from './secret-store.ts';
 // on a Mac. The DB keeps names and scopes so the UI can list them without reading values.
 
 /** Omni's own sync credentials (apps/server/sync/worker.ts). Global, and never handed to an agent's environment. */
-export const SYNC_SECRETS = { url: 'SUPABASE_URL', anonKey: 'SUPABASE_ANON_KEY', refreshToken: 'SUPABASE_REFRESH_TOKEN' } as const;
-const PRIVATE = new Set<string>(Object.values(SYNC_SECRETS));
+export const SYNC_SECRETS = { url: 'OMNI_RELAY_URL', token: 'OMNI_RELAY_TOKEN' } as const;
+/** The Supabase relay's, from before the Cloudflare one (ADR 0008). Still kept from threads until a new sign-in removes them. */
+export const LEGACY_SYNC_SECRETS = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_REFRESH_TOKEN'] as const;
+const PRIVATE = new Set<string>([...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS]);
 const SERVER_ONLY = new Set<string>(SERVER_ONLY_VARS);
 
 /** False for Omni's sync credentials (global only), the Grok Bot webhook and webhook signing secrets (any scope). */

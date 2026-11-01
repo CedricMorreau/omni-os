@@ -284,9 +284,10 @@ export interface SecretRow {
 }
 
 /** GET /api/sync/status. */
-export type { SyncStatus } from '@omni/server/sync/worker.ts';
-/** POST /api/sync/setup: a code went out by email, or the sign-in worked. */
-export type SyncSetupResult = { state: 'code_sent'; email: string } | { state: 'signed_in'; email: string; relayChanged: boolean };
+import type { SyncStatus } from '@omni/server/sync/worker.ts';
+export type { SyncStatus };
+/** POST /api/sync/setup/poll once Clerk approved and the relay gave this machine its token. */
+export type SyncSignedIn = { state: 'signed_in'; email: string | null; relayChanged: boolean; status: SyncStatus };
 
 /** A sub-agent or background task the CLI is running, as GET /api/tasks and the feed's 'tasks' event carry it. */
 export interface BackgroundTask {

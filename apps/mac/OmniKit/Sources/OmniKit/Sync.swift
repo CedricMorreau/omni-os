@@ -3,7 +3,7 @@ import Observation
 
 /// GET /api/sync/status: whether history syncs with the other Mac, and what waits either way.
 public struct SyncStatus: Decodable, Hashable, Sendable {
-  /// The credentials are in the Keychain.
+  /// The relay URL and this machine's relay token are in the server's secret store.
   public let configured: Bool
   /// Not paused.
   public let enabled: Bool
@@ -21,10 +21,11 @@ public struct SyncStatus: Decodable, Hashable, Sendable {
   public let nextSyncAt: Date?
   /// Local changes waiting to push.
   public let pending: Int
-  /// Changes for an entity with no handler yet, or one the relay refuses. They push once it takes them.
+  /// Changes for an entity with no handler yet. They push once this Omni has one.
   public let held: Int
-  /// Entities the relay refused: it was set up by an older 0001_changes.sql. Nil from an older server.
-  public let refused: [String]?
+  /// This machine still holds the Supabase credentials from before sync moved to a Cloudflare relay: sign in to
+  /// the new relay. Nil from an older server.
+  public let legacyRelay: Bool?
   /// Remote changes that could not apply yet, retried after each pull.
   public let deferred: Int
   /// The last relay change this Mac has.
@@ -64,37 +65,27 @@ public struct SyncStatus: Decodable, Hashable, Sendable {
   public var needsSignIn: Bool { !configured || signedOut }
 }
 
-/// POST /api/sync/setup. With neither a password nor a code the server emails a code.
+/// POST /api/sync/setup: the relay to sign in to. The server answers with a Google sign-in code, like
+/// /api/auth/google/link, and the app polls POST /api/sync/setup/poll until Clerk answers.
 public struct SyncSetup: Encodable, Hashable, Sendable {
   public var url: String
-  public var anonKey: String
-  public var email: String
-  public var password: String?
-  public var code: String?
 
-  public init(url: String, anonKey: String, email: String, password: String? = nil, code: String? = nil) {
+  public init(url: String) {
     self.url = url
-    self.anonKey = anonKey
-    self.email = email
-    self.password = password
-    self.code = code
   }
 }
 
-public enum SyncSetupResult: Decodable, Hashable, Sendable {
-  case codeSent(email: String)
-  case signedIn(email: String)
-
-  private enum CodingKeys: String, CodingKey { case state, email }
-
-  public init(from decoder: any Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    let email = try c.decode(String.self, forKey: .email)
-    switch try c.decode(String.self, forKey: .state) {
-    case "code_sent": self = .codeSent(email: email)
-    default: self = .signedIn(email: email)
-    }
-  }
+/// POST /api/sync/setup/poll.
+public struct SyncSetupPoll: Decodable, Hashable, Sendable {
+  /// pending, signed_in, refused, denied or expired.
+  public let state: String
+  public let error: String?
+  /// The Google account that signed in. Only with signed_in, and nil when Clerk named none.
+  public let email: String?
+  /// signed_in moved this machine to another relay or account: its history is queued again.
+  public let relayChanged: Bool?
+  /// The status after a signed_in.
+  public let status: SyncStatus?
 }
 
 /// A row of the path map editor: a folder on the other Mac, and where it lives on this one.
@@ -111,17 +102,13 @@ public struct SyncPathMapping: Hashable, Sendable, Identifiable {
 }
 
 /// The Sync part of the Machines tab, like the Web UI's Settings, Machines: the status, sync now, pause, sign in and out, and the path map.
-/// The password and the code are held only while typed and sent; a sign-in that works clears them.
+/// Sign-in is the relay URL, then Google through Clerk's device-code page, as the Google account card links one.
 @MainActor @Observable
 public final class SyncModel {
   public enum LoadState: Hashable, Sendable {
     case loading
     case loaded
     case failed(String)
-  }
-
-  public enum Method: String, CaseIterable, Hashable, Sendable {
-    case password, code
   }
 
   public enum Busy: Hashable, Sendable {
@@ -134,21 +121,14 @@ public final class SyncModel {
   /// What the last action failed with, like a relay that is down on Sync Now.
   public private(set) var actionError: String?
 
-  // MARK: Sign-in form
+  // MARK: Sign-in
   public var url = ""
-  public var anonKey = ""
-  public var email = "" {
-    didSet { if email != oldValue { codeSentTo = nil } }
-  }
-  public var method = Method.password {
-    didSet { signInError = nil }
-  }
-  public var password = ""
-  public var code = ""
-  /// The email a code went to. Until then the code method sends one.
-  public private(set) var codeSentTo: String?
-  public private(set) var isSigningIn = false
+  /// A sign-in in progress: the code to compare on Clerk's page.
+  public private(set) var signingIn: GoogleFlowStart?
+  public private(set) var isStarting = false
   public private(set) var signInError: String?
+  /// The last sign-in moved this machine to another relay or account, so its history is queued again.
+  public private(set) var relayChanged = false
 
   // MARK: Path map
   public var mappings: [SyncPathMapping] = [] {
@@ -161,6 +141,7 @@ public final class SyncModel {
 
   @ObservationIgnored private let client: OmniClient
   @ObservationIgnored private var loads = 0
+  @ObservationIgnored private var pollTask: Task<Void, Never>?
 
   public init(client: OmniClient) {
     self.client = client
@@ -207,7 +188,7 @@ public final class SyncModel {
     await act(.pausing) { c throws(OmniAPIError) in try await paused ? c.enableSync() : c.disableSync() }
   }
 
-  /// Stops syncing and removes the credentials from the Keychain. History stays on this Mac.
+  /// Stops syncing and removes the relay URL and this machine's token from the secret store. History stays on this Mac.
   public func signOut() async {
     await act(.signingOut) { c throws(OmniAPIError) in try await c.disableSync(forget: true) }
   }
@@ -227,58 +208,65 @@ public final class SyncModel {
 
   // MARK: Sign-in
 
-  /// The code method's first step: no code yet, so the button emails one.
-  public var needsCode: Bool { method == .code && codeSentTo == nil }
+  public var canSignIn: Bool { !isStarting && signingIn == nil && !trimmed(url).isEmpty }
 
-  public var canSignIn: Bool {
-    guard !isSigningIn, !trimmed(url).isEmpty, !trimmed(anonKey).isEmpty, !trimmed(email).isEmpty else { return false }
-    switch method {
-    case .password: return !password.isEmpty
-    case .code: return needsCode || !trimmed(code).isEmpty
-    }
-  }
-
-  public var signInTitle: String { needsCode ? "Email Me a Code" : "Sign In and Sync" }
-
-  /// Sends the form. A password or code that works is cleared; a refused one stays, to fix and send again.
-  public func signIn() async {
-    guard canSignIn else { return }
-    var body = SyncSetup(url: trimmed(url), anonKey: trimmed(anonKey), email: trimmed(email))
-    switch method {
-    case .password: body.password = password
-    case .code where !needsCode: body.code = trimmed(code)
-    case .code: break
-    }
-    isSigningIn = true
+  /// Sends the relay URL and polls until Clerk answers. Returns the code so the view can open its page.
+  @discardableResult
+  public func startSignIn() async -> GoogleFlowStart? {
+    guard canSignIn else { return nil }
+    isStarting = true
     signInError = nil
-    defer { isSigningIn = false }
-    let result: SyncSetupResult
+    relayChanged = false
+    defer { isStarting = false }
     do throws(OmniAPIError) {
-      result = try await client.setupSync(body)
+      let start = try await client.setupSync(SyncSetup(url: trimmed(url)))
+      signingIn = start
+      pollTask = Task { [weak self] in await self?.poll(start) }
+      return start
     } catch {
       if error != .cancelled { signInError = error.message }
-      return
-    }
-    switch result {
-    case .codeSent(let email):
-      codeSentTo = email
-    case .signedIn:
-      clearSecrets()
-      codeSentTo = nil
-      await refresh()
+      return nil
     }
   }
 
-  /// Asks for a new code on the next sign-in.
-  public func resetCode() {
-    codeSentTo = nil
-    code = ""
+  /// Stops waiting for Clerk, as when the tab closes. The URL stays.
+  public func cancelSignIn() {
+    pollTask?.cancel()
+    pollTask = nil
+    signingIn = nil
   }
 
-  /// Drops a password or code that was typed and not used, as when the tab closes.
-  public func clearSecrets() {
-    password = ""
-    code = ""
+  private func poll(_ start: GoogleFlowStart) async {
+    while !Task.isCancelled {
+      try? await Task.sleep(for: .seconds(max(1, start.interval)))
+      guard !Task.isCancelled, signingIn == start else { return }
+      do throws(OmniAPIError) {
+        let r = try await client.pollSyncSetup(start)
+        if r.state == "pending" { continue }
+        signingIn = nil
+        pollTask = nil
+        switch r.state {
+        case "signed_in":
+          relayChanged = r.relayChanged ?? false
+          if let s = r.status {
+            status = s
+            loadState = .loaded
+          } else {
+            await refresh()
+          }
+        case "denied": signInError = "Sign-in was declined on the Clerk page."
+        case "expired": signInError = "The code expired before it was approved. Start again."
+        default: signInError = r.error ?? "Sign-in did not finish."
+        }
+        return
+      } catch {
+        guard error != .cancelled else { return }
+        signingIn = nil
+        pollTask = nil
+        signInError = error.message
+        return
+      }
+    }
   }
 
   // MARK: Path map

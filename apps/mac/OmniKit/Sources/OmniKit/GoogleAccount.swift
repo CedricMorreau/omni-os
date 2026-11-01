@@ -27,7 +27,7 @@ public struct SignedInDevice: Decodable, Hashable, Sendable, Identifiable {
   public let current: Bool
 }
 
-/// POST /api/auth/google/link: the code to show and the Clerk page to approve it on.
+/// POST /api/auth/google/link and POST /api/sync/setup: the code to show and the Clerk page to approve it on.
 public struct GoogleFlowStart: Decodable, Hashable, Sendable {
   public let flow: String
   public let secret: String
