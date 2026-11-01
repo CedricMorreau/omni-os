@@ -77,7 +77,10 @@ describe('/mcp: the tools', () => {
     const res = await post(`/mcp/${MCP_TOKEN}`, 'tools/list');
     const { result } = (await res.json()) as { result: { tools: { name: string }[] } };
     expect(result.tools.map((t) => t.name).sort()).toEqual(
-      ['get_thread', 'list_channels', 'list_crew', 'list_harnesses', 'list_threads', 'mark_thread_done', 'message_thread', 'read_thread', 'search_threads', 'start_thread', 'stop_thread'].sort(),
+      [
+        'create_folder', 'delete_folder', 'get_thread', 'list_automations', 'list_channels', 'list_crew', 'list_folders', 'list_harnesses', 'list_threads', 'message_thread',
+        'read_thread', 'rename_folder', 'run_automation', 'search_threads', 'set_automation_enabled', 'start_thread', 'stop_thread', 'switch_thread_run', 'update_thread',
+      ].sort(),
     );
   });
 
@@ -108,9 +111,42 @@ describe('/mcp: the tools', () => {
     expect(got.body.status).not.toMatch(/queued|running/);
   });
 
-  it('marks a thread done', T, async () => {
+  it('renames, pins and marks a thread done, and refuses an empty update', T, async () => {
     const t = make('Finished', 'failed');
-    expect((await tool('mark_thread_done', { thread_id: t.id })).body.done_at).toBeTruthy();
+    const r = await tool('update_thread', { thread_id: t.id, title: 'Wrapped up', pinned: true, done: true });
+    expect(r.body).toMatchObject({ id: t.id, title: 'Wrapped up', pinned: true });
+    expect(h.db.threads.get(t.id)!.done_at).toBeTruthy();
+    expect(await tool('update_thread', { thread_id: t.id })).toMatchObject({ isError: true, raw: expect.stringContaining('Nothing to change') });
+  });
+
+  it('creates, lists, renames and deletes folders, and files threads by folder name', T, async () => {
+    const made = await tool('create_folder', { channel: 'scratch', name: 'Launch' });
+    expect(made.body).toMatchObject({ name: 'Launch', channel: 'scratch', existing: false });
+    // Again, in other case: the same folder back, not "Launch 2".
+    expect((await tool('create_folder', { channel: 'scratch', name: 'launch' })).body).toMatchObject({ id: made.body.id, existing: true });
+
+    const t = make('To file');
+    // An unknown folder name is refused unless create_folder says to make it.
+    expect(await tool('update_thread', { thread_id: t.id, folder: 'Later' })).toMatchObject({ isError: true, raw: expect.stringContaining('has no folder "Later"') });
+    expect((await tool('update_thread', { thread_id: t.id, folder: '  LAUNCH ' })).body.folder_id).toBe(made.body.id);
+    const later = await tool('update_thread', { thread_id: t.id, folder: 'Later', create_folder: true });
+    expect(later.body.folder_id).not.toBe(made.body.id);
+
+    const listed = await tool('list_folders', { channel: 'scratch' });
+    expect(listed.body.find((f: any) => f.name === 'Later')).toMatchObject({ threads: 1, recent: ['To file'] });
+    expect((await tool('rename_folder', { folder_id: made.body.id, name: 'Launch week' })).body.name).toBe('Launch week');
+
+    const gone = await tool('delete_folder', { folder_id: later.body.folder_id });
+    expect(gone.body).toMatchObject({ threads_moved_out: 1 });
+    expect(h.db.threads.get(t.id)!.folder_id).toBeNull();
+    expect((await tool('update_thread', { thread_id: t.id, folder: 'Launch week' })).body.folder_id).toBe(made.body.id);
+    expect((await tool('update_thread', { thread_id: t.id, folder: '' })).body.folder_id).toBeNull();
+  });
+
+  it('lists automations', T, async () => {
+    const r = await tool('list_automations');
+    expect(r.isError).toBe(false);
+    expect(Array.isArray(r.body)).toBe(true);
   });
 });
 

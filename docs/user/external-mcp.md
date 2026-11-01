@@ -1,6 +1,6 @@
 # Omni as an MCP server for other apps
 
-Agents outside Omni can use it through MCP: Claude Desktop, claude.ai, ChatGPT, Cursor, Codex, Claude Code, Grok or anything else that speaks MCP. They can see your channels and threads, read what a thread said, start new threads (the Conductor too) and steer or stop them.
+Agents outside Omni can use it through MCP: Claude Desktop, claude.ai, ChatGPT, Cursor, Codex, Claude Code, Grok or anything else that speaks MCP. They can see your channels and threads, read what a thread said, start new threads (the Conductor too), steer or stop them, organize them into folders and run automations.
 
 | Tool | What it does |
 | --- | --- |
@@ -9,11 +9,35 @@ Agents outside Omni can use it through MCP: Claude Desktop, claude.ai, ChatGPT, 
 | `get_thread` | Status and last reply. `wait_seconds` (up to 50) waits for a running thread to finish |
 | `read_thread` | The conversation a page at a time, without tool calls |
 | `start_thread` | A new thread in a channel, as any crew role. It runs in the background |
-| `message_thread`, `stop_thread`, `mark_thread_done` | Steer, queue or interrupt a thread, stop its turn, clear it from Needs you |
+| `message_thread`, `stop_thread` | Steer, queue or interrupt a thread, or stop its turn |
+| `update_thread` | Rename, file in a folder, pin, archive or mark done |
+| `switch_thread_run` | Move a thread to another harness, model or effort for its next message |
+| `list_folders`, `create_folder`, `rename_folder`, `delete_folder` | A channel's sidebar folders. Deleting one keeps its threads |
+| `list_automations`, `run_automation`, `set_automation_enabled` | See automations and their last runs, run one now, turn one on or off |
 
 A thread started here has no parent, so its reply does not come back as a `[crew report]`: the calling agent gets it with `get_thread`. The code is in `apps/mcp/external/`, and the same tools serve both ways in below.
 
-## Set it up
+## Let an agent install it
+
+Paste this into Claude Code, Codex, Cursor or any agent with a shell on the machine Omni runs on. Swap `~/omni-os` if your checkout is elsewhere.
+
+```text
+Install the Omni MCP server for me. Omni is checked out at ~/omni-os and its server runs on this machine.
+1. Run `cd ~/omni-os && npm run -s mcp:config` and read what it prints. Never print or paste the contents
+   of data/api-token or data/mcp-token, and don't pass --show-token.
+2. Add the "omni" server to every MCP client installed here, using the stdio entry it printed:
+   Claude Code: run the `claude mcp add` line. Codex: run the `codex mcp add` line.
+   Claude Desktop and Cursor: merge the "omni" entry into the "mcpServers" of the config file it names,
+   keeping every other server. Create the file if it is missing.
+   Skip a client that is not installed, and if "omni" is already there, replace only that entry.
+3. Check it: if the omni tools are loaded in this session, call list_channels. Otherwise run
+   `claude mcp list` or `codex mcp list` and confirm omni shows as connected.
+4. Tell me which clients you set up, which ones need a restart, and the exact steps for the ones you
+   cannot set up from here: claude.ai and ChatGPT need the remote URL from step 1 with the
+   `tailscale funnel` line run first, and I will paste the token myself.
+```
+
+## Set it up by hand
 
 ```bash
 npm run mcp:config

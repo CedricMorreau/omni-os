@@ -7,6 +7,7 @@
 //
 // Local clients start the stdio server with this Node and read data/api-token themselves, so no token goes into their
 // config. Remote clients get data/mcp-token (made here on first use), in the URL or as a Bearer header.
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { tokenPath } from '../api-token.ts';
 import { ROOT, config, paths } from '../config.ts';
@@ -21,6 +22,12 @@ const flag = (name: string) => {
 
 const stdio = join(ROOT, 'apps/mcp/external/stdio.ts');
 const node = process.execPath;
+const desktopConfig =
+  process.platform === 'darwin'
+    ? join(homedir(), 'Library/Application Support/Claude/claude_desktop_config.json')
+    : process.platform === 'win32'
+      ? join(process.env.APPDATA ?? homedir(), 'Claude/claude_desktop_config.json')
+      : join(homedir(), '.config/Claude/claude_desktop_config.json');
 // A server on another port or data dir than the checkout's default: the stdio server has to be told.
 const moved = {
   ...(config.port !== 4747 && { OMNI_URL: `http://127.0.0.1:${config.port}` }),
@@ -38,7 +45,8 @@ Omni MCP server
 
 ON THIS MACHINE (stdio)
 
-Claude Desktop (claude_desktop_config.json), Cursor (~/.cursor/mcp.json) or any client with an mcpServers file:
+Merge the "omni" entry into the mcpServers of Claude Desktop (${desktopConfig}), Cursor (${join(homedir(), '.cursor/mcp.json')})
+or any client with an mcpServers file:
 
 ${JSON.stringify({ mcpServers: { omni: { command: node, args: [stdio], ...(env && { env }) } } }, null, 2)}
 
