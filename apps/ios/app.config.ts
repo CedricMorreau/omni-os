@@ -17,6 +17,12 @@ const config: ExpoConfig = {
   plugins: [
     'expo-dev-client',
     ['expo-build-properties', { ios: { deploymentTarget: '18.0' } }],
+    [
+      'expo-camera',
+      {
+        cameraPermission: 'Omni OS uses the camera to scan the pairing code shown on your computer.',
+      },
+    ],
   ],
   experiments: { reactCompiler: true },
 };

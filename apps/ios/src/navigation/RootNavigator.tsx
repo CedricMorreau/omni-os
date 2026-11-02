@@ -1,21 +1,28 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { HeaderButton } from '../components/HeaderButton';
+import { usePairing } from '../pairing/PairingProvider';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
-import { HomeScreen } from '../screens/HomeScreen';
+import { ServersScreen } from '../screens/ServersScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
+import { useHasSession } from '../session/ActiveSession';
 import { useOmniTheme } from '../theme';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+/** No session shows Connect alone. Any session makes Channels the home screen, with Servers one tap away. */
 export function RootNavigator() {
   const { colors } = useOmniTheme();
+  const { ready } = usePairing();
+  const hasSession = useHasSession();
+
+  if (!ready) return null;
 
   return (
     <Stack.Navigator
-      initialRouteName="Channels"
       screenOptions={{
         headerStyle: { backgroundColor: colors.bg },
         headerTintColor: colors.fg,
@@ -24,19 +31,36 @@ export function RootNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-      <Stack.Screen
-        name="Connect"
-        component={ConnectScreen}
-        options={{ title: 'Connect', headerBackTitle: 'Home' }}
-      />
-      <Stack.Screen
-        name="Channels"
-        component={ChannelsScreen}
-        options={{ title: 'Channels' }}
-      />
-      <Stack.Screen name="Channel" component={ChannelScreen} options={{ title: 'Channel', headerBackTitle: 'Channels' }} />
-      <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+      {hasSession ? (
+        <>
+          <Stack.Screen
+            name="Channels"
+            component={ChannelsScreen}
+            options={({ navigation }) => ({
+              title: 'Channels',
+              headerRight: () => <HeaderButton label="Servers" onPress={() => navigation.navigate('Servers')} />,
+            })}
+          />
+          <Stack.Screen
+            name="Channel"
+            component={ChannelScreen}
+            options={{ title: 'Channel', headerBackTitle: 'Channels' }}
+          />
+          <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+          <Stack.Screen
+            name="Servers"
+            component={ServersScreen}
+            options={{ title: 'Servers', headerBackTitle: 'Channels' }}
+          />
+          <Stack.Screen
+            name="AddServer"
+            component={ConnectScreen}
+            options={{ title: 'Add server', headerBackTitle: 'Back' }}
+          />
+        </>
+      ) : (
+        <Stack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect to a server' }} />
+      )}
     </Stack.Navigator>
   );
 }

@@ -1,10 +1,11 @@
 import { defineConfig } from 'vitest/config';
 
-// Expo's tsconfig base is not exported from the package, so Vite cannot resolve the extends in tsconfig.json. The
-// tests need nothing from it: they run plain TypeScript with no JSX.
 export default defineConfig({
-  oxc: { tsconfig: false },
+  root: import.meta.dirname,
+  // The app's tsconfig extends `expo/tsconfig.base`, which Vite's tsconfig loader cannot resolve.
+  tsconfig: './tsconfig.vitest.json',
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    environment: 'node',
   },
 });

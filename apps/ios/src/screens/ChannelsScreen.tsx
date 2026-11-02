@@ -8,6 +8,9 @@ import { useChannels, useLink, useLiveHub, usePullRefresh } from '../live/react'
 import { ListHeading } from '../components/ListHeading';
 import { StatusLine } from '../components/StatusLine';
 import type { RootScreenProps } from '../navigation/types';
+import { usePairing } from '../pairing/PairingProvider';
+import { Button } from '../ui/Button';
+import { Callout } from '../ui/Callout';
 import { fontSize, minTarget, space, useOmniTheme } from '../theme';
 
 interface ChannelSection {
@@ -21,6 +24,8 @@ export function ChannelsScreen({ navigation }: RootScreenProps<'Channels'>) {
   const pull = usePullRefresh();
   const { channels, error } = useChannels();
   const link = useLink();
+  const { activeServer, statusById, notice, clearNotice } = usePairing();
+  const incompatible = activeServer !== null && statusById[activeServer.id] === 'incompatible';
 
   const sections = useMemo<ChannelSection[]>(() => {
     if (!channels) return [];
@@ -48,6 +53,12 @@ export function ChannelsScreen({ navigation }: RootScreenProps<'Channels'>) {
       }
       ListHeaderComponent={
         <View style={styles.header}>
+          {notice !== null && (
+            <Callout message={notice}>
+              <Button label="Dismiss" variant="secondary" onPress={clearNotice} />
+            </Callout>
+          )}
+          {incompatible && <Callout message="This server speaks an API this app doesn't support. Update the app or the server." />}
           <StatusLine />
           {channels && error ? (
             <Text style={[styles.note, { color: colors.fg3 }]}>Last refresh failed. Pull down to try again.</Text>

@@ -1,17 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { apiPath, createHttpClient, OmniHttpError, parseBaseUrl, type BaseUrl, type Fetch, type HttpFailure } from '../src/http.ts';
+import { apiPath, createHttpClient, OmniHttpError, originOf, parseBaseUrl, type BaseUrl, type Fetch, type HttpFailure } from '../src/http.ts';
 
-type Sent = { url: string; method: string; headers: Record<string, string>; body?: string };
+type Sent = { url: string; method: string; headers: Record<string, string>; body?: string; redirect: string; signal?: AbortSignal };
 
 const base = parseBaseUrl('http://127.0.0.1:4757') as BaseUrl;
 
-function fake(reply: { status?: number; type?: string | null; text?: string } | (() => Promise<never>) = {}) {
+type Reply = {
+  status?: number;
+  type?: string | null;
+  text?: string;
+  headers?: Record<string, string>;
+  /** Where the platform says the answer came from, and the response type. */
+  url?: string;
+  responseType?: string;
+};
+
+function fake(reply: Reply | ((init: Parameters<Fetch>[1]) => Promise<never>) = {}) {
   const sent: Sent[] = [];
   const fetch: Fetch = async (url, init) => {
-    sent.push({ url, method: init.method, headers: init.headers, body: init.body });
-    if (typeof reply === 'function') return reply();
-    const { status = 200, type = 'application/json; charset=UTF-8', text = '{}' } = reply;
-    return { status, headers: { get: (n: string) => (n.toLowerCase() === 'content-type' ? type : null) }, text: async () => text };
+    sent.push({ url, method: init.method, headers: init.headers, body: init.body, redirect: init.redirect, signal: init.signal });
+    if (typeof reply === 'function') return reply(init);
+    const { status = 200, type = 'application/json; charset=UTF-8', text = '{}', headers = {}, url: from, responseType } = reply;
+    const all: Record<string, string | null> = { 'content-type': type, ...Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])) };
+    return { status, headers: { get: (n: string) => all[n.toLowerCase()] ?? null }, text: async () => text, url: from, type: responseType };
   };
   return { sent, fetch };
 }
@@ -63,6 +74,8 @@ describe('request', () => {
         method: 'GET',
         headers: { accept: 'application/json', authorization: 'Bearer tok-123' },
         body: undefined,
+        redirect: 'manual',
+        signal: undefined,
       },
     ]);
   });
@@ -108,7 +121,7 @@ describe('request', () => {
   it("rejects with the server's {error} and keeps the body for a refusal", async () => {
     const { fetch } = fake({ status: 409, text: '{"error":"Thread is running","code":"busy"}' });
     const f = await failure(createHttpClient({ baseUrl: base, token: 't', fetch }).request('PATCH', apiPath`/threads/${'t1'}`, { body: { done: true } }));
-    expect(f).toEqual({ kind: 'http', status: 409, message: 'Thread is running', body: { error: 'Thread is running', code: 'busy' } });
+    expect(f).toEqual({ kind: 'http', status: 409, message: 'Thread is running', body: { error: 'Thread is running', code: 'busy' }, retryAfter: null });
   });
 
   it('rejects 401 as an http failure, so the caller can ask to pair again', async () => {
@@ -124,7 +137,7 @@ describe('request', () => {
     const html = await failure(createHttpClient({ baseUrl: base, token: 't', fetch: fake({ status: 502, type: 'text/html', text: '<html>Bad gateway</html>' }).fetch }).request('GET', apiPath`/x`));
     expect(html).toMatchObject({ kind: 'http', status: 502, message: 'Request failed (502)' });
     const empty = await failure(createHttpClient({ baseUrl: base, token: 't', fetch: fake({ status: 404, type: null, text: '' }).fetch }).request('GET', apiPath`/x`));
-    expect(empty).toEqual({ kind: 'http', status: 404, message: 'Request failed (404)', body: null });
+    expect(empty).toEqual({ kind: 'http', status: 404, message: 'Request failed (404)', body: null, retryAfter: null });
   });
 
   it('rejects a 2xx answer that is not JSON', async () => {
@@ -171,6 +184,109 @@ describe('request', () => {
     expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://127.0.0.1:4757/api/threads', 'GET http://127.0.0.1:4757/api/status']);
   });
 
+  it('keeps the Retry-After header on a refusal', async () => {
+    const { fetch } = fake({ status: 429, text: '{"error":"slow down"}', headers: { 'Retry-After': '17' } });
+    const f = await failure(createHttpClient({ baseUrl: base, token: null, fetch }).request('POST', apiPath`/x`));
+    expect(f).toMatchObject({ kind: 'http', status: 429, retryAfter: '17' });
+  });
+
+  it('gives up on a request that never answers once the timeout passes', async () => {
+    const { fetch } = fake((init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))));
+    const f = await failure(createHttpClient({ baseUrl: base, token: 't', fetch, timeoutMs: 10 }).request('GET', apiPath`/status`));
+    expect(f).toEqual({ kind: 'unreachable', detail: 'timed out' });
+  });
+
+  it('still reports the caller cancelling as cancelled when a timeout is set', async () => {
+    const abort = new AbortController();
+    const { fetch } = fake((init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))));
+    const pending = createHttpClient({ baseUrl: base, token: 't', fetch, timeoutMs: 60_000 }).request('GET', apiPath`/status`, { signal: abort.signal });
+    abort.abort();
+    expect(await failure(pending)).toEqual({ kind: 'cancelled' });
+  });
+});
+
+describe('redirects', () => {
+  const authed = (fetch: Fetch) => createHttpClient({ baseUrl: base, token: 'secret-token', fetch });
+
+  it('asks fetch not to follow redirects', async () => {
+    const { sent, fetch } = fake();
+    await authed(fetch).request('GET', apiPath`/status`);
+    expect(sent[0].redirect).toBe('manual');
+  });
+
+  it.each([301, 302, 303, 307, 308])('refuses a %i without contacting the target or reading the body', async (status) => {
+    let read = false;
+    const sent: string[] = [];
+    const fetch: Fetch = async (url) => {
+      sent.push(url);
+      return {
+        status,
+        headers: { get: (n) => (n.toLowerCase() === 'location' ? 'https://evil.example.net/steal' : null) },
+        text: async () => {
+          read = true;
+          return '{}';
+        },
+      };
+    };
+    expect(await failure(authed(fetch).request('GET', apiPath`/status`))).toEqual({ kind: 'redirect' });
+    expect(sent).toEqual(['http://127.0.0.1:4757/api/status']);
+    expect(read).toBe(false);
+  });
+
+  it('refuses the opaque redirect a browser returns', async () => {
+    const { fetch } = fake({ status: 0, responseType: 'opaqueredirect' });
+    expect(await failure(authed(fetch).request('GET', apiPath`/status`))).toEqual({ kind: 'redirect' });
+  });
+
+  it('refuses an answer a platform that ignores `manual` took from another origin, without reading it', async () => {
+    let read = false;
+    const fetch: Fetch = async () => ({
+      status: 200,
+      headers: { get: () => 'application/json' },
+      url: 'https://evil.example.net/api/status',
+      text: async () => {
+        read = true;
+        return '{"running":1}';
+      },
+    });
+    expect(await failure(authed(fetch).request('GET', apiPath`/status`))).toEqual({ kind: 'redirect' });
+    expect(read).toBe(false);
+  });
+
+  it.each([
+    ['another port', 'http://127.0.0.1:9999/api/status'],
+    ['another scheme', 'https://127.0.0.1:4757/api/status'],
+    ['a look-alike host', 'http://127.0.0.1.evil.example.net:4757/api/status'],
+  ])('refuses an answer from %s', async (_label, url) => {
+    expect(await failure(authed(fake({ url }).fetch).request('GET', apiPath`/status`))).toEqual({ kind: 'redirect' });
+  });
+
+  it.each([
+    ['the same origin', 'http://127.0.0.1:4757/api/status'],
+    ['no url at all', ''],
+  ])('accepts an answer with %s', async (_label, url) => {
+    expect(await authed(fake({ url }).fetch).request('GET', apiPath`/status`)).toEqual({});
+  });
+
+  it('treats a default port as the same origin', async () => {
+    const fetch = fake({ url: 'https://OMNI.example.com/api/status' }).fetch;
+    const http = createHttpClient({ baseUrl: parseBaseUrl('https://omni.example.com:443') as BaseUrl, token: 't', fetch });
+    expect(await http.request('GET', apiPath`/status`)).toEqual({});
+  });
+});
+
+describe('originOf', () => {
+  it.each([
+    ['https://Omni.Example.com:443/api/x', 'https://omni.example.com'],
+    ['http://host:80', 'http://host'],
+    ['http://127.0.0.1:4757/a?b#c', 'http://127.0.0.1:4757'],
+    ['http://[::1]:4747/x', 'http://[::1]:4747'],
+  ])('reads %s', (url, origin) => expect(originOf(url)).toBe(origin));
+
+  it.each(['', '/api/status', 'ftp://host', 'https://user@host'])('refuses %j', (url) => expect(originOf(url)).toBeNull());
+});
+
+describe('urls', () => {
   it('builds the URL a stream or file request uses', () => {
     const http = createHttpClient({ baseUrl: base, token: 't', fetch: fake().fetch });
     expect(http.url(apiPath`/threads/${'t 1'}/stream`, { after: 7 })).toBe('http://127.0.0.1:4757/api/threads/t%201/stream?after=7');
