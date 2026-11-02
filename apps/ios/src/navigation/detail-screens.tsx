@@ -15,9 +15,7 @@ export function stackOptions(colors: ColorTokens): NativeStackNavigationOptions 
     headerStyle: { backgroundColor: colors.bg },
     headerTintColor: colors.fg,
     headerTitleStyle: { color: colors.fg },
-    headerLargeTitleStyle: { color: colors.fg },
     headerShadowVisible: false,
-    headerLargeTitleShadowVisible: false,
     contentStyle: { backgroundColor: colors.bg },
   };
 }

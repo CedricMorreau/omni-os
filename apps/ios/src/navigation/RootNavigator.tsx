@@ -54,7 +54,7 @@ function ActivityStack() {
       <Stack.Screen
         name="Activity"
         component={ActivityScreen}
-        options={({ navigation }) => ({ title: 'Activity', headerLargeTitle: true, headerRight: serversButton(navigation) })}
+        options={({ navigation }) => ({ title: 'Activity', headerRight: serversButton(navigation) })}
       />
       {detailScreens({ backTitle: 'Activity' })}
     </Stack.Navigator>
