@@ -15,6 +15,7 @@ import { useApp, useSecretStoreLabel } from '../store.tsx';
 import { ChannelSettingsForm, Section } from './ChannelSettings.tsx';
 import { GoogleAccountSection } from './GoogleAccount.tsx';
 import { ConnectSection } from './Connect.tsx';
+import { IosPairingSection } from './IosPairing.tsx';
 import { MachinesSection, RunOnCard } from './Machines.tsx';
 import { SecretsSection } from './Secrets.tsx';
 import { ModelsSection } from './SettingsAgents.tsx';
@@ -316,6 +317,7 @@ function AccessSection() {
       <div id={settingAnchor('connect')} className="scroll-mt-6 space-y-5">
         <ConnectSection />
       </div>
+      <IosPairingSection />
       <ConfigSection part="access" />
     </>
   );
