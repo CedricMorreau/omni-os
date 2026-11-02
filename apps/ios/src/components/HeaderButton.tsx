@@ -3,10 +3,10 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 import { fontSize, minTarget, useOmniTheme } from '../theme';
 
 /** A text button for a navigation header. */
-export function HeaderButton({ label, onPress }: { label: string; onPress: () => void }) {
+export function HeaderButton({ label, onPress, accessibilityLabel }: { label: string; onPress: () => void; accessibilityLabel?: string }) {
   const { colors } = useOmniTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={8} style={styles.button}>
+    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} onPress={onPress} hitSlop={8} style={styles.button}>
       <Text style={[styles.label, { color: colors.fg }]}>{label}</Text>
     </Pressable>
   );

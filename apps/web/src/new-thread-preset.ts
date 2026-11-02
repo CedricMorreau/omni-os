@@ -1,7 +1,7 @@
 // What a composer opens with when it starts from a thread. Web UI only; the slash rules are in
 // packages/shared/composer-slash.ts.
 import type { Channel, CrewRole, HarnessInfo, Thread } from './api.ts';
-import { AUTO, AUTO_CHOICE, asksAuto } from './thread-run.ts';
+import { AUTO, AUTO_CHOICE, asksAuto } from '@omni/shared/thread-run.ts';
 
 /** The body that starts a thread with this one's channel, harness, model, effort and role. A thread Auto picked for starts on Auto. */
 export const newThreadBody = (t: Thread, prompt: string) => ({

@@ -1,6 +1,6 @@
 # Omni OS for iOS
 
-This development client pairs with an Omni server, then reads its channels and threads and follows them live. It is read only: sending messages comes in a later milestone. Expo Go is not supported.
+This development client pairs with an Omni server, then reads its channels and threads and follows them live. You can pin, mark done, rename, move and archive a thread from its menu or by swiping its row, and switch its model, effort or harness. Sending messages comes in a later milestone. Expo Go is not supported.
 
 ## Run on the iOS simulator
 

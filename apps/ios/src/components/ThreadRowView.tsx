@@ -5,15 +5,18 @@ import { fontSize, lineHeight, minTarget, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
 
 /** A thread in a list: its state dot, title, and the state word and age on a second line. */
-export function ThreadRowView({ row, onPress }: { row: ThreadRow; onPress: () => void }) {
+export function ThreadRowView({ row, onPress, onLongPress }: { row: ThreadRow; onPress: () => void; onLongPress?: () => void }) {
   const { colors } = useOmniTheme();
   const tone: DotTone = row.status === 'failed' ? 'warn' : row.busy ? 'ok' : 'muted';
-  const meta = [row.statusLabel, row.ago].filter(Boolean).join(' · ');
+  const marked = row.target.done ? 'Marked done' : null;
+  const meta = [row.pinned ? 'Pinned' : null, marked, row.statusLabel, row.ago].filter(Boolean).join(' · ');
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={row.statusLabel ? `${row.title}, ${row.statusLabel}` : row.title}
+      accessibilityLabel={[row.title, row.pinned ? 'pinned' : null, marked ? 'marked done' : null, row.statusLabel].filter(Boolean).join(', ')}
+      accessibilityHint={onLongPress ? 'Swipe left for pin, done and archive. Hold for more.' : undefined}
       onPress={onPress}
+      onLongPress={onLongPress}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.surface2 : colors.bg }]}
     >
       <View style={styles.dot}>

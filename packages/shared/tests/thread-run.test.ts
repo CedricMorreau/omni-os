@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currentRun, pickedRun, shownRun, threadChoice, threadRunLabels, type RunCatalogHarness } from '../src/thread-run.ts';
+import { currentRun, pickedRun, shownRun, threadChoice, threadRunLabels, type RunCatalogHarness } from '../thread-run.ts';
 
 const catalog: RunCatalogHarness[] = [
   {

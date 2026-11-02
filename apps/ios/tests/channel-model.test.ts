@@ -114,3 +114,15 @@ describe('channelThreads', () => {
     expect(model.active).toEqual([]);
   });
 });
+
+describe('thread rows for the menu', () => {
+  it('carries what the swipe actions and the long-press menu act on', () => {
+    const row = threadRow(stub({ id: 'p', pinned_at: '2026-11-02T09:00:00Z', done_at: null, folder_id: 'f1' } as Partial<ThreadStub> & { id: string }), NOW);
+    expect(row.pinned).toBe(true);
+    expect(row.target).toMatchObject({ id: 'p', pinned: true, done: false, folderId: 'f1', archived: false });
+  });
+
+  it('is not pinned without a pin time', () => {
+    expect(threadRow(stub({ id: 'q' }), NOW)).toMatchObject({ pinned: false, target: { pinned: false } });
+  });
+});

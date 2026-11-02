@@ -1,24 +1,57 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { HeaderButton } from '../components/HeaderButton';
 import { Notice } from '../components/Notice';
+import { RunSheet } from '../components/thread/RunSheet';
 import { ThreadBody } from '../components/thread/ThreadBody';
 import { ThreadFooter } from '../components/thread/ThreadFooter';
 import { ThreadHeader } from '../components/thread/ThreadHeader';
-import { useThreadLive, useThreadView } from '../live/react';
+import { ThreadMenuSheet } from '../components/thread/ThreadMenuSheet';
+import { useChannels, useThreadLive, useThreadView } from '../live/react';
 import type { RootScreenProps } from '../navigation/types';
 import { useOmniTheme } from '../theme';
+import { useHarnessCatalog } from '../thread/hooks';
+import { targetOfThread } from '../thread/target';
+
+const FLASH_MS = 3000;
 
 export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   const { id } = route.params;
   const { colors } = useOmniTheme();
   const live = useThreadLive(id);
   const view = useThreadView(live);
+  const { channels } = useChannels();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const title = view?.thread?.title || 'Thread';
+  const thread = view?.thread ?? null;
+  const catalog = useHarnessCatalog(thread?.channel_id, thread !== null);
+  const target = useMemo(() => (thread ? targetOfThread(thread) : null), [thread]);
+  const folders = useMemo(() => channels?.find((c) => c.id === thread?.channel_id)?.folders ?? [], [channels, thread?.channel_id]);
+
+  const title = thread?.title || 'Thread';
+  const hasThread = thread !== null;
   useEffect(() => {
-    navigation.setOptions({ title });
-  }, [navigation, title]);
+    navigation.setOptions({
+      title,
+      headerRight: hasThread ? () => <HeaderButton label="•••" accessibilityLabel="Thread menu" onPress={() => setMenuOpen(true)} /> : undefined,
+    });
+  }, [navigation, title, hasThread]);
+
+  const say = useCallback((message: string) => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    setFlash(message);
+    flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
 
   if (!view || view.status === 'loading') return <Notice title="Loading thread" />;
   if (view.status === 'missing') return <Notice title="Thread not found" body="It may have been archived or removed on the server." />;
@@ -28,9 +61,18 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.bg }]}>
-      <ThreadHeader view={view} />
+      <ThreadHeader view={view} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} flash={flash} />
       <ThreadBody view={view} live={live} />
       <ThreadFooter />
+      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={() => setMenuOpen(false)} onChanged={say} />
+      <RunSheet
+        visible={runOpen}
+        onClose={() => setRunOpen(false)}
+        threadId={id}
+        thread={thread}
+        busy={thread?.status === 'running' || thread?.status === 'queued'}
+        catalog={catalog}
+      />
     </View>
   );
 }

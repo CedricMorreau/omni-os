@@ -78,6 +78,10 @@ export interface LiveHub {
   /** The header's link state, reduced from the feed and the open thread. */
   readonly link: Store<Link>;
   refreshChannels(): Promise<void>;
+  /** Runs one API call with the session's credentials, retried once after a 401. Rejects with 'Not paired' without a server. */
+  request<T>(call: (api: OmniApi) => Promise<T>): Promise<T>;
+  /** Puts a thread row the server just returned into the open thread's view and refetches the channel lists. */
+  applyThread(thread: Thread): void;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -327,6 +331,10 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       this.following = following;
     }
 
+    applyThread(thread: Thread) {
+      if (thread.id === this.threadId) this.patch({ thread });
+    }
+
     pause() {
       this.stream?.pause();
     }
@@ -363,6 +371,11 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     channels,
     link,
     refreshChannels,
+    request: (call) => withAuth(() => call(requireApi())),
+    applyThread(thread) {
+      for (const t of openThreads) t.applyThread(thread);
+      void refreshChannels();
+    },
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);

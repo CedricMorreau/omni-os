@@ -1,11 +1,12 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 
 import { channelThreads, type ThreadRow } from '../live/channel-model';
 import { useChannels, usePullRefresh } from '../live/react';
 import { ListHeading } from '../components/ListHeading';
 import { StatusLine } from '../components/StatusLine';
-import { ThreadRowView } from '../components/ThreadRowView';
+import { ThreadMenuSheet } from '../components/thread/ThreadMenuSheet';
+import { ThreadSwipeRow } from '../components/ThreadSwipeRow';
 import type { RootScreenProps } from '../navigation/types';
 import { fontSize, space, useOmniTheme } from '../theme';
 
@@ -22,6 +23,7 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
   const { channels } = useChannels();
   const channel = channels?.find((c) => c.id === id) ?? null;
   const name = channel?.name ?? null;
+  const [menuId, setMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     if (name) navigation.setOptions({ title: name });
@@ -42,34 +44,45 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
 
   const open = (threadId: string) => navigation.navigate('Thread', { id: threadId });
 
+  const menuTarget = useMemo(() => {
+    for (const section of sections) {
+      const row = section.data.find((r) => r.id === menuId);
+      if (row) return row.target;
+    }
+    return null;
+  }, [sections, menuId]);
+
   return (
-    <SectionList
-      sections={sections}
-      keyExtractor={(row) => row.id}
-      contentInsetAdjustmentBehavior="automatic"
-      style={{ backgroundColor: colors.bg }}
-      refreshControl={
-        <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} tintColor={colors.fg3} />
-      }
-      ListHeaderComponent={
-        <View style={styles.header}>
-          <StatusLine />
-        </View>
-      }
-      ListEmptyComponent={
-        <View style={styles.empty}>
-          <Text style={[styles.emptyTitle, { color: colors.fg }]}>
-            {channels === null ? 'Loading threads' : channel ? 'No threads yet' : 'Channel not found'}
-          </Text>
-          {channel === null && channels !== null ? (
-            <Text style={[styles.emptyBody, { color: colors.fg3 }]}>It may have been archived or removed on the server.</Text>
-          ) : null}
-        </View>
-      }
-      renderSectionHeader={({ section }) => <ListHeading>{section.title}</ListHeading>}
-      renderItem={({ item }) => <ThreadRowView row={item} onPress={() => open(item.id)} />}
-      stickySectionHeadersEnabled={false}
-    />
+    <>
+      <SectionList
+        sections={sections}
+        keyExtractor={(row) => row.id}
+        contentInsetAdjustmentBehavior="automatic"
+        style={{ backgroundColor: colors.bg }}
+        refreshControl={
+          <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} tintColor={colors.fg3} />
+        }
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <StatusLine />
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={[styles.emptyTitle, { color: colors.fg }]}>
+              {channels === null ? 'Loading threads' : channel ? 'No threads yet' : 'Channel not found'}
+            </Text>
+            {channel === null && channels !== null ? (
+              <Text style={[styles.emptyBody, { color: colors.fg3 }]}>It may have been archived or removed on the server.</Text>
+            ) : null}
+          </View>
+        }
+        renderSectionHeader={({ section }) => <ListHeading>{section.title}</ListHeading>}
+        renderItem={({ item }) => <ThreadSwipeRow row={item} onPress={() => open(item.id)} onMenu={() => setMenuId(item.id)} />}
+        stickySectionHeadersEnabled={false}
+      />
+      <ThreadMenuSheet target={menuTarget} folders={channel?.folders ?? []} onClose={() => setMenuId(null)} onChanged={() => {}} />
+    </>
   );
 }
 

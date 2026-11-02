@@ -1,4 +1,4 @@
-import type { Run } from '@omni/shared/run-switch.ts';
+import type { Run } from './run-switch.ts';
 
 /** The model that asks for Auto, which picks the harness, model and effort from the prompt (apps/server/harness/auto.ts). */
 export const AUTO = 'auto';
@@ -56,7 +56,7 @@ export function threadRunLabels(
 }
 
 /** The catalog's entry for a thread's harness and model. An empty model is the harness default. */
-function runModel(thread: { harness: string; model: string | null }, harnesses: RunCatalogHarness[] | null | undefined) {
+export function runModel(thread: { harness: string; model: string | null }, harnesses: RunCatalogHarness[] | null | undefined) {
   const harness = harnesses?.find((h) => h.id === thread.harness);
   const picked = thread.model ? harness?.models.find((m) => m.id === thread.model) : undefined;
   const model = picked ?? (thread.model ? undefined : harness?.models.find((m) => m.default) ?? harness?.models[0]);
@@ -105,6 +105,20 @@ export function pickedRun(
   if ('effort' in pick) return pick.effort === thread.effort ? null : { harness: thread.harness, model: thread.model ?? '', effort: pick.effort };
   const now = threadChoice(thread, harnesses);
   return pick.harness === now.harness && pick.model === now.model ? null : { harness: pick.harness, model: pick.model, effort: '' };
+}
+
+/**
+ * The run a pick in the model sheet switches to: the model and effort it shows, as one pick. The same model with another
+ * effort keeps the model. Another model starts at its default effort, whatever effort the sheet showed.
+ */
+export function pickedModelRun(
+  thread: { harness: string; model: string | null; effort: string },
+  harnesses: RunCatalogHarness[] | null | undefined,
+  choice: { harness: string; model: string },
+  effort: string,
+): Run | null {
+  const now = threadChoice(thread, harnesses);
+  return pickedRun(thread, harnesses, choice.harness === now.harness && choice.model === now.model ? { effort } : choice);
 }
 
 function effortLabel(effort: string, model: RunCatalogModel | undefined, catalogKnown: boolean): string {

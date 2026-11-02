@@ -8,7 +8,7 @@ import type { ModelChoice } from '../components/ModelPicker.tsx';
 import { Avatar, ErrorNote } from '../components/ui.tsx';
 import { draftRun, draftRunRequest } from '../new-thread-preset.ts';
 import { baseRequest } from '../worktree-base.ts';
-import { asksAuto } from '../thread-run.ts';
+import { asksAuto } from '@omni/shared/thread-run.ts';
 import { href } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { useDictation, withPhrase } from './dictation.ts';
