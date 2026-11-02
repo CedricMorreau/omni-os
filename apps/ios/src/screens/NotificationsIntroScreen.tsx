@@ -51,7 +51,7 @@ export function NotificationsIntroScreen({ navigation }: RootScreenProps<'Notifi
       </View>
 
       <Text style={[styles.footnote, { color: colors.fg3 }]}>
-        You can change this any time under Servers, then Notifications.
+        You can change this any time under Settings, then Notifications.
       </Text>
     </ScrollView>
   );
