@@ -23,7 +23,9 @@ import {
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
+import { createActionsLive, type ActionsLive } from './actions';
 import { createActivityLive, type ActivityState } from './activity';
+import { createFolderCollapse } from './folders';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
@@ -81,7 +83,11 @@ export interface LiveHub {
   readonly activity: Store<ActivityState>;
   refreshChannels(): Promise<void>;
   refreshActivity(): Promise<void>;
+  /** Opens or closes a folder for every client. Resolves to the failure's message, or null. */
+  setFolderCollapsed(folderId: string, collapsed: boolean): Promise<string | null>;
   openThread(threadId: string): ThreadLive;
+  /** A thread's channel actions and runs, for as long as the screen holds it. */
+  openActions(threadId: string): ActionsLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
   /** Connects now instead of waiting out a backoff, as when the network comes back. */
@@ -107,6 +113,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   const channels = createStore<ChannelsState>({ channels: null, loading: false, error: null, loadedAt: null });
   const link = createStore<Link>(linkOf({ paired, foreground: true, feed: null, thread: null }));
   const openThreads = new Set<ThreadLiveImpl>();
+  const openActions = new Set<ActionsLive>();
   let activeThread: ThreadLiveImpl | null = null;
   let foreground = true;
   let feed: SSEClient | null = null;
@@ -164,6 +171,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     });
     return refreshing;
   }
+
+  const setFolderCollapsed = createFolderCollapse({ api, withAuth, channels, refresh: refreshChannels });
 
   function scheduleRefresh() {
     if (refreshTimer !== null) return;
@@ -373,6 +382,20 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     activity: activity.state,
     refreshChannels,
     refreshActivity: activity.refresh,
+    setFolderCollapsed,
+    openActions(threadId) {
+      const actions = createActionsLive({ api, withAuth, threadId });
+      if (!foreground) actions.pause();
+      const close = actions.close;
+      openActions.add(actions);
+      return {
+        ...actions,
+        close() {
+          openActions.delete(actions);
+          close();
+        },
+      };
+    },
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -386,9 +409,11 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       if (!active) {
         feed?.pause();
         for (const t of openThreads) t.pause();
+        for (const a of openActions) a.pause();
       } else {
         feed?.resume();
         for (const t of openThreads) t.resume();
+        for (const a of openActions) a.resume();
         void refreshChannels();
         void activity.refresh();
       }
@@ -405,6 +430,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       feed?.close();
       feed = null;
       for (const t of [...openThreads]) t.close();
+      for (const a of [...openActions]) a.close();
+      openActions.clear();
     },
   };
 }

@@ -1,23 +1,20 @@
 import { useEffect, useMemo } from 'react';
-import { RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { Alert, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 
-import { channelThreads, type ThreadRow } from '../live/channel-model';
-import { useChannels, usePullRefresh } from '../live/react';
+import { channelThreads, threadSections, type ThreadRow } from '../live/channel-model';
+import { useChannels, useHandoffOpen, useLiveHub, usePullRefresh } from '../live/react';
+import { FolderHeader } from '../components/FolderHeader';
+import { HandoffRowView } from '../components/HandoffRowView';
 import { ListHeading } from '../components/ListHeading';
 import { StatusLine } from '../components/StatusLine';
 import { ThreadRowView } from '../components/ThreadRowView';
 import type { RootScreenProps } from '../navigation/types';
 import { fontSize, space, useOmniTheme } from '../theme';
 
-interface ThreadSection {
-  key: string;
-  title: string;
-  data: ThreadRow[];
-}
-
 export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>) {
   const { id } = route.params;
   const { colors } = useOmniTheme();
+  const hub = useLiveHub();
   const pull = usePullRefresh();
   const { channels } = useChannels();
   const channel = channels?.find((c) => c.id === id) ?? null;
@@ -27,18 +24,16 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
     if (name) navigation.setOptions({ title: name });
   }, [name, navigation]);
 
-  const sections = useMemo<ThreadSection[]>(() => {
+  const sections = useMemo(() => {
     if (!channel) return [];
-    const model = channelThreads(channel, Date.now());
-    const out: ThreadSection[] = [];
-    if (model.active.length) out.push({ key: 'active', title: 'Active', data: model.active });
-    for (const folder of model.folders) {
-      const rows = [...folder.active, ...folder.recent];
-      if (rows.length) out.push({ key: `folder-${folder.id}`, title: folder.name, data: rows });
-    }
-    if (model.recent.length) out.push({ key: 'recent', title: 'Recent', data: model.recent });
-    return out;
-  }, [channel]);
+    const nameOf = (channelId: string) => channels?.find((c) => c.id === channelId)?.name ?? channelId;
+    return threadSections(channelThreads(channel, Date.now(), nameOf));
+  }, [channel, channels]);
+
+  const toggleFolder = async (folderId: string, collapsed: boolean) => {
+    const failure = await hub.setFolderCollapsed(folderId, collapsed);
+    if (failure) Alert.alert('Could not update the folder', failure);
+  };
 
   const open = (threadId: string) => navigation.navigate('Thread', { id: threadId });
 
@@ -66,11 +61,29 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
           ) : null}
         </View>
       }
-      renderSectionHeader={({ section }) => <ListHeading>{section.title}</ListHeading>}
-      renderItem={({ item }) => <ThreadRowView row={item} onPress={() => open(item.id)} />}
+      renderSectionHeader={({ section }) =>
+        section.folder ? (
+          <FolderHeader
+            name={section.title}
+            collapsed={section.folder.collapsed}
+            count={section.folder.count}
+            running={section.folder.running}
+            onToggle={() => void toggleFolder(section.folder!.id, !section.folder!.collapsed)}
+          />
+        ) : (
+          <ListHeading>{section.title}</ListHeading>
+        )
+      }
+      renderItem={({ item }) => <ChannelThreadRow row={item} onOpen={open} />}
       stickySectionHeadersEnabled={false}
     />
   );
+}
+
+function ChannelThreadRow({ row, onOpen }: { row: ThreadRow; onOpen: (threadId: string) => void }) {
+  const [open, toggle] = useHandoffOpen(row.id);
+  if (!row.handoff) return <ThreadRowView row={row} onPress={() => onOpen(row.id)} />;
+  return <HandoffRowView row={{ ...row, handoff: row.handoff }} open={open} onToggle={toggle} onOpenThread={onOpen} />;
 }
 
 const styles = StyleSheet.create({

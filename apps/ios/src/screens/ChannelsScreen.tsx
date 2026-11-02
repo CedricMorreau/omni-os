@@ -3,9 +3,10 @@ import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from '
 
 import type { ChannelWithRunning } from '@omni/client-core';
 
-import { channelSections } from '../live/channel-model';
-import { useChannels, useLink, useLiveHub, usePullRefresh } from '../live/react';
+import { channelSections, channelSubtitle, needsByChannel } from '../live/channel-model';
+import { useActivity, useChannels, useLink, useLiveHub, usePullRefresh } from '../live/react';
 import { ListHeading } from '../components/ListHeading';
+import { StatusDot } from '../components/StatusDot';
 import { StatusLine } from '../components/StatusLine';
 import type { RootScreenProps } from '../navigation/types';
 import { usePairing } from '../pairing/PairingProvider';
@@ -24,6 +25,8 @@ export function ChannelsScreen({ navigation }: RootScreenProps<'Channels'>) {
   const pull = usePullRefresh();
   const { channels, error } = useChannels();
   const link = useLink();
+  const { needsYou } = useActivity();
+  const needs = useMemo(() => needsByChannel(needsYou), [needsYou]);
   const { activeServer, statusById, notice, clearNotice } = usePairing();
   const incompatible = activeServer !== null && statusById[activeServer.id] === 'incompatible';
 
@@ -37,6 +40,11 @@ export function ChannelsScreen({ navigation }: RootScreenProps<'Channels'>) {
   }, [channels]);
 
   const empty = channels !== null && sections.length === 0;
+  const summary = useMemo(() => {
+    if (!channels) return null;
+    const { listedCount, running } = channelSections(channels);
+    return `${listedCount} ${listedCount === 1 ? 'channel' : 'channels'} · ${running} running`;
+  }, [channels]);
 
   return (
     <SectionList
@@ -60,6 +68,7 @@ export function ChannelsScreen({ navigation }: RootScreenProps<'Channels'>) {
           )}
           {incompatible && <Callout message="This server speaks an API this app doesn't support. Update the app or the server." />}
           <StatusLine />
+          {summary ? <Text style={[styles.summary, { color: colors.fg3 }]}>{summary}</Text> : null}
           {channels && error ? (
             <Text style={[styles.note, { color: colors.fg3 }]}>Last refresh failed. Pull down to try again.</Text>
           ) : null}
@@ -78,29 +87,49 @@ export function ChannelsScreen({ navigation }: RootScreenProps<'Channels'>) {
       }
       renderSectionHeader={({ section }) => (section.title ? <ListHeading>{section.title}</ListHeading> : <View style={styles.conductorGap} />)}
       renderItem={({ item }) => (
-        <ChannelRow channel={item} onPress={() => navigation.navigate('Channel', { id: item.id })} />
+        <ChannelRow channel={item} needs={needs.get(item.id) ?? 0} onPress={() => navigation.navigate('Channel', { id: item.id })} />
       )}
       stickySectionHeadersEnabled={false}
     />
   );
 }
 
-function ChannelRow({ channel, onPress }: { channel: ChannelWithRunning; onPress: () => void }) {
+function ChannelRow({ channel, needs, onPress }: { channel: ChannelWithRunning; needs: number; onPress: () => void }) {
   const { colors } = useOmniTheme();
   const running = channel.running || 0;
+  const subtitle = channelSubtitle(channel);
+  const label = [channel.name, needs > 0 && `${needs} need you`, running > 0 && `${running} running`].filter(Boolean).join(', ');
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={running > 0 ? `${channel.name}, ${running} running` : channel.name}
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.surface2 : colors.bg, borderColor: colors.line }]}
     >
-      <Text numberOfLines={1} style={[styles.name, { color: colors.fg }]}>
-        {channel.name}
-      </Text>
-      {running > 0 ? <Text style={[styles.running, { color: colors.fg3 }]}>{`${running} running`}</Text> : null}
+      <View style={styles.text}>
+        <Text numberOfLines={1} style={[styles.name, { color: colors.fg }]}>
+          {channel.name}
+        </Text>
+        {subtitle ? (
+          <Text numberOfLines={1} style={[styles.sub, { color: colors.fg3 }]}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {needs > 0 ? <Count tone="warn" value={needs} /> : null}
+      {running > 0 ? <Count tone="ok" value={running} /> : null}
       <Text style={[styles.chevron, { color: colors.fg4 }]}>›</Text>
     </Pressable>
+  );
+}
+
+function Count({ tone, value }: { tone: 'ok' | 'warn'; value: number }) {
+  const { colors } = useOmniTheme();
+  return (
+    <View style={styles.count}>
+      <StatusDot tone={tone} />
+      <Text style={[styles.running, { color: colors.fg3 }]}>{value}</Text>
+    </View>
   );
 }
 
@@ -140,13 +169,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.s9,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  name: {
+  text: {
     flex: 1,
+    paddingVertical: space.s4,
+    gap: 2,
+  },
+  name: {
     fontSize: fontSize.input,
     fontWeight: '500',
   },
+  sub: {
+    fontSize: fontSize.meta,
+  },
+  summary: {
+    fontSize: fontSize.meta,
+    paddingBottom: space.s2,
+  },
+  count: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s2 + 1,
+  },
   running: {
     fontSize: fontSize.meta,
+    fontVariant: ['tabular-nums'],
   },
   chevron: {
     fontSize: fontSize.heading + 4,

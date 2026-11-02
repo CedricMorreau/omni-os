@@ -1,6 +1,7 @@
 import { createNativeStackNavigator, type NativeStackNavigationOptions, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { HeaderButton } from '../components/HeaderButton';
+import { ActionsScreen } from '../screens/ActionsScreen';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
 import { ServersScreen } from '../screens/ServersScreen';
@@ -30,6 +31,7 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
     <>
       <Stack.Screen name="Channel" component={ChannelScreen} options={{ title: 'Channel', headerBackTitle: backTitle }} />
       <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+      <Stack.Screen name="Actions" component={ActionsScreen} options={{ title: 'Actions', headerBackTitle: 'Thread' }} />
       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers', headerBackTitle: backTitle }} />
       <Stack.Screen name="AddServer" component={ConnectScreen} options={{ title: 'Add server', headerBackTitle: 'Back' }} />
     </>

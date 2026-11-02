@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { HeaderButton } from '../components/HeaderButton';
 import { Notice } from '../components/Notice';
 import { ThreadBody } from '../components/thread/ThreadBody';
 import { ThreadFooter } from '../components/thread/ThreadFooter';
@@ -17,8 +18,8 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
 
   const title = view?.thread?.title || 'Thread';
   useEffect(() => {
-    navigation.setOptions({ title });
-  }, [navigation, title]);
+    navigation.setOptions({ title, headerRight: () => <HeaderButton label="Actions" onPress={() => navigation.navigate('Actions', { threadId: id })} /> });
+  }, [navigation, title, id]);
 
   if (!view || view.status === 'loading') return <Notice title="Loading thread" />;
   if (view.status === 'missing') return <Notice title="Thread not found" body="It may have been archived or removed on the server." />;
