@@ -11,13 +11,13 @@ import type { ThreadDetail } from '../src/api.ts';
 import { DiffFile } from '../src/components/DiffViewer.tsx';
 import { pressLine, type LinePick } from '../src/components/thread/panel/LineSelection.tsx';
 import { parseDiff, type DiffLine } from '../src/diff.ts';
-import { parsePayload } from '../src/format.ts';
+import { parsePayload } from '@omni/shared/transcript-fold.ts';
 import { cantShowText, ContextChips, ContextInspector, NEWER_LABEL } from '../src/message-context/ContextChips.tsx';
 import { rangeText, sourceText } from '../src/message-context/diff-selection.tsx';
 import { CONTEXT_VIEWS } from '../src/message-context/kinds.ts';
 import { addDraftContext, draftContext, removeDraftContext, settleDraftContext } from '../src/message-context/draft.ts';
 import { requestIdFor, sendKey } from '../src/requests.ts';
-import type { UserP } from '../src/transcript/fold.ts';
+import type { UserP } from '@omni/shared/transcript-fold.ts';
 
 // The Web UI's half of message context (apps/web/src/message-context/), on the corpus the shared and Swift tests read
 // (packages/test-fixtures/message-context.json) and the thread the Mac app's fixtures record.

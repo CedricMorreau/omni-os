@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fixture } from '@omni/test-fixtures';
 import { describe, expect, it } from 'vitest';
-import type { Span } from '@omni/shared/history.ts';
-import type { HandoverP, RunName, SwitchP } from '@omni/shared/run-switch.ts';
-import { buildItems, buildTasks, type SwitchItem, type TranscriptEvent } from '../src/transcript/fold.ts';
+import type { Span } from '../history.ts';
+import type { HandoverP, RunName, SwitchP } from '../run-switch.ts';
+import { buildItems, buildTasks, type SwitchItem, type TranscriptEvent } from '../transcript-fold.ts';
 import { projectFold } from './transcript-snapshot.ts';
 
 // One corpus for the Web UI fold and the Mac transcript. Swift reads the same file from the repo.
@@ -29,7 +29,7 @@ const REQUIRED = [
 
 describe('transcript fold', () => {
   it('imports no react', () => {
-    const src = readFileSync(new URL('../src/transcript/fold.ts', import.meta.url), 'utf8');
+    const src = readFileSync(new URL('../transcript-fold.ts', import.meta.url), 'utf8');
     expect(src).not.toMatch(/from ['"]react['"]/);
     expect(src).not.toMatch(/\breact\b/);
   });

@@ -1,5 +1,5 @@
-// A Cursor cloud agent's run as the card shows it (transcript/fold.ts folds its rows). Pure, so it is testable.
-import type { CloudAgentP } from './transcript/fold.ts';
+// A Cursor cloud agent's run as the card shows it (transcript-fold.ts folds its rows). Pure, so it is testable.
+import type { CloudAgentP } from './transcript-fold.ts';
 
 /** Each run status as a thread status (for the pill's glyph) and the word the card says. */
 export const CLOUD_STATUS: Record<CloudAgentP['status'], { status: string; label: string }> = {

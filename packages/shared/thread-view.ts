@@ -1,18 +1,35 @@
-// The phone's thread screen, folded per turn: what Ben asked, what came back, what it cost and what it made. Pure, on
-// top of the transcript fold (transcript/fold.ts), so it reads the same events the desktop transcript does.
-import type { ThreadQuestion } from '@omni/shared/question.ts';
-import type { Clipped, Span } from '@omni/shared/history.ts';
-import type { Artifact, Thread } from '../api.ts';
-import { toDate } from '../format.ts';
-import { cloudStatus } from '../cloud-agent.ts';
-import { buildItems, isAsking, toolLabel, toolSummary, type CloudAgentP, type Item, type ReportP, type ResultP, type SwitchItem, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
+// A thread folded per turn: what Ben asked, what came back, what it cost and what it made. The phone's thread screen
+// and the iOS app draw it. Pure, on top of the transcript fold (transcript-fold.ts), so it reads the same events the
+// desktop transcript does.
+import type { ThreadQuestion } from './question.ts';
+import type { Clipped, Span } from './history.ts';
+import { cloudStatus } from './cloud-agent.ts';
+import { buildItems, isAsking, toolLabel, toolSummary, type CloudAgentP, type Item, type ReportP, type ResultP, type SwitchItem, type Todo, type ToolCall, type TranscriptEvent, type UserP } from './transcript-fold.ts';
 
 export type TurnStatus = 'running' | 'queued' | 'done' | 'failed' | 'stopped';
 
 /** A message of Ben's in a turn, with its row: one that came clipped offers its whole text. */
 export type Prompt = UserP & { key: number; clipped?: Clipped };
 
-export interface TurnView {
+/** What a turn reads of a file the thread made: when it last changed. A client passes its own richer type and gets it back. */
+export interface TurnArtifact {
+  updated_at: string;
+}
+
+/** What a turn reads of a thread this one delegated to: when it started, and whether it is a team member. */
+export interface TurnChild {
+  created_at: string;
+  source?: string | null;
+}
+
+/** What a thread view reads of the thread itself. */
+export interface TurnThread {
+  status: string;
+  cwd?: string | null;
+  harness: string;
+}
+
+export interface TurnView<A extends TurnArtifact = TurnArtifact, C extends TurnChild = TurnChild> {
   key: number;
   at: string;
   /** Ben's message that started it, then any he steered in while it ran. Empty when a crew report started it. */
@@ -30,9 +47,9 @@ export interface TurnView {
   /** Questions the agent asked Ben during the turn, each shown as its card. */
   questions: ThreadQuestion[];
   /** Files the turn wrote last, so each file shows once, with the turn that made its current version. */
-  artifacts: Artifact[];
+  artifacts: A[];
   /** Threads delegated during the turn. */
-  children: Thread[];
+  children: C[];
   result: ResultP | null;
   error: string | null;
   /** The Cursor cloud agent run this turn launched or followed up, as it stands now. */
@@ -57,8 +74,8 @@ export interface NowDoing {
   target: string;
 }
 
-export interface ThreadView {
-  turns: TurnView[];
+export interface ThreadView<A extends TurnArtifact = TurnArtifact, C extends TurnChild = TurnChild> {
+  turns: TurnView<A, C>[];
   /** The latest TodoWrite of the latest turn, while it runs. */
   plan: PlanView | null;
   /** Null while it waits on Ben's answer to a question: it is not doing anything. */
@@ -98,9 +115,9 @@ const walk = (calls: ToolCall[], fn: (c: ToolCall) => void) => {
   }
 };
 
-const time = (iso: string) => toDate(iso).getTime();
+const time = (iso: string) => new Date(iso).getTime();
 
-function endOf(t: TurnView): TurnStatus | null {
+function endOf(t: Pick<TurnView, 'result' | 'error'>): TurnStatus | null {
   if (t.result) return t.result.stopped ? 'stopped' : t.result.ok ? 'done' : 'failed';
   return t.error ? 'failed' : null;
 }
@@ -108,7 +125,7 @@ function endOf(t: TurnView): TurnStatus | null {
 /** The thread's status as its newest turn's. */
 const LIVE: Record<string, TurnStatus> = { running: 'running', queued: 'queued', failed: 'failed', stopped: 'stopped', done: 'done' };
 
-export function threadView({
+export function threadView<A extends TurnArtifact, C extends TurnChild>({
   events,
   spans,
   thread,
@@ -118,20 +135,20 @@ export function threadView({
   events: TranscriptEvent[];
   /** The spans of a bounded history (`History.spans`): only their turns show. */
   spans?: readonly Span[];
-  thread: Pick<Thread, 'status' | 'cwd' | 'harness'>;
-  artifacts: Artifact[];
-  children: Thread[];
-}): ThreadView {
+  thread: TurnThread;
+  artifacts: A[];
+  children: C[];
+}): ThreadView<A, C> {
   const { items, plan } = buildItems(events, spans);
-  const turns: TurnView[] = [];
+  const turns: TurnView<A, C>[] = [];
   // Until the first switch, the thread ran where that switch moved it from.
   let harness = items.find((it): it is SwitchItem => it.type === 'switch')?.p.from.harness ?? thread.harness;
-  const start = (key: number, at: string): TurnView => {
-    const t: TurnView = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, proseClipped: null, reports: [], questions: [], artifacts: [], children: [], result: null, error: null, cloud: null, status: 'done', items: [], switches: [], harness };
+  const start = (key: number, at: string): TurnView<A, C> => {
+    const t: TurnView<A, C> = { key, at, prompts: [], steps: 0, failed: 0, texts: [], prose: null, proseClipped: null, reports: [], questions: [], artifacts: [], children: [], result: null, error: null, cloud: null, status: 'done', items: [], switches: [], harness };
     turns.push(t);
     return t;
   };
-  let cur: TurnView | null = null;
+  let cur: TurnView<A, C> | null = null;
   for (const it of items) {
     // A message or report after a turn ended starts the next one; one sent while it ran was steered into it.
     if (it.type === 'user' || it.type === 'report') {
@@ -143,7 +160,7 @@ export function threadView({
       cur.texts.push(it.p.text);
       cur.proseClipped = it.clipped ? { key: it.key, clipped: it.clipped } : null;
     } else if (it.type === 'tools') {
-      const turn: TurnView = (cur ??= start(it.key, it.calls[0]?.at ?? ''));
+      const turn: TurnView<A, C> = (cur ??= start(it.key, it.calls[0]?.at ?? ''));
       turn.steps += it.total;
       walk(it.calls, (c) => {
         if (c.result?.is_error) turn.failed++;
