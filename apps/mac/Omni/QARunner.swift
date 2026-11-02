@@ -178,6 +178,10 @@ final class QARunner {
           result.files = [name + ".png"]
           await takeOver.confirm()
           try? await Task.sleep(for: .milliseconds(600))
+        case .pairingCode:
+          guard let issue = QAIosPairingProbe.issue else { throw QAScriptError("no Omni for iOS card on screen") }
+          await issue()
+          try? await Task.sleep(for: .milliseconds(600))
         case .scroll(let scroll):
           result.note = try await self.scroll(scroll)
         case .expand:
@@ -468,6 +472,7 @@ final class QARunner {
     case .handoffMenu(let name): "handoffMenu \(name)"
     case .handOff(let device): "handOff \(device)"
     case .takeOver(let name): "takeOver \(name)"
+    case .pairingCode: "iosPairing showCode"
     case .palette(let query): "palette \(query ?? "close")"
     case .quickPrompt(let action): "quickPrompt \(action)"
     case .selectLines(let file, let from, let to): "selectLines \(file) \(from)-\(to)"

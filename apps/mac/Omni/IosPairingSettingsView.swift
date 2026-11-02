@@ -3,6 +3,14 @@ import CoreImage.CIFilterBuiltins
 import OmniKit
 import SwiftUI
 
+#if DEBUG
+/// Show Pairing Code on the Omni for iOS card, for the QA harness to press. Set while the card shows.
+@MainActor
+enum QAIosPairingProbe {
+  static var issue: (() async -> Void)?
+}
+#endif
+
 /// The Omni for iOS card of the Sharing & access section, like the Web UI's Settings, Sharing & access, Omni for iOS
 /// (apps/web/src/pages/IosPairing.tsx): a QR the iPhone app scans to pair. The address and the code come from OmniKit's
 /// IosPairing.swift. A new model per client and per visit, and the code goes with it. The status reloads every
@@ -51,6 +59,10 @@ struct IosPairingCard: View {
         content
       }
     }
+    #if DEBUG
+    .onAppear { QAIosPairingProbe.issue = { await pairing.issue() } }
+    .onDisappear { QAIosPairingProbe.issue = nil }
+    #endif
   }
 
   @ViewBuilder

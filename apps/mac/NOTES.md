@@ -544,6 +544,7 @@ Steps (a list, or an object with the list under `steps`):
 | `{"handoffMenu": "name"}` | Clicks the open thread's ⋯ menu and writes `name.png` while it is open |
 | `{"handOff": "<device id>"}` | Hands the open thread to that Mac, as picking it in the Machine chip does |
 | `{"takeOver": "name"}` | Picks This Mac in the Machine chip (through its probe, as the item's action), writes `name.png` while the confirm sheet shows, then presses Take Over in it. The open thread must be one another Mac holds, so it needs two synced servers |
+| `{"iosPairing": "showCode"}` | Presses Show Pairing Code on the Omni for iOS card (Sharing & access), as the button does, and waits for the code and QR to draw. The card must be on screen, so open it first with `{"settings": "access"}` |
 | `{"selectLines": {"file": "src/cart.ts", "from": 1, "to": 3}}` | In the Changes tab's shown view, clicks the numbers of row `from` (an index into the file's diff rows, hunk rows counted, from 0) of the first file at that path, then Shift-clicks row `to`. The dock shows under the diff |
 | `{"addContext": "note"}` | Writes the note in the dock and presses Add to Message. Fails with the reason when the reply box refuses the lines |
 | `{"selectTerminal": true}` | In the Terminal tab, selects everything the terminal shows. The selection panel opens over its foot. The shell lives on the server, so put output in it first, with `POST /api/threads/:id/terminal/input` |
