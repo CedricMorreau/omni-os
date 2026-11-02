@@ -2,7 +2,9 @@ import { DarkTheme, DefaultTheme, NavigationContainer, type Theme } from '@react
 import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { navigationRef } from './navigation/ref';
 import { RootNavigator } from './navigation/RootNavigator';
+import { NotificationsProvider } from './notifications/NotificationsProvider';
 import { PairingProvider } from './pairing/PairingProvider';
 import { ActiveSessionProvider } from './session/ActiveSession';
 import { useOmniTheme } from './theme';
@@ -26,11 +28,13 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
       <PairingProvider>
-        <NavigationContainer theme={navTheme}>
-          <ActiveSessionProvider>
-            <RootNavigator />
-          </ActiveSessionProvider>
-        </NavigationContainer>
+        <NotificationsProvider>
+          <NavigationContainer ref={navigationRef} theme={navTheme}>
+            <ActiveSessionProvider>
+              <RootNavigator />
+            </ActiveSessionProvider>
+          </NavigationContainer>
+        </NotificationsProvider>
       </PairingProvider>
     </SafeAreaProvider>
   );

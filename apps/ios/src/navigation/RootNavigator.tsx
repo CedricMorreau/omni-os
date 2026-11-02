@@ -5,6 +5,8 @@ import { usePairing } from '../pairing/PairingProvider';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
+import { NotificationSettingsScreen } from '../screens/NotificationSettingsScreen';
+import { NotificationsIntroScreen } from '../screens/NotificationsIntroScreen';
 import { ServersScreen } from '../screens/ServersScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
 import { useHasSession } from '../session/ActiveSession';
@@ -56,6 +58,16 @@ export function RootNavigator() {
             name="AddServer"
             component={ConnectScreen}
             options={{ title: 'Add server', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="NotificationSettings"
+            component={NotificationSettingsScreen}
+            options={{ title: 'Notifications', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="NotificationsIntro"
+            component={NotificationsIntroScreen}
+            options={{ title: 'Notifications', presentation: 'modal' }}
           />
         </>
       ) : (
