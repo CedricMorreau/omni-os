@@ -47,13 +47,21 @@ Make a pairing code on your computer, then scan its QR code or type the server a
 
 The app accepts only an `https://` server origin. It checks the server's capabilities after pairing and whenever it returns to the foreground. The contract is in `packages/shared/app-pairing.ts`.
 
-With no server paired the app shows Connect. Once one is, the app opens on three native tabs, Activity, Channels and Library, in phone web's order. Activity is home: it shows what needs you, what runs, your pins, the latest threads and what finished today, and its tab carries the needs-you count. Each tab keeps its own stack, so a thread opens inside the tab you tapped it in, and the tab bar hides on pushed screens. Servers (in each tab's header) switches or removes servers and reaches Add server. The channel list, Activity, the thread view and the connection line come from `src/live/`, which talks to the active server through `@omni/client-core` with the token from the Keychain. Pairing's own calls use the same client.
+With no server paired the app shows Connect. Once one is, the app opens on three native tabs, Activity, Channels and Library, in phone web's order. Activity is home: it shows what needs you, what runs, your pins, the latest threads and what finished today, and its tab carries the needs-you count. Each tab keeps its own stack, so a thread opens inside the tab you tapped it in, and the tab bar hides on pushed screens. Search (left of each tab's header) and Settings (right) open from every tab root. Settings reaches Servers, which switches or removes servers and reaches Add server. The channel list, Activity, the thread view and the connection line come from `src/live/`, which talks to the active server through `@omni/client-core` with the token from the Keychain. Pairing's own calls use the same client.
 
 A 401 anywhere, on a request or on a stream, makes the app ask the server whether it still accepts this phone. If it does not (the phone was revoked in Settings on the computer), the app forgets that server and shows Connect with a notice. Another paired server, if any, becomes active.
 
 Requests never follow a redirect. `@omni/client-core` sends `redirect: 'manual'` and refuses a 3xx or an answer that came from another origin. On iOS, React Native's fetch ignores `redirect` and follows the redirect itself, but its redirect handler drops every request header, the token included, so what the client-core check adds there is that nothing from the other origin is read.
 
 The Simulator has no camera, so use Enter code there.
+
+## Search and Settings
+
+Search lists the latest threads until you type. After 200 ms of quiet it asks the server's `/search`, which matches every word as a prefix in thread titles and messages, and shows matching channels above the thread hits. A hit opens its thread. It does not scroll to the matching message yet, because the Thread screen takes only an id.
+
+Settings is a grouped list. Servers is the pairing screen. Notifications opens the `NotificationSettings` route once a stack registers it, and shows "Not available yet" until then. Devices lists who is signed in to the active server and revokes one. The server decides who may revoke a device, and its refusal is shown as it is. Automations lists the server's automations and pauses or resumes one, as phone web does. Sign out of a server is the same as removing it: the phone tells the server, then forgets the token. The footer shows the app version.
+
+These screens call the server through `hub.call` (`src/live/hub.ts`), which retries once after a 401 like the live lists, and `useRemote` (`src/live/use-remote.ts`) for lists the live feed does not carry. Appearance follows the system theme. Workspace, Machines, Sync, Integrations, Harness config, Secrets and About stay in the Web UI and the Mac app.
 
 ## Library and artifacts
 

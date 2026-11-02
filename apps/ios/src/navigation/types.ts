@@ -19,6 +19,10 @@ export type RootStackParamList = {
   Artifact: { artifact: Artifact };
   /** Forks a thread onto another harness: a new, linked thread that picks up from it. Presented as a modal over the thread. */
   Continue: { id: string };
+  Search: undefined;
+  Settings: undefined;
+  Devices: undefined;
+  Automations: undefined;
   Servers: undefined;
   /** Pairing another server. A separate route, so pairing the first server swaps Connect out for the tabs. */
   AddServer: undefined;

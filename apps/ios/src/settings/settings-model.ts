@@ -1,0 +1,17 @@
+/** The route the push notification preferences screen registers. It lands in a separate change, so Settings looks for it. */
+export const NOTIFICATIONS_ROUTE = 'NotificationSettings';
+
+export function notificationsRoute(routeNames: readonly string[]): typeof NOTIFICATIONS_ROUTE | null {
+  return routeNames.includes(NOTIFICATIONS_ROUTE) ? NOTIFICATIONS_ROUTE : null;
+}
+
+export function automationsDetail(count: number | null, error: string | null, serverName: string | null): string {
+  if (count === null) return error ? 'Could not load' : 'Loading';
+  if (count === 0) return 'None yet';
+  return serverName ? `${count} on ${serverName}` : String(count);
+}
+
+export function versionLabel(version: string | null | undefined, build: string | null | undefined): string {
+  if (!version) return 'Omni OS';
+  return build ? `Omni OS ${version} (${build})` : `Omni OS ${version}`;
+}
