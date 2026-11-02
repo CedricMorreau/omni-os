@@ -1,66 +1,76 @@
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-
-import { HeaderButton } from '../components/HeaderButton';
+import { useNeedsYouCount } from '../live/react';
 import { usePairing } from '../pairing/PairingProvider';
-import { ChannelScreen } from '../screens/ChannelScreen';
+import { ActivityScreen } from '../screens/ActivityScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
-import { ServersScreen } from '../screens/ServersScreen';
-import { ThreadScreen } from '../screens/ThreadScreen';
 import { useHasSession } from '../session/ActiveSession';
 import { useOmniTheme } from '../theme';
-import type { RootStackParamList } from './types';
+import { detailScreens, serversButton, Stack, stackOptions } from './detail-screens';
+import { createNativeTabsNavigator } from './native-tabs';
+import { activityTabLabel, needsBadge } from './tabs-model';
+import type { TabsParamList } from './types';
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createNativeTabsNavigator<TabsParamList>();
 
-/** No session shows Connect alone. Any session makes Channels the home screen, with Servers one tap away. */
+/** No session shows Connect alone. Any session opens the tabs on Activity, with Servers one tap away on each tab's root. */
 export function RootNavigator() {
   const { colors } = useOmniTheme();
   const { ready } = usePairing();
   const hasSession = useHasSession();
+  const needs = useNeedsYouCount();
 
   if (!ready) return null;
 
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.bg },
-        headerTintColor: colors.fg,
-        headerTitleStyle: { color: colors.fg },
-        headerShadowVisible: false,
-        contentStyle: { backgroundColor: colors.bg },
-      }}
-    >
-      {hasSession ? (
-        <>
-          <Stack.Screen
-            name="Channels"
-            component={ChannelsScreen}
-            options={({ navigation }) => ({
-              title: 'Channels',
-              headerRight: () => <HeaderButton label="Servers" onPress={() => navigation.navigate('Servers')} />,
-            })}
-          />
-          <Stack.Screen
-            name="Channel"
-            component={ChannelScreen}
-            options={{ title: 'Channel', headerBackTitle: 'Channels' }}
-          />
-          <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
-          <Stack.Screen
-            name="Servers"
-            component={ServersScreen}
-            options={{ title: 'Servers', headerBackTitle: 'Channels' }}
-          />
-          <Stack.Screen
-            name="AddServer"
-            component={ConnectScreen}
-            options={{ title: 'Add server', headerBackTitle: 'Back' }}
-          />
-        </>
-      ) : (
+  if (!hasSession) {
+    return (
+      <Stack.Navigator screenOptions={stackOptions(colors)}>
         <Stack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect to a server' }} />
-      )}
+      </Stack.Navigator>
+    );
+  }
+
+  return (
+    <Tab.Navigator initialRouteName="ActivityTab">
+      <Tab.Screen
+        name="ActivityTab"
+        component={ActivityStack}
+        options={{
+          title: 'Activity',
+          icon: 'tray',
+          selectedIcon: 'tray.fill',
+          tabBadge: needsBadge(needs),
+          tabAccessibilityLabel: activityTabLabel(needs),
+        }}
+      />
+      <Tab.Screen name="ChannelsTab" component={ChannelsStack} options={{ title: 'Channels', icon: 'number' }} />
+    </Tab.Navigator>
+  );
+}
+
+function ActivityStack() {
+  const { colors } = useOmniTheme();
+  return (
+    <Stack.Navigator screenOptions={stackOptions(colors)}>
+      <Stack.Screen
+        name="Activity"
+        component={ActivityScreen}
+        options={({ navigation }) => ({ title: 'Activity', headerLargeTitle: true, headerRight: serversButton(navigation) })}
+      />
+      {detailScreens({ backTitle: 'Activity' })}
+    </Stack.Navigator>
+  );
+}
+
+function ChannelsStack() {
+  const { colors } = useOmniTheme();
+  return (
+    <Stack.Navigator screenOptions={stackOptions(colors)}>
+      <Stack.Screen
+        name="Channels"
+        component={ChannelsScreen}
+        options={({ navigation }) => ({ title: 'Channels', headerRight: serversButton(navigation) })}
+      />
+      {detailScreens({ backTitle: 'Channels' })}
     </Stack.Navigator>
   );
 }

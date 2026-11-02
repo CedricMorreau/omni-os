@@ -2,12 +2,17 @@ import { StyleSheet, Text } from 'react-native';
 
 import { fontSize, space, useOmniTheme } from '../theme';
 
-/** A section label in a list, such as "Active" or a folder name. */
-export function ListHeading({ children }: { children: string }) {
+/** A section label in a list, such as "Active" or a folder name, with how many rows it holds when given. */
+export function ListHeading({ children, count }: { children: string; count?: number }) {
   const { colors } = useOmniTheme();
   return (
-    <Text accessibilityRole="header" style={[styles.heading, { color: colors.fg3 }]}>
+    <Text
+      accessibilityRole="header"
+      accessibilityLabel={count === undefined ? undefined : `${children}, ${count}`}
+      style={[styles.heading, { color: colors.fg3 }]}
+    >
       {children}
+      {count === undefined ? null : <Text style={{ color: colors.fg4 }}>{`  ${count}`}</Text>}
     </Text>
   );
 }

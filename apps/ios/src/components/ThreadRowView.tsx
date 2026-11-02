@@ -4,15 +4,19 @@ import type { ThreadRow } from '../live/channel-model';
 import { fontSize, lineHeight, minTarget, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
 
-/** A thread in a list: its state dot, title, and the state word and age on a second line. */
-export function ThreadRowView({ row, onPress }: { row: ThreadRow; onPress: () => void }) {
+/**
+ * A thread in a list: its state dot, title, and the state word and age on a second line. A row from several channels
+ * names its channel there first.
+ */
+export function ThreadRowView({ row, onPress }: { row: ThreadRow & { channel?: string }; onPress: () => void }) {
   const { colors } = useOmniTheme();
   const tone: DotTone = row.status === 'failed' ? 'warn' : row.busy ? 'ok' : 'muted';
-  const meta = [row.statusLabel, row.ago].filter(Boolean).join(' · ');
+  const channel = row.channel ? `#${row.channel}` : null;
+  const meta = [channel, row.statusLabel, row.ago].filter(Boolean).join(' · ');
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={row.statusLabel ? `${row.title}, ${row.statusLabel}` : row.title}
+      accessibilityLabel={[row.title, channel, row.statusLabel].filter(Boolean).join(', ')}
       onPress={onPress}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.surface2 : colors.bg }]}
     >

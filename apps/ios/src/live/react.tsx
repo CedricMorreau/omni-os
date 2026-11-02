@@ -54,6 +54,13 @@ export function useActivity() {
   return useStore(useLiveHub().activity);
 }
 
+/** What the Activity tab's badge counts. A number, so the tab bar re-renders only when it changes. */
+export function useNeedsYouCount(): number {
+  const { activity } = useLiveHub();
+  const count = () => activity.get().needsYou?.items.length ?? 0;
+  return useSyncExternalStore(activity.subscribe, count, count);
+}
+
 /** A pull-to-refresh that shows its spinner only for a pull. A refresh the app starts itself, as on returning to the front, stays quiet. */
 export function usePullRefresh() {
   const hub = useLiveHub();
