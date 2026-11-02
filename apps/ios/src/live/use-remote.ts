@@ -9,7 +9,6 @@ export interface Remote<T> {
   error: string | null;
   loading: boolean;
   reload(): Promise<void>;
-  /** Replaces the data, as when a change is shown before the server confirms it. */
   setData(next: T): void;
 }
 

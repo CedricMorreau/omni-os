@@ -13,7 +13,6 @@ import { GroupedList, ListRow } from '../ui/GroupedList';
 
 const loadAutomations = (api: OmniApi) => api.automations();
 
-/** What the app can change: the servers it is paired with, notifications, the devices signed in, automations and sign out. */
 export function SettingsScreen({ navigation }: RootScreenProps<'Settings'>) {
   const { colors } = useOmniTheme();
   const { activeServer, remove } = usePairing();

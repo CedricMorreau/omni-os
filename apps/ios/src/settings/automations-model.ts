@@ -18,14 +18,11 @@ export interface AutomationRow {
   id: string;
   name: string;
   enabled: boolean;
-  /** Set when the automation cannot run. Its switch stays off limits. */
   invalid: boolean;
-  /** The schedule or event and the channel, then the next run, "Paused" or why it is invalid, one per line. */
   detail: string;
   switchLabel: string;
 }
 
-/** What starts the automation, in words. */
 export function triggerLabel(a: Pick<Automation, 'cron' | 'on'>): string {
   if (a.on) return EVENT_LABELS[a.on.event] ?? a.on.event;
   return describeCron(a.cron);
@@ -90,7 +87,6 @@ export function automationRows(list: readonly Automation[], now: number): Automa
   });
 }
 
-/** The list with one automation switched, as the row shows before the server confirms. */
 export function withEnabled(list: readonly Automation[], id: string, enabled: boolean): Automation[] {
   return list.map((a) => (a.id === id ? { ...a, enabled } : a));
 }

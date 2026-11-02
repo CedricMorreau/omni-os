@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { HitRow } from '../search/search-model';
 import { fontSize, lineHeight, minTarget, space, useOmniTheme } from '../theme';
 
-/** A thread the search found: title, where and when, and the words around the match with the match in bold. */
 export function SearchHitRow({ row, onPress }: { row: HitRow; onPress: () => void }) {
   const { colors } = useOmniTheme();
   const meta = [`#${row.channel}`, row.statusLabel, row.ago].filter(Boolean).join(' · ');

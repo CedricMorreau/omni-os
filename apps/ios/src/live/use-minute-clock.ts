@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 
-/** The time, refreshed every minute, so "5m" labels on screen keep up. */
 export function useMinuteClock(): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {

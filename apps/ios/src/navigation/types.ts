@@ -15,11 +15,8 @@ export type RootStackParamList = {
   Thread: { id: string };
   /** A file the crew made. Any tab can push it, through `openArtifact`. */
   Artifact: { artifact: Artifact };
-  /** Search across thread titles and messages. Any tab's header opens it. */
   Search: undefined;
-  /** Servers, devices, automations and the rest of what the app can change. Any tab's header opens it. */
   Settings: undefined;
-  /** The devices signed in to the active server. */
   Devices: undefined;
   Automations: undefined;
   Servers: undefined;

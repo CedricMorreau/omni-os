@@ -13,7 +13,6 @@ import { useThreadSearch } from '../search/use-thread-search';
 import { fontSize, minTarget, radius, space, useOmniTheme } from '../theme';
 import { GroupedList, ListRow } from '../ui/GroupedList';
 
-/** Search from any tab. The latest threads show until something is typed, then matching channels and the server's full-text hits. */
 export function SearchScreen({ navigation }: RootScreenProps<'Search'>) {
   const { colors } = useOmniTheme();
   const { channels } = useChannels();

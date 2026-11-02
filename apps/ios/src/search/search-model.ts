@@ -2,10 +2,8 @@ import type { ChannelWithRunning, SearchHit, Thread } from '@omni/client-core';
 
 import { shortAgo } from '../live/channel-model';
 
-/** How long typing pauses before the query goes to the server. */
 export const SEARCH_DEBOUNCE_MS = 200;
 
-/** The text to search for: trimmed, with runs of spaces folded. Empty means nothing to search. */
 export function searchQuery(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
@@ -15,7 +13,6 @@ export interface SnippetPart {
   match: boolean;
 }
 
-/** A server snippet split at its `<mark>` tags, so the matched words can be drawn bold. */
 export function snippetParts(snippet: string): SnippetPart[] {
   const parts: SnippetPart[] = [];
   for (const [i, chunk] of snippet.split(/<\/?mark>/).entries()) {
@@ -30,7 +27,6 @@ export interface ChannelMatch {
   detail: string | null;
 }
 
-/** Live channels whose name or id contains the query. The Conductor is named as such. */
 export function matchChannels(channels: readonly ChannelWithRunning[] | null, query: string): ChannelMatch[] {
   const needle = query.toLowerCase();
   if (!needle) return [];

@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
 
-/** A rounded card of rows with a hairline between them. Settings screens are made of these. */
 export function GroupedList({ children }: { children: ReactNode }) {
   const { colors } = useOmniTheme();
   return <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.line }]}>{children}</View>;
@@ -11,16 +10,12 @@ export function GroupedList({ children }: { children: ReactNode }) {
 
 export interface ListRowProps {
   title: string;
-  /** A second line under the title. */
   detail?: string;
-  /** Text at the trailing edge, such as a count or a state. */
   value?: string;
   /** Replaces the value at the trailing edge, such as a switch. */
   trailing?: ReactNode;
-  /** Draws a chevron after the value. */
   chevron?: boolean;
   tone?: 'default' | 'destructive';
-  /** Without it the row is plain text. */
   onPress?: () => void;
   disabled?: boolean;
   /** The first row of a group has no line above it. */

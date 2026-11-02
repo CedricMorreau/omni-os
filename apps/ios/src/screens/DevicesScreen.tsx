@@ -11,7 +11,6 @@ import { GroupedList, ListRow } from '../ui/GroupedList';
 
 const loadDevices = (api: OmniApi) => api.devices();
 
-/** Settings, Devices: the browsers and apps signed in to this server, each with a Revoke. */
 export function DevicesScreen() {
   const { colors } = useOmniTheme();
   const hub = useLiveHub();

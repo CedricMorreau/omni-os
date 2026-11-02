@@ -22,7 +22,6 @@ export interface Automation {
 export function automationsApi(http: HttpClient) {
   return {
     automations: () => http.request<Automation[]>('GET', apiPath`/automations`),
-    /** Pauses or resumes one automation. */
     setAutomationEnabled: (id: string, enabled: boolean) =>
       http.request<{ ok: true }>('POST', apiPath`/automations/${id}/enabled`, { body: { enabled } }),
   };

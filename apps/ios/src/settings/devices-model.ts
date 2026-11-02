@@ -5,7 +5,6 @@ import { shortAgo } from '../live/channel-model';
 export interface DeviceRow {
   id: string;
   name: string;
-  /** "Browser · active 5m ago". */
   detail: string;
   current: boolean;
   revokeLabel: string;

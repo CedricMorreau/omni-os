@@ -7,7 +7,6 @@ import type { Remote } from '../live/use-remote';
 import { fontSize, lineHeight, space, useOmniTheme } from '../theme';
 import { refreshNote, remoteView } from './remote-state';
 
-/** A settings screen made of a list loaded from the server, with its spinner, failure, empty message and pull to refresh. */
 export function RemoteList({
   remote,
   what,
@@ -20,7 +19,6 @@ export function RemoteList({
   what: string;
   emptyTitle: string;
   emptyHint: string;
-  /** The rows, drawn once there is something to show. */
   children: ReactNode;
 }) {
   const { colors } = useOmniTheme();
