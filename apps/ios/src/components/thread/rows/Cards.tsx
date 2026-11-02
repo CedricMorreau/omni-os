@@ -3,6 +3,7 @@ import { handoverNote, switchText } from '@omni/shared/run-switch.ts';
 import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AttachmentRow } from '../../../attachments/AttachmentRow';
 import { duration, plural } from '../../../thread/format';
 import { outcomeText, type ThreadRow } from '../../../thread/rows';
 import { fontSize, minTarget, radius, space, useOmniTheme } from '../../../theme';
@@ -28,22 +29,12 @@ function LoadWhole({ label, onPress }: { label: string; onPress: () => void }) {
 
 export function PromptRow({ row }: Of<'prompt'>) {
   const { colors } = useOmniTheme();
-  const { loadWhole } = useRowActions();
+  const { loadWhole, threadId } = useRowActions();
   const { p, caption } = row;
   return (
     <View style={styles.end}>
       <View style={[styles.bubble, { backgroundColor: colors.surface2 }, p.dropped && styles.dim]}>
-        {p.attachments?.length ? (
-          <View style={styles.chips}>
-            {p.attachments.map((a) => (
-              <View key={a.path} style={[styles.chip, { backgroundColor: colors.surface3 }]}>
-                <Text numberOfLines={1} style={[styles.chipText, { color: colors.fg2 }]}>
-                  {a.name}
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
+        {p.attachments?.length ? <AttachmentRow threadId={threadId} items={p.attachments} /> : null}
         {p.text ? (
           <Text selectable style={[styles.bubbleText, { color: colors.fg }]}>
             {p.text}
@@ -199,8 +190,14 @@ export function DelegationRow({ row }: Of<'delegation'>) {
 
 export function ArtifactRow({ row }: Of<'artifact'>) {
   const { colors } = useOmniTheme();
+  const { openArtifact } = useRowActions();
   return (
-    <View accessibilityLabel={`File ${row.a.name}`} style={[styles.card, styles.line, { backgroundColor: colors.surface }]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`File ${row.a.name}`}
+      onPress={() => openArtifact(row.a)}
+      style={({ pressed }) => [styles.card, styles.line, { backgroundColor: pressed ? colors.surface3 : colors.surface }]}
+    >
       <View style={[styles.fileIcon, { backgroundColor: colors.surface3 }]}>
         <Text style={[styles.caption, { color: colors.fg2, fontFamily: MONO }]}>{row.a.name.split('.').pop()?.slice(0, 4) ?? ''}</Text>
       </View>
@@ -210,7 +207,7 @@ export function ArtifactRow({ row }: Of<'artifact'>) {
         </Text>
         <Text style={[styles.caption, { color: colors.fg3 }]}>{row.a.kind}</Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -288,9 +285,6 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '86%', borderRadius: radius.xl, paddingHorizontal: space.s8, paddingVertical: space.s6, gap: space.s4 },
   bubbleText: { fontSize: 15, lineHeight: 22 },
   dim: { opacity: 0.6 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s2 },
-  chip: { borderRadius: radius.pill, paddingHorizontal: space.s4, paddingVertical: 4, maxWidth: 220 },
-  chipText: { fontSize: 12 },
   wake: { gap: space.s2 },
   caption: { fontSize: fontSize.meta },
   small: { fontSize: 12.5, lineHeight: 18 },

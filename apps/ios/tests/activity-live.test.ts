@@ -50,7 +50,7 @@ const session = (): OmniSession => ({ serverUrl: BASE, token: async () => 'token
 const thread = (id: string, updated_at: string, over: Record<string, unknown> = {}) => ({ id, channel_id: 'c', title: id, status: 'running', archived: 0, updated_at, ...over });
 const needs = (...ids: string[]) => ({ items: ids.map((id) => ({ thread: thread(id, ''), result: null, blockers: [], at: '' })), unread: 0, blocked: 0 });
 
-/** The four loads Activity makes, answered from `server`, which a test changes between loads. */
+/** The loads Activity and the inbox make, answered from `server`, which a test changes between loads. */
 function activityServer() {
   const server = {
     needsYou: needs('ask') as unknown,
@@ -93,7 +93,7 @@ describe('activity', () => {
     expect(calls).toEqual(expect.arrayContaining(['/api/needs-you', '/api/recent?limit=60', '/api/pinned', '/api/status']));
     const s = hub.activity.get();
     expect(s).toMatchObject({ loading: false, error: null, loadedAt: NOW, pinned: [] });
-    expect(s.needsYou?.items.map((i) => i.thread.id)).toEqual(['ask']);
+    expect(hub.needsYou.get().data?.items.map((i) => i.thread.id)).toEqual(['ask']);
     expect(s.recent?.map((t) => t.id)).toEqual(['b', 'a']);
     expect(s.usage['claude-code']?.five_hour?.utilization).toBe(40);
     hub.close();
@@ -190,10 +190,11 @@ describe('activity', () => {
     server.fail.add('/api/recent');
     server.needsYou = needs('ask', 'more');
     await hub.refreshActivity();
+    await hub.refreshNeedsYou();
     const s = hub.activity.get();
     expect(s).toMatchObject({ error: 'down', loading: false, loadedAt: NOW });
     expect(s.recent?.map((r) => r.id)).toEqual(['b', 'a']);
-    expect(s.needsYou?.items.map((i) => i.thread.id)).toEqual(['ask', 'more']);
+    expect(hub.needsYou.get().data?.items.map((i) => i.thread.id)).toEqual(['ask', 'more']);
 
     server.fail.clear();
     await hub.refreshActivity();
@@ -206,7 +207,7 @@ describe('activity', () => {
     const hub = createLiveHub({ session: { ...session(), serverUrl: null }, transport: fakeTransport().transport, fetch });
     await hub.refreshActivity();
     expect(calls).toEqual([]);
-    expect(hub.activity.get()).toMatchObject({ needsYou: null, recent: null, loading: false });
+    expect(hub.activity.get()).toMatchObject({ recent: null, loading: false });
     hub.close();
   });
 });

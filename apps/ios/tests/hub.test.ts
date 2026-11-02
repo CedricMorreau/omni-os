@@ -542,10 +542,12 @@ describe('files', () => {
     const { fetch, calls } = fakeFetch((path) => (path === '/api/status' ? (ok ? { body: { maxUploadMb: 50 } } : { status: 500, body: { error: 'down' } }) : { body: [] }));
     const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
     await settle();
+    const asked = () => calls.filter((p) => p === '/api/status').length;
+    const loaded = asked(); // Activity's own load of the status failed too
     expect(await hub.uploadLimitMb()).toBe(25);
     ok = true;
     expect(await hub.uploadLimitMb()).toBe(50);
-    expect(calls.filter((p) => p === '/api/status')).toHaveLength(2);
+    expect(asked() - loaded).toBe(2);
     hub.close();
   });
 

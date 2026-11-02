@@ -5,6 +5,7 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from '
 
 import type { ThreadLive, ThreadView } from '../../live/hub';
 import { useMarkResultRead } from '../../live/react';
+import { openArtifact } from '../../navigation/open-artifact';
 import type { RootStackParamList } from '../../navigation/types';
 import { CLOSED, type Disclosure, threadRows, type ThreadRow } from '../../thread/rows';
 import { fontSize, minTarget, space, useOmniTheme } from '../../theme';
@@ -64,6 +65,8 @@ export function ThreadBody({ view, live }: { view: ThreadView; live: ThreadLive 
   const cwd = view.thread?.cwd ?? null;
   const actions = useMemo<RowActions>(
     () => ({
+      threadId: view.threadId,
+      openArtifact: (artifact) => openArtifact(navigation, artifact),
       openThread: (id) => navigation.push('Thread', { id }),
       loadWhole: (eventId) => void liveRef.current?.loadFullRow(eventId),
       toggleTurn: (turn) => setDisclosure((d) => ({ ...d, turns: toggled(d.turns, turn) })),
@@ -72,7 +75,7 @@ export function ThreadBody({ view, live }: { view: ThreadView; live: ThreadLive 
       answer: ((questionId, answers) => (liveRef.current ? liveRef.current.answerQuestion(questionId, answers) : Promise.reject(new Error('Still connecting. Try again in a moment.')))) as SendAnswers,
       cwd,
     }),
-    [navigation, cwd],
+    [navigation, cwd, view.threadId],
   );
 
   const renderItem = useCallback(({ item }: { item: ThreadRow }) => <RowView row={item} />, []);

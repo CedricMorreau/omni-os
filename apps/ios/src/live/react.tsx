@@ -88,13 +88,13 @@ export function useActivity() {
 
 /** What the Activity tab's badge counts. A number, so the tab bar re-renders only when it changes. */
 export function useNeedsYouCount(): number {
-  const { activity } = useLiveHub();
-  const count = () => activity.get().needsYou?.items.length ?? 0;
-  return useSyncExternalStore(activity.subscribe, count, count);
+  const { needsYou } = useLiveHub();
+  const count = () => needsYou.get().data?.items.length ?? 0;
+  return useSyncExternalStore(needsYou.subscribe, count, count);
 }
 
 /** A pull-to-refresh that shows its spinner only for a pull. A refresh the app starts itself, as on returning to the front, stays quiet. */
-export function usePullRefresh(load: (hub: LiveHub) => Promise<unknown> = (hub) => Promise.all([hub.refreshChannels(), hub.refreshActivity()])) {
+export function usePullRefresh(load: (hub: LiveHub) => Promise<unknown> = (hub) => Promise.all([hub.refreshChannels(), hub.refreshActivity(), hub.refreshNeedsYou()])) {
   const hub = useLiveHub();
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = () => {

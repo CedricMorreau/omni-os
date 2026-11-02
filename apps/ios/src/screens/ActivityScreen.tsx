@@ -8,7 +8,7 @@ import { ListHeading } from '../components/ListHeading';
 import { StatusLine } from '../components/StatusLine';
 import { ThreadRowView } from '../components/ThreadRowView';
 import { activitySections, type ThreadGroup } from '../live/activity-model';
-import { useActivity, useChannels, usePullRefresh } from '../live/react';
+import { useActivity, useChannels, useNeedsYou, usePullRefresh } from '../live/react';
 import type { RootScreenProps } from '../navigation/types';
 import { usePairing } from '../pairing/PairingProvider';
 import { fontSize, space, useOmniTheme } from '../theme';
@@ -29,7 +29,8 @@ export function ActivityScreen({ navigation }: RootScreenProps<'Activity'>) {
   const now = useMinuteClock();
   const [filter, setFilter] = useState<Filter>('all');
 
-  const { recent, needsYou, pinned, usage } = activity;
+  const needsYou = useNeedsYou();
+  const { recent, pinned, usage } = activity;
   const a = useMemo(
     () => activitySections({ recent, needsYou, pinned, channels, usage, now }),
     [recent, needsYou, pinned, channels, usage, now],

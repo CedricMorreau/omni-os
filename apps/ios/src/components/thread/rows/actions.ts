@@ -1,9 +1,14 @@
+import type { Artifact } from '@omni/client-core';
 import type { OutputChunk } from '@omni/shared/tool-output.ts';
 import { createContext, useContext } from 'react';
 
 import type { SendAnswers } from '../QuestionCard';
 
 export interface RowActions {
+  /** The thread on screen: the scope uploaded files are read from. */
+  threadId: string;
+  /** Opens a file the crew made in the artifact viewer. */
+  openArtifact(artifact: Artifact): void;
   openThread(id: string): void;
   loadWhole(eventId: number): void;
   toggleTurn(turn: number): void;
@@ -18,6 +23,8 @@ const idle = (): never => {
 };
 
 const NONE: RowActions = {
+  threadId: '',
+  openArtifact: idle,
   openThread: idle,
   loadWhole: idle,
   toggleTurn: idle,

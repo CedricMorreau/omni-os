@@ -1,4 +1,4 @@
-import type { HarnessUsage, NeedsYou, OmniApi, PinnedThread, Thread, Usage } from '@omni/client-core';
+import type { HarnessUsage, OmniApi, PinnedThread, Thread, Usage } from '@omni/client-core';
 
 import { serial } from './serial';
 import { createStore, type Store } from './store';
@@ -7,11 +7,12 @@ import { createStore, type Store } from './store';
 export const RECENT_LIMIT = 60;
 
 export interface ActivityState {
-  needsYou: NeedsYou | null;
   /** Newest activity first. Null until the first load. */
   recent: readonly Thread[] | null;
   pinned: readonly PinnedThread[];
   usage: HarnessUsage;
+  /** The largest file the server takes, from the status the load already read. Null until it says. */
+  maxUploadMb: number | null;
   loading: boolean;
   /** The last failed load. What the earlier loads brought stays on screen. */
   error: string | null;
@@ -26,45 +27,34 @@ export interface ActivityLive {
 }
 
 export interface ActivityLiveOptions {
-  api: Pick<OmniApi, 'needsYou' | 'recent' | 'pinned' | 'status'> | null;
+  api: Pick<OmniApi, 'recent' | 'pinned' | 'status'> | null;
   withAuth: <T>(run: () => Promise<T>) => Promise<T>;
   now: () => number;
 }
 
 /** Activity's data, kept live from the feed the way phone web's store keeps it. */
 export function createActivityLive({ api, withAuth, now }: ActivityLiveOptions): ActivityLive {
-  const state = createStore<ActivityState>({ needsYou: null, recent: null, pinned: [], usage: {}, loading: false, error: null, loadedAt: null });
+  const state = createStore<ActivityState>({ recent: null, pinned: [], usage: {}, maxUploadMb: null, loading: false, error: null, loadedAt: null });
   const failed = (e: unknown) => state.set((s) => ({ ...s, error: messageOf(e) }));
 
   const refresh = serial(async () => {
     if (!api) return;
     state.set((s) => ({ ...s, loading: true }));
-    const [needsYou, recent, pinned, status] = await Promise.allSettled([
-      withAuth(() => api.needsYou()),
+    const [recent, pinned, status] = await Promise.allSettled([
       withAuth(() => api.recent(RECENT_LIMIT)),
       withAuth(() => api.pinned()),
       withAuth(() => api.status()),
     ]);
-    const failure = [needsYou, recent, pinned, status].find((r) => r.status === 'rejected');
+    const failure = [recent, pinned, status].find((r) => r.status === 'rejected');
     state.set((s) => ({
-      needsYou: needsYou.status === 'fulfilled' ? needsYou.value : s.needsYou,
       recent: recent.status === 'fulfilled' ? recent.value : s.recent,
       pinned: pinned.status === 'fulfilled' ? pinned.value : s.pinned,
       usage: status.status === 'fulfilled' ? (status.value.usage ?? {}) : s.usage,
+      maxUploadMb: status.status === 'fulfilled' ? (status.value.maxUploadMb ?? null) : s.maxUploadMb,
       loading: false,
       error: failure ? messageOf(failure.reason) : null,
       loadedAt: failure ? s.loadedAt : now(),
     }));
-  });
-
-  const refreshNeedsYou = serial(async () => {
-    if (!api) return;
-    try {
-      const needsYou = await withAuth(() => api.needsYou());
-      state.set((s) => ({ ...s, needsYou }));
-    } catch (e) {
-      failed(e);
-    }
   });
 
   const refreshPinned = serial(async () => {
@@ -83,11 +73,7 @@ export function createActivityLive({ api, withAuth, now }: ActivityLiveOptions):
       case 'thread':
         if (!isRecord(message.thread) || typeof message.thread.id !== 'string') return;
         patchRecent(message.thread as unknown as Thread);
-        void refreshNeedsYou();
         void refreshPinned();
-        return;
-      case 'needs_you':
-        void refreshNeedsYou();
         return;
       case 'usage': {
         const harness = typeof message.harness === 'string' ? message.harness : 'claude-code';

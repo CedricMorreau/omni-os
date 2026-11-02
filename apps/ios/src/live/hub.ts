@@ -207,6 +207,9 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   let uploadLimit: Promise<number> | null = null;
   function uploadLimitMb(): Promise<number> {
     if (!api) return Promise.resolve(DEFAULT_MAX_MB);
+    // Activity reads the same status when it loads, so a server that has answered once is not asked again.
+    const known = activity.state.get().maxUploadMb;
+    if (known !== null && known > 0) return Promise.resolve(known);
     uploadLimit ??= withAuth(() => requireApi().status()).then(
       (status) => (typeof status.maxUploadMb === 'number' && status.maxUploadMb > 0 ? status.maxUploadMb : DEFAULT_MAX_MB),
       () => {
@@ -633,8 +636,11 @@ function isListChange(message: unknown): boolean {
   return isRecord(message) && typeof message.type === 'string' && LIST_CHANGES.has(message.type);
 }
 
+/** What can change the inbox: the server says so, or a thread changed, which is how a result lands or a blocker clears. */
 function isNeedsYouChange(message: unknown): boolean {
-  return isRecord(message) && message.type === NEEDS_YOU;
+  if (!isRecord(message)) return false;
+  if (message.type === NEEDS_YOU) return true;
+  return message.type === 'thread' && isRecord(message.thread) && typeof message.thread.id === 'string';
 }
 
 function messageOf(e: unknown): string {
