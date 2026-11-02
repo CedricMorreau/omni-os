@@ -1,4 +1,3 @@
-/** "45s", "2m 10s" or "1h 5m", empty without a value. The same words phone web uses. */
 export function duration(ms: number | undefined): string {
   if (!ms && ms !== 0) return '';
   const s = Math.round(ms / 1000);

@@ -24,7 +24,6 @@ function stateOf(call: ToolCall, running: boolean): CallState {
 const TONE: Record<CallState, DotTone> = { running: 'ok', stopped: 'muted', failed: 'warn', done: 'muted' };
 const WORD: Record<CallState, string | null> = { running: 'Running', stopped: 'Stopped', failed: 'Failed', done: null };
 
-/** What a closed call still shows: the first lines of a command's output, or of any failure. */
 const peek = (call: ToolCall): string => (call.result && (call.result.is_error || call.name === 'Bash') ? call.result.text.trim().split('\n').slice(0, 3).join('\n').slice(0, 240) : '');
 
 export function NoteRow({ row }: Of<'note'>) {

@@ -1,6 +1,5 @@
 import { str, type ToolCall } from '@omni/shared/transcript-fold.ts';
 
-/** One line of what a call was given: plain, or a line an edit adds or removes. */
 export interface DetailLine {
   text: string;
   tone?: 'add' | 'del';
@@ -14,7 +13,6 @@ const lines = (s: string, tone?: DetailLine['tone']): DetailLine[] => {
   return all.length > SHOWN ? [...shown, { text: `… ${all.length - SHOWN} more lines` }] : shown;
 };
 
-/** What an opened call shows of its input, before its output: the command, the edit as a diff, a file's new text. */
 export function callDetail(call: Pick<ToolCall, 'name' | 'input'>): DetailLine[] {
   const i = call.input;
   switch (call.name) {

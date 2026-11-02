@@ -3,10 +3,6 @@ import { createContext, useContext } from 'react';
 
 import type { SendAnswers } from '../QuestionCard';
 
-/**
- * What a row can ask of the screen. The value never changes after the screen mounts, so a row that reads it is not
- * redrawn when the screen is.
- */
 export interface RowActions {
   openThread(id: string): void;
   loadWhole(eventId: number): void;

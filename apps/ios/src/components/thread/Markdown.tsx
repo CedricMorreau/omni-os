@@ -56,7 +56,6 @@ function styleFor(c: ColorTokens): MarkdownStyle {
   } as MarkdownStyle;
 }
 
-/** The agent's text: headings, lists, tables, fenced code, links. Drawn natively, selectable. A bare thread id opens that thread. */
 export const Markdown = memo(function Markdown({ text, onOpenThread }: { text: string; onOpenThread: (id: string) => void }) {
   const { colors } = useOmniTheme();
   const style = useMemo(() => styleFor(colors), [colors]);

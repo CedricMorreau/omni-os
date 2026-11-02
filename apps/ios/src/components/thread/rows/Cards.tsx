@@ -113,7 +113,6 @@ export function ConductorRow() {
   );
 }
 
-/** A long error, four lines until tapped. */
 export function ErrorRow({ row }: Of<'error'>) {
   const { colors } = useOmniTheme();
   const [open, setOpen] = useState(false);
@@ -198,7 +197,6 @@ export function DelegationRow({ row }: Of<'delegation'>) {
   );
 }
 
-/** A file the thread made. Tapping it will open the viewer once the app has one. */
 export function ArtifactRow({ row }: Of<'artifact'>) {
   const { colors } = useOmniTheme();
   return (

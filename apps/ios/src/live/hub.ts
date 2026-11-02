@@ -90,7 +90,6 @@ export interface ThreadLive {
   loadOlder(): Promise<void>;
   /** Replaces a clipped row with its whole payload. */
   loadFullRow(eventId: number): Promise<void>;
-  /** One chunk of a compact tool result's saved output, from `offset`. Throws when the call fails. */
   loadOutput(eventId: number, offset: number): Promise<OutputChunk>;
   /** False while Ben reads older rows, so a new row does not trim what is on screen. */
   setFollowing(following: boolean): void;

@@ -17,7 +17,6 @@ export interface Disclosure {
 
 export const CLOSED: Disclosure = { turns: new Set(), calls: new Set() };
 
-/** What the list draws, one flat row each so the list can virtualize a long turn. Every row carries the key the list keys it by. */
 export type ThreadRow =
   | { kind: 'prompt'; key: string; p: Prompt; caption: string | null }
   | { kind: 'report'; key: string; r: ReportP }
@@ -39,10 +38,6 @@ export type ThreadRow =
 
 export type RowKind = ThreadRow['kind'];
 
-/**
- * Where each folded item draws. Exhaustive on purpose: a kind the fold learns has to be placed here before the app
- * compiles, so a new kind cannot go missing from the screen.
- */
 export const ITEM_ROWS: Record<Item['type'], readonly RowKind[]> = {
   user: ['prompt'],
   text: ['prose', 'note'],
@@ -58,14 +53,11 @@ export const ITEM_ROWS: Record<Item['type'], readonly RowKind[]> = {
 
 export interface RowsInput {
   events: readonly HistoryEvent[];
-  /** The history's spans: only their rows show. Left out, every row shows. */
   spans?: readonly Span[];
   thread: Thread;
   artifacts: Artifact[];
   children: Thread[];
-  /** Whether the thread's first loaded page reaches its first row, so the opening message can say who delegated it. */
   atStart: boolean;
-  /** The Conductor's own threads read their answer under its name. */
   conductor?: boolean;
   disclosure?: Disclosure;
 }
@@ -84,7 +76,6 @@ function* callRows(calls: ToolCall[], depth: number, open: ReadonlySet<string>, 
   }
 }
 
-/** The steps a turn shows once opened, in the order they ran. The turn's answer is the one text left out: it already reads above. */
 function* stepRows(t: IosTurn, open: ReadonlySet<string>, running: boolean): Generator<ThreadRow> {
   const answer = t.items.findLast((it) => it.type === 'text');
   for (const it of t.items) {
@@ -153,7 +144,6 @@ function keepRows(prev: readonly ThreadRow[], next: ThreadRow[]): ThreadRow[] {
   });
 }
 
-/** The summary line under an ended turn, like phone web's: "Done in 2m 10s · 4 steps · Claude Code". */
 export function outcomeText(r: Extract<ThreadRow, { kind: 'outcome' }>, took: string): string {
   const [word, after] = ENDED[r.status] ?? ['Ended', 'Ended after'];
   return [took ? `${after} ${took}` : word, r.steps ? `${r.steps} ${r.steps === 1 ? 'step' : 'steps'}` : null, harnessLabel(r.harness)].filter(Boolean).join(' · ');

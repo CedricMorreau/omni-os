@@ -23,7 +23,6 @@ import { CallRow, ModRow, NoteRow } from './Steps';
 
 type Views = { [K in RowKind]: ComponentType<{ row: Extract<ThreadRow, { kind: K }> }> };
 
-/** One component per row kind. Typed over every kind, so a row the model learns does not compile until it has a view. */
 const VIEWS: Views = {
   prompt: PromptRow,
   report: ReportRow,
@@ -44,10 +43,8 @@ const VIEWS: Views = {
   plan: PlanRow,
 };
 
-/** The space above a row. Steps sit close together, turns further apart. */
 const GAP: Partial<Record<RowKind, number>> = { call: space.s2, note: space.s4, mod: space.s2, switch: space.s4, prompt: space.s9 };
 
-/** Redraws only when its row is a different object. `threadRows` keeps every unchanged row the same object. */
 export const RowView = memo(function RowView({ row }: { row: ThreadRow }) {
   const Draw = VIEWS[row.kind] as ComponentType<{ row: ThreadRow }>;
   return (

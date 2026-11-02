@@ -26,7 +26,6 @@ const toggled = <T,>(set: ReadonlySet<T>, v: T): ReadonlySet<T> => {
   return next;
 };
 
-/** The thread's rows, rebuilt from its events. A row that did not change stays the object it was. */
 function useThreadRows(view: ThreadView, disclosure: Disclosure): ThreadRow[] {
   const prev = useRef<readonly ThreadRow[]>([]);
   const { thread } = view;

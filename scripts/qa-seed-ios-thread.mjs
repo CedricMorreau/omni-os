@@ -13,11 +13,8 @@
 //     --out PATH        write the table of title, id and event count as JSON
 //     --only TEXT       seed only the threads whose title contains TEXT (repeatable); a channel lists its five newest
 //
-// The channel goes through the API. Threads and events are written into <dir>/data/omni.db with node:sqlite while the
-// server runs (WAL, so it reads them at once): POST /threads would start a fake-claude turn and add events of its own.
-// A row is what the runner writes: events(uid, thread_id, kind, payload JSON string, created_at), searchable kinds in
-// search_fts, and a done thread with last_text set the way runner/records.ts sets it. Re-running replaces a thread of the
-// same title in place: same id, fresh events. Ids are derived from the title, so links survive a re-run.
+// Re-running replaces a thread of the same title in place: same id, fresh events. Ids are derived from the title, so
+// links survive a re-run.
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,10 +63,6 @@ async function api(path, init = {}) {
   return res;
 }
 
-// ---------- what to seed ----------
-
-/** @typedef {{ kind: string, payload: unknown, created_at?: string }} SeedEvent */
-/** @type {{ title: string, events: SeedEvent[] }[]} */
 const plan = [];
 
 const corpus = JSON.parse(readFileSync(join(ROOT, 'packages/test-fixtures/transcript/corpus.json'), 'utf8'));
@@ -87,19 +80,15 @@ if (existsSync(fixtureDir)) {
 }
 
 if (!opts['no-long']) {
-  // long-thread.ts has no imports, so Node 24.3+ and 26 load it as is.
   const { longThread } = await import(pathToFileURL(join(ROOT, 'packages/test-fixtures/long-thread.ts')).href);
   plan.push({ title: 'Long thread', events: longThread() });
 }
 
-// A channel shows its five newest threads, so a run with --only "Corpus: run-switch" reseeds just those and they land on top.
 if (opts.only?.length) {
   const keep = plan.filter((t) => opts.only.some((o) => t.title.includes(o)));
   if (!keep.length) die(`--only matched no thread title: ${opts.only.join(', ')}`);
   plan.splice(0, plan.length, ...keep);
 }
-
-// ---------- write ----------
 
 const uuidFrom = (s) => {
   const h = createHash('sha1').update(s).digest('hex');
@@ -115,7 +104,6 @@ function isJson(s) {
   }
 }
 
-/** A payload's text; the corpus keeps rows that are not JSON on purpose (undecodable-tool-use), which have none. */
 const text = (payload) => {
   try {
     const p = typeof payload === 'string' ? JSON.parse(payload) : payload;
@@ -125,7 +113,6 @@ const text = (payload) => {
   }
 };
 
-/** The assistant text after the last user message, the way runner/records.ts sets last_text. */
 function lastText(events) {
   let from = 0;
   events.forEach((e, i) => e.kind === 'user' && (from = i + 1));
@@ -133,7 +120,6 @@ function lastText(events) {
   return run.join('\n\n').slice(0, 600) || null;
 }
 
-// The channel goes through the API; an existing one is fine.
 const made = await api('/channels', {
   method: 'POST',
   body: JSON.stringify({ id: opts.channel, name: 'iOS QA', kind: 'internal', use_worktree: 0 }),
@@ -156,7 +142,6 @@ const insertFts = db.prepare('INSERT INTO search_fts (body, thread_id, event_id)
 const iso = (ms) => new Date(ms).toISOString();
 const now = Date.now();
 
-// The channel lists newest first: Rich fixtures on top, then Long thread, then the corpus cases in file order.
 const order = (t) => (t.title.startsWith('Rich: ') ? 0 : t.title === 'Long thread' ? 1 : 2);
 plan.sort((a, b) => order(a) - order(b));
 
@@ -189,10 +174,8 @@ plan.forEach((t, n) => {
 });
 db.close();
 
-// A rename of the channel to itself publishes a feed event, so open clients reload their lists.
 await api(`/channels/${opts.channel}`, { method: 'PATCH', body: JSON.stringify({ name: 'iOS QA' }) });
 
-// Every thread must open through the same read the clients use.
 const failures = [];
 for (const s of seeded) {
   const res = await api(`/threads/${s.id}/history`);
