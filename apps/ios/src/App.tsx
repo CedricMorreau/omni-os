@@ -1,5 +1,6 @@
 import { DarkTheme, DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootNavigator } from './navigation/RootNavigator';
@@ -24,14 +25,16 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
-      <PairingProvider>
-        <NavigationContainer theme={navTheme}>
-          <ActiveSessionProvider>
-            <RootNavigator />
-          </ActiveSessionProvider>
-        </NavigationContainer>
-      </PairingProvider>
+      <KeyboardProvider>
+        <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+        <PairingProvider>
+          <NavigationContainer theme={navTheme}>
+            <ActiveSessionProvider>
+              <RootNavigator />
+            </ActiveSessionProvider>
+          </NavigationContainer>
+        </PairingProvider>
+      </KeyboardProvider>
     </SafeAreaProvider>
   );
 }
