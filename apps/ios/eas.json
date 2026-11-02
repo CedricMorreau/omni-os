@@ -30,5 +30,13 @@
       "autoIncrement": true,
       "ios": { "image": "macos-tahoe-26.6-xcode-27.1" }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID"
+      }
+    }
   }
 }

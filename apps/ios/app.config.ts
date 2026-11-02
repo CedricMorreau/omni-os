@@ -12,27 +12,57 @@ export function apsEnvironment(easProfile: string | undefined): 'development' | 
   return easProfile === 'production' || easProfile === 'preview' ? 'production' : 'development';
 }
 
+/**
+ * Whether the build carries the development client, which adds the Metro launcher. EAS sets EAS_BUILD_PROFILE. A local
+ * `expo run:ios` has none and gets the client. Store and internal test builds run the app alone.
+ */
+export function usesDevClient(easProfile: string | undefined): boolean {
+  return easProfile !== 'production' && easProfile !== 'preview';
+}
+
 const config: ExpoConfig = {
-  name: 'Omni OS',
+  name: 'Omni',
   slug: 'omni-os-ios',
   version: '0.1.0',
   scheme: 'omni-os',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
+  icon: './assets/icon.png',
   ios: {
     bundleIdentifier: 'app.omni-os.ios',
-    supportsTablet: true,
+    supportsTablet: false,
     infoPlist: {
       NSAppTransportSecurity: { NSAllowsLocalNetworking: true },
+      NSLocalNetworkUsageDescription: 'Omni OS connects to your Omni server on your local network.',
+      // Standard HTTPS and OS crypto only, which is exempt.
+      ITSAppUsesNonExemptEncryption: false,
+    },
+    privacyManifests: {
+      NSPrivacyTracking: false,
+      NSPrivacyTrackingDomains: [],
+      // The app sends its data to the user's own server, not to the developer, and includes no analytics or crash SDK.
+      NSPrivacyCollectedDataTypes: [],
+      NSPrivacyAccessedAPITypes: [],
     },
   },
   plugins: [
-    'expo-dev-client',
+    ...(usesDevClient(process.env.EAS_BUILD_PROFILE) ? ['expo-dev-client'] : []),
     ['expo-build-properties', { ios: { deploymentTarget: '18.0' } }],
-    ['expo-camera', { cameraPermission: CAMERA }],
+    // The scanner reads QR codes only: no video and no microphone.
+    ['expo-camera', { cameraPermission: CAMERA, microphonePermission: false }],
     ['expo-notifications', { mode: apsEnvironment(process.env.EAS_BUILD_PROFILE) }],
     // Photos only: no video, so no microphone.
     ['expo-image-picker', { photosPermission: 'Omni OS reads the photos you pick so you can attach them to a message.', cameraPermission: CAMERA, microphonePermission: false }],
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/icon.png',
+        resizeMode: 'contain',
+        imageWidth: 200,
+        backgroundColor: '#ffffff',
+        dark: { backgroundColor: '#121316' },
+      },
+    ],
   ],
   experiments: { reactCompiler: true },
 };
