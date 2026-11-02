@@ -1,3 +1,4 @@
+import { apiPath, createHttpClient, OmniHttpError, parseBaseUrl, type Fetch, type HttpClient } from '@omni/client-core';
 import type { AppPairingRedeemResponse, ServerCapabilities } from '@omni/shared/app-pairing.ts';
 
 export const SUPPORTED_API_VERSION = 1;
@@ -46,117 +47,97 @@ export interface PairingApi {
 }
 
 export interface PairingApiOptions {
-  fetch?: typeof fetch;
+  fetch?: Fetch;
   timeoutMs?: number;
 }
 
-interface RequestInput {
-  method: 'GET' | 'POST';
-  path: string;
-  token?: string;
-  body?: unknown;
-}
+type StatusKinds = Partial<Record<number, PairingApiErrorKind>>;
 
+/** Pairing's three calls on the shared HTTP layer: no redirect is followed, one timeout covers the body, one error type. */
 export function createPairingApi(options: PairingApiOptions = {}): PairingApi {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  // The timer covers the body read too, so a server that stalls mid-response is unreachable, not a hang.
-  async function send<T>(
+  async function call<T>(
     origin: string,
-    input: RequestInput,
-    handle: (response: Response, text: string) => T,
+    token: string | undefined,
+    byStatus: StatusKinds,
+    badBody: PairingApiErrorKind,
+    run: (http: HttpClient) => Promise<T>,
   ): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const fetchImpl = options.fetch ?? globalThis.fetch;
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      if (input.token !== undefined) headers.Authorization = `Bearer ${input.token}`;
-      if (input.body !== undefined) headers['Content-Type'] = 'application/json';
-
-      const response = await fetchImpl(`${origin}${input.path}`, {
-        method: input.method,
-        headers,
-        body: input.body === undefined ? undefined : JSON.stringify(input.body),
-        signal: controller.signal,
-        redirect: 'error',
-      });
-      // React Native's fetch ignores `redirect`, so also check where the response came from.
-      if (response.url !== '' && new URL(response.url).origin !== origin) {
-        throw new PairingApiError('unreachable', { origin });
-      }
-      return handle(response, await response.text());
+      const baseUrl = parseBaseUrl(origin);
+      if (!baseUrl) throw new PairingApiError('unreachable', { origin });
+      return await run(createHttpClient({ baseUrl, token: token ?? null, fetch: options.fetch, timeoutMs }));
     } catch (error) {
-      if (error instanceof PairingApiError) throw error;
-      throw new PairingApiError('unreachable', { origin });
-    } finally {
-      clearTimeout(timer);
+      throw toPairingError(origin, error, byStatus, badBody);
     }
   }
 
   return {
     redeemPairingCode({ origin, code, name }) {
-      return send(
-        origin,
-        { method: 'POST', path: '/api/auth/app-pairings/redeem', body: { code, name } },
-        (response, text) => {
-          if (response.ok) {
-            const body = parseJson(text);
-            if (isRecord(body) && isNonEmptyString(body.token) && isNonEmptyString(body.sessionId)) {
-              return { token: body.token, sessionId: body.sessionId };
-            }
-            throw new PairingApiError('server-error', { origin, status: response.status });
-          }
-          throw failureFor(origin, response, {
-            400: 'invalid-input',
-            404: 'code-unavailable',
-            429: 'rate-limited',
-          });
-        },
-      );
+      const statuses: StatusKinds = { 400: 'invalid-input', 404: 'code-unavailable', 429: 'rate-limited' };
+      return call(origin, undefined, statuses, 'server-error', async (http) => {
+        const body = await http.request('POST', apiPath`/auth/app-pairings/redeem`, { body: { code, name } });
+        if (isRecord(body) && isNonEmptyString(body.token) && isNonEmptyString(body.sessionId)) {
+          return { token: body.token, sessionId: body.sessionId };
+        }
+        throw new PairingApiError('server-error', { origin });
+      });
     },
 
     fetchCapabilities({ origin, token }) {
-      return send(
-        origin,
-        { method: 'GET', path: '/api/capabilities', token },
-        (response, text) => {
-          if (!response.ok) {
-            throw failureFor(origin, response, { 401: 'unauthorized', 404: 'incompatible' });
-          }
-          const body = parseJson(text);
-          if (!isRecord(body)) throw new PairingApiError('incompatible', { origin });
-          if (body.api !== SUPPORTED_API_VERSION) {
-            const api = typeof body.api === 'number' ? body.api : undefined;
-            throw new PairingApiError('incompatible', { origin, ...(api !== undefined && { api }) });
-          }
-          if (!hasCapabilitySections(body)) throw new PairingApiError('incompatible', { origin });
-          return body as unknown as ServerCapabilities;
-        },
-      );
+      return call(origin, token, { 401: 'unauthorized', 404: 'incompatible' }, 'incompatible', async (http) => {
+        const body = await http.request('GET', apiPath`/capabilities`);
+        if (!isRecord(body)) throw new PairingApiError('incompatible', { origin });
+        if (body.api !== SUPPORTED_API_VERSION) {
+          const api = typeof body.api === 'number' ? body.api : undefined;
+          throw new PairingApiError('incompatible', { origin, ...(api !== undefined && { api }) });
+        }
+        if (!hasCapabilitySections(body)) throw new PairingApiError('incompatible', { origin });
+        return body as unknown as ServerCapabilities;
+      });
     },
 
     signOut({ origin, token }) {
-      return send(origin, { method: 'POST', path: '/api/auth/signout', token }, (response) => {
-        if (!response.ok) throw failureFor(origin, response, { 401: 'unauthorized' });
+      return call(origin, token, { 401: 'unauthorized' }, 'server-error', async (http) => {
+        await http.request('POST', apiPath`/auth/signout`).catch((error: unknown) => {
+          // Any 2xx answer signed the phone out, whatever its body was.
+          const failure = error instanceof OmniHttpError ? error.failure : null;
+          if (failure?.kind !== 'not-json' && failure?.kind !== 'decoding') throw error;
+        });
       });
     },
   };
 }
 
-function failureFor(
+/** An answer with a status gets the kind its status maps to. Anything without an answer is unreachable. */
+function toPairingError(
   origin: string,
-  response: Response,
-  byStatus: Partial<Record<number, PairingApiErrorKind>>,
+  error: unknown,
+  byStatus: StatusKinds,
+  badBody: PairingApiErrorKind,
 ): PairingApiError {
-  const kind = byStatus[response.status] ?? 'server-error';
-  return new PairingApiError(kind, {
-    origin,
-    status: response.status,
-    ...(kind === 'rate-limited' && {
-      retryAfterSeconds: parseRetryAfter(response.headers.get('Retry-After')),
-    }),
-  });
+  if (error instanceof PairingApiError) return error;
+  if (!(error instanceof OmniHttpError)) return new PairingApiError('unreachable', { origin });
+
+  const failure = error.failure;
+  switch (failure.kind) {
+    case 'http': {
+      const kind = byStatus[failure.status] ?? 'server-error';
+      return new PairingApiError(kind, {
+        origin,
+        status: failure.status,
+        ...(kind === 'rate-limited' && { retryAfterSeconds: parseRetryAfter(failure.retryAfter) }),
+      });
+    }
+    case 'not-json':
+    case 'decoding':
+      return new PairingApiError(badBody, { origin });
+    case 'unreachable':
+    case 'cancelled':
+    case 'redirect':
+      return new PairingApiError('unreachable', { origin });
+  }
 }
 
 function parseRetryAfter(header: string | null): number {
@@ -165,14 +146,6 @@ function parseRetryAfter(header: string | null): number {
     if (seconds > 0) return seconds;
   }
   return DEFAULT_RETRY_AFTER_SECONDS;
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

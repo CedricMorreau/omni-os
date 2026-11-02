@@ -1,3 +1,4 @@
+import type { Fetch } from '@omni/client-core';
 import { describe, expect, it } from 'vitest';
 
 import { createPairingApi, PairingApiError, type PairingApiErrorKind } from './api';
@@ -14,13 +15,13 @@ const capabilities = {
 
 interface Call {
   url: string;
-  init: RequestInit;
+  init: Parameters<Fetch>[1];
 }
 
 function respond(status: number, body?: unknown, init: { headers?: Record<string, string>; url?: string } = {}) {
   const response = new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    headers: init.headers,
+    headers: { 'Content-Type': 'application/json', ...init.headers },
   });
   if (init.url !== undefined) Object.defineProperty(response, 'url', { value: init.url });
   return response;
@@ -28,11 +29,11 @@ function respond(status: number, body?: unknown, init: { headers?: Record<string
 
 function apiWith(handler: (call: Call) => Response | Promise<Response>, timeoutMs?: number) {
   const calls: Call[] = [];
-  const fakeFetch = (async (url: string, init: RequestInit) => {
+  const fakeFetch: Fetch = async (url, init) => {
     const call = { url, init };
     calls.push(call);
     return handler(call);
-  }) as unknown as typeof fetch;
+  };
   return { api: createPairingApi({ fetch: fakeFetch, timeoutMs }), calls };
 }
 
@@ -59,7 +60,7 @@ describe('redeemPairingCode', () => {
     expect(calls[0]?.url).toBe(`${ORIGIN}/api/auth/app-pairings/redeem`);
     expect(calls[0]?.init.method).toBe('POST');
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ code: 'abc', name: 'iPhone' });
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect(calls[0]?.init.headers.authorization).toBeUndefined();
   });
 
   it.each<[number, PairingApiErrorKind]>([
@@ -103,7 +104,7 @@ describe('fetchCapabilities', () => {
     await expect(api.fetchCapabilities({ origin: ORIGIN, token: 'tok' })).resolves.toEqual(capabilities);
 
     expect(calls[0]?.url).toBe(`${ORIGIN}/api/capabilities`);
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    expect(calls[0]?.init.headers.authorization).toBe('Bearer tok');
   });
 
   it('rejects another api version as incompatible and reports it', async () => {
@@ -126,7 +127,7 @@ describe('fetchCapabilities', () => {
   });
 
   it.each([
-    ['a non-JSON body', () => new Response('<html>', { status: 200 })],
+    ['a non-JSON body', () => new Response('<html>', { status: 200, headers: { 'Content-Type': 'text/html' } })],
     ['a JSON array', () => respond(200, [1])],
     ['api 1 without the capability sections', () => respond(200, { api: 1 })],
   ])('treats %s as incompatible', async (_label, make) => {
@@ -142,7 +143,7 @@ describe('signOut', () => {
     await api.signOut({ origin: ORIGIN, token: 'tok' });
     expect(calls[0]?.url).toBe(`${ORIGIN}/api/auth/signout`);
     expect(calls[0]?.init.method).toBe('POST');
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    expect(calls[0]?.init.headers.authorization).toBe('Bearer tok');
   });
 
   it('propagates a failure', async () => {
@@ -168,6 +169,14 @@ describe('unreachable servers', () => {
     );
     const error = await failureOf(api.fetchCapabilities({ origin: ORIGIN, token: 'tok' }));
     expect(error.kind).toBe('unreachable');
+  });
+
+  it('refuses a redirect and never asks for the target', async () => {
+    const { api, calls } = apiWith(() => respond(302, undefined, { headers: { Location: 'https://evil.example.net/' } }));
+    const error = await failureOf(api.fetchCapabilities({ origin: ORIGIN, token: 'tok' }));
+    expect(error.kind).toBe('unreachable');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init.redirect).toBe('manual');
   });
 
   it('accepts a response whose url is on the same origin', async () => {

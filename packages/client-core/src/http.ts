@@ -11,16 +11,35 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 /** Query parameters, `undefined` ones left out. A string is a query already encoded, as `@omni/shared`'s builders make. */
 export type Query = Readonly<Record<string, string | number | undefined>> | string;
 
+export interface FetchResponse {
+  status: number;
+  headers: { get(name: string): string | null };
+  text(): Promise<string>;
+  /** Where the answer came from after any redirects. Empty or missing when the platform does not say. */
+  url?: string;
+  /** `opaqueredirect` is what a browser's fetch gives for a redirect it was told not to follow. */
+  type?: string;
+}
+
 export type Fetch = (
   url: string,
-  init: { method: HttpMethod; headers: Record<string, string>; body?: string; signal?: AbortSignal },
-) => Promise<{ status: number; headers: { get(name: string): string | null }; text(): Promise<string> }>;
+  init: {
+    method: HttpMethod;
+    headers: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+    /** Always `manual`: a redirect is never followed, because the request may carry the bearer token. */
+    redirect: 'manual';
+  },
+) => Promise<FetchResponse>;
 
 export interface HttpClientConfig {
   baseUrl: BaseUrl;
   /** Sent as `Authorization: Bearer`. A function is read again on every request. */
   token: string | null | (() => string | null | Promise<string | null>);
   fetch?: Fetch;
+  /** Gives up on a request, its body read included, after this long. The request then fails as `unreachable`. */
+  timeoutMs?: number;
 }
 
 export interface RequestOptions<T> {
@@ -36,12 +55,14 @@ export type HttpFailure =
   /** No answer at all: the server is down, the address is wrong, or the connection dropped. */
   | { kind: 'unreachable'; detail: string }
   /** A non-2xx answer. `message` is the server's `{error}` or its text; `body` the parsed reply, for a 409's `code`. */
-  | { kind: 'http'; status: number; message: string; body: unknown }
+  | { kind: 'http'; status: number; message: string; body: unknown; retryAfter: string | null }
   /** A 2xx answer that is not JSON, like the Web UI's index.html for a path the server does not route. */
   | { kind: 'not-json'; status: number; contentType: string | null }
   /** JSON that does not parse, or that `parse` refused. */
   | { kind: 'decoding'; detail: string }
-  | { kind: 'cancelled' };
+  | { kind: 'cancelled' }
+  /** The server answered with a redirect, or the platform followed one to another origin. Refused: the token stays with the server. */
+  | { kind: 'redirect' };
 
 export class OmniHttpError extends Error {
   readonly failure: HttpFailure;
@@ -64,6 +85,8 @@ function failureMessage(f: HttpFailure): string {
       return `The server sent data this app can't read: ${f.detail}`;
     case 'cancelled':
       return 'Cancelled.';
+    case 'redirect':
+      return 'The server redirected the request to another address. The app refuses to follow it.';
   }
 }
 
@@ -72,6 +95,15 @@ export function parseBaseUrl(input: string): BaseUrl | null {
   const m = input.trim().match(/^(https?):\/\/([^/?#@\s]+)(\/[^?#\s]*)?$/i);
   if (!m) return null;
   return `${m[1].toLowerCase()}://${m[2]}${(m[3] ?? '').replace(/\/+$/, '')}` as BaseUrl;
+}
+
+/** `scheme://host[:port]` in lower case with a default port dropped, or null when `url` is not an absolute http(s) URL. */
+export function originOf(url: string): string | null {
+  const m = url.match(/^(https?):\/\/([^/?#\s]+)/i);
+  if (!m || m[2].includes('@')) return null;
+  const scheme = m[1].toLowerCase();
+  const host = m[2].toLowerCase().replace(scheme === 'https' ? /:443$/ : /:80$/, '');
+  return `${scheme}://${host}`;
 }
 
 /** Tag for API paths: apiPath`/threads/${id}/messages`. Each value is encoded, so an id with `/` or `?` stays one segment. */
@@ -120,8 +152,20 @@ export interface HttpClient {
   request<T = unknown>(method: HttpMethod, path: ApiPath, options?: RequestOptions<T>): Promise<T>;
 }
 
+/**
+ * A redirect is never followed. Where `fetch` honors `redirect: 'manual'` the redirect target is never contacted, so
+ * the token cannot reach it. Where it does not (React Native's fetch ignores the option), the answer is still refused
+ * when it did not come from the server's own origin, so nothing another origin sends is read.
+ */
+function redirected(res: FetchResponse, serverOrigin: string | null): boolean {
+  if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) return true;
+  if (!res.url) return false;
+  return originOf(res.url) !== serverOrigin;
+}
+
 export function createHttpClient(config: HttpClientConfig): HttpClient {
-  const send = config.fetch ?? (globalThis.fetch as Fetch);
+  const send = config.fetch ?? (globalThis.fetch as unknown as Fetch);
+  const serverOrigin = originOf(config.baseUrl);
 
   const url = (path: ApiPath, query?: Query) => {
     const q = queryString(query);
@@ -135,22 +179,49 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     if (token?.trim()) headers.authorization = `Bearer ${token.trim()}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
 
+    // One controller covers the caller's signal and the timeout. The timer runs through the body read.
+    const timeout = config.timeoutMs === undefined ? null : new AbortController();
+    let timedOut = false;
+    const timer = timeout
+      ? setTimeout(() => {
+          timedOut = true;
+          timeout.abort();
+        }, config.timeoutMs)
+      : undefined;
+    const onAbort = () => timeout?.abort();
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort);
+
     let status: number;
     let contentType: string | null;
+    let retryAfter: string | null;
     let text: string;
     try {
-      const res = await send(url(path, options.query), { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
+      const res = await send(url(path, options.query), {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: timeout ? timeout.signal : signal,
+        redirect: 'manual',
+      });
+      if (redirected(res, serverOrigin)) throw new OmniHttpError({ kind: 'redirect' });
       status = res.status;
       contentType = res.headers.get('content-type');
+      retryAfter = res.headers.get('retry-after');
       text = await res.text();
     } catch (err) {
+      if (err instanceof OmniHttpError) throw err;
+      if (timedOut) throw new OmniHttpError({ kind: 'unreachable', detail: 'timed out' });
       if (signal?.aborted || (err as { name?: unknown } | null)?.name === 'AbortError') throw new OmniHttpError({ kind: 'cancelled' });
       throw new OmniHttpError({ kind: 'unreachable', detail: describe(err) });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
 
     if (status < 200 || status > 299) {
       const data = text ? parseJson(text) : null;
-      throw new OmniHttpError({ kind: 'http', status, message: errorMessage(data, contentType, status), body: data });
+      throw new OmniHttpError({ kind: 'http', status, message: errorMessage(data, contentType, status), body: data, retryAfter });
     }
     if (!isJson(contentType)) throw new OmniHttpError({ kind: 'not-json', status, contentType });
     let json: unknown;

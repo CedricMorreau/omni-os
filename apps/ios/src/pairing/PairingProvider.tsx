@@ -9,7 +9,8 @@ import {
 import { AppState } from 'react-native';
 
 import { describePairingError, revokedNotice } from './messages';
-import { pairingService, pairingVault } from './runtime';
+import { pairingService } from './runtime';
+import type { CheckResult } from './service';
 import { activeServer, emptyIndex, type PairedServer, type ServerIndex } from './servers';
 import type { ServerStatus } from './status';
 
@@ -24,8 +25,11 @@ interface PairingContextValue {
   remove(id: string): Promise<void>;
   refreshActive(): Promise<void>;
   clearNotice(): void;
-  getActiveToken(): Promise<string | null>;
+  /** Checks with the server that it still accepts the phone. False when it does not, and it is forgotten by then. */
+  confirmSignedIn(id: string): Promise<boolean>;
 }
+
+type CheckOutcome = CheckResult['kind'] | 'failed';
 
 const PairingContext = createContext<PairingContextValue | null>(null);
 
@@ -45,7 +49,7 @@ export function PairingProvider({ children }: { children: ReactNode }) {
   // Handlers that outlive a render (AppState, awaited checks) read the latest index here.
   const indexRef = useRef<ServerIndex>(emptyIndex);
   const loadedRef = useRef(false);
-  const checksRef = useRef(new Map<string, Promise<void>>());
+  const checksRef = useRef(new Map<string, Promise<CheckOutcome>>());
 
   function applyIndex(next: ServerIndex) {
     indexRef.current = next;
@@ -60,7 +64,7 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     setStatusById((current) => ({ ...current, [id]: status }));
   }
 
-  async function runCheck(id: string) {
+  async function runCheck(id: string): Promise<CheckOutcome> {
     setStatus(id, 'checking');
     try {
       const result = await service.checkServer(id);
@@ -79,12 +83,14 @@ export function PairingProvider({ children }: { children: ReactNode }) {
         case 'stale':
           break;
       }
+      return result.kind;
     } catch {
       setStatus(id, 'unreachable');
+      return 'failed';
     }
   }
 
-  function check(id: string): Promise<void> {
+  function check(id: string): Promise<CheckOutcome> {
     const running = checksRef.current.get(id);
     if (running) return running;
     const started = runCheck(id).finally(() => checksRef.current.delete(id));
@@ -140,9 +146,8 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     },
     refreshActive,
     clearNotice: () => setNotice(null),
-    async getActiveToken() {
-      const id = indexRef.current.activeId;
-      return id === null ? null : pairingVault.getToken(id);
+    async confirmSignedIn(id) {
+      return (await check(id)) === 'ready';
     },
   };
 
