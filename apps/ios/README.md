@@ -1,6 +1,8 @@
 # Omni OS for iOS
 
-This development client pairs with an Omni server, then reads its channels and threads and follows them live. It is read only: sending messages comes in a later milestone. Expo Go is not supported.
+This development client pairs with an Omni server, reads its channels and threads, follows them live and sends messages to them. Expo Go is not supported.
+
+A thread has a composer pinned above the keyboard. While a turn runs, a message steers the agent when its harness can take input mid-turn and otherwise queues for after the turn, and the placeholder and the send button's label say which. A message shows in the thread as sending, and if the network fails it stays there with Retry, which sends it again under the same request id so the server answers with the first acceptance instead of taking the message twice, and Edit, which puts the text back in the box and focuses it. If the server got the message but its answer was lost, the failed row goes as soon as the thread stream shows it, so it never appears twice. Stop replaces Send when the box is empty and a turn can be stopped. Messages held after a server restart show Resume, which sends the ones that never reached the agent, and Discard on each. A message that may have reached the agent also shows Send again, as on the web.
 
 ## Run on the iOS simulator
 

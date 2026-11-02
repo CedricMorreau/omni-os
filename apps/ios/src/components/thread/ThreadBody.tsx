@@ -1,12 +1,11 @@
 import { useMemo } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { PendingMsg } from '@omni/client-core';
-
 import type { ThreadLive, ThreadView } from '../../live/hub';
 import { foldTranscript } from '../../live/transcript';
-import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../../theme';
+import { fontSize, minTarget, space, useOmniTheme } from '../../theme';
 import { TranscriptRow } from '../TranscriptRow';
+import { PendingRows } from './PendingRows';
 
 /** Within this many points of the newest row, the thread counts as followed. */
 const FOLLOW_SLACK = 48;
@@ -30,27 +29,10 @@ export function ThreadBody({ view, live }: { view: ThreadView; live: ThreadLive 
       onEndReached={() => void live?.loadOlder()}
       onEndReachedThreshold={0.4}
       keyboardDismissMode="interactive"
-      ListHeaderComponent={<PendingList pending={view.pending} />}
+      ListHeaderComponent={live ? <PendingRows view={view} live={live} /> : undefined}
       ListFooterComponent={<OlderFooter hasOlder={view.hasOlder} loading={view.loadingOlder} empty={items.length === 0} onLoad={() => void live?.loadOlder()} />}
       ListEmptyComponent={view.status === 'ready' ? <Text style={[styles.meta, { color: colors.fg3 }]}>No messages yet.</Text> : undefined}
     />
-  );
-}
-
-function PendingList({ pending }: { pending: PendingMsg[] }) {
-  const { colors } = useOmniTheme();
-  if (pending.length === 0) return null;
-  return (
-    <View style={styles.pending}>
-      {pending.map((p) => (
-        <View key={p.uuid} style={[styles.pendingItem, { backgroundColor: colors.surface }]}>
-          <Text style={[styles.meta, { color: colors.fg3 }]}>{pendingLabel(p)}</Text>
-          <Text numberOfLines={3} style={[styles.pendingText, { color: colors.fg2 }]}>
-            {p.text}
-          </Text>
-        </View>
-      ))}
-    </View>
   );
 }
 
@@ -78,11 +60,6 @@ function OlderFooter({ hasOlder, loading, empty, onLoad }: { hasOlder: boolean; 
   );
 }
 
-function pendingLabel(p: PendingMsg): string {
-  if (p.kind === 'crew_report') return 'Crew report';
-  return p.state === 'held' ? 'Held' : 'Waiting for the agent';
-}
-
 const styles = StyleSheet.create({
   meta: {
     fontSize: fontSize.meta,
@@ -91,19 +68,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.s9,
     paddingVertical: space.s6,
     gap: space.s8,
-  },
-  pending: {
-    gap: space.s4,
-    paddingBottom: space.s6,
-  },
-  pendingItem: {
-    borderRadius: radius.md,
-    padding: space.s6,
-    gap: space.s2,
-  },
-  pendingText: {
-    fontSize: fontSize.body,
-    lineHeight: Math.round(fontSize.body * lineHeight.body),
   },
   olderRow: {
     minHeight: minTarget,

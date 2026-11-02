@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canSteer, type HarnessId } from '../src/api/harnesses.ts';
 import { OmniHttpError } from '../src/http.ts';
 import { api, at } from './api-helpers.ts';
 
@@ -141,5 +142,23 @@ describe('sending', () => {
     const { sent, api: a } = api();
     await a.stop('t1');
     expect(sent).toEqual([{ method: 'POST', url: at('/threads/t1/stop') }]);
+  });
+});
+
+describe('canSteer', () => {
+  const row = (id: string, steer: boolean) => ({ id: id as HarnessId, capabilities: { steer, warmProcess: true, interrupt: true, inlineImages: true, usage: 'none' as const } });
+
+  it('falls back to every harness but Cursor and Cursor Cloud while the catalog is missing', () => {
+    for (const catalog of [null, undefined, []]) {
+      expect(canSteer('claude-code', catalog)).toBe(true);
+      expect(canSteer('hermes', catalog)).toBe(true);
+      expect(canSteer('cursor', catalog)).toBe(false);
+      expect(canSteer('cursor-cloud', catalog)).toBe(false);
+    }
+  });
+
+  it("uses the harness's own row even when it disagrees with the fallback", () => {
+    expect(canSteer('cursor', [row('cursor', true)])).toBe(true);
+    expect(canSteer('codex', [row('codex', false)])).toBe(false);
   });
 });

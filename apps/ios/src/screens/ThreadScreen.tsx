@@ -1,8 +1,11 @@
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { Notice } from '../components/Notice';
 import { ThreadBody } from '../components/thread/ThreadBody';
+import { ThreadComposer } from '../components/thread/ThreadComposer';
 import { ThreadFooter } from '../components/thread/ThreadFooter';
 import { ThreadHeader } from '../components/thread/ThreadHeader';
 import { useThreadLive, useThreadView } from '../live/react';
@@ -14,6 +17,7 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   const { colors } = useOmniTheme();
   const live = useThreadLive(id);
   const view = useThreadView(live);
+  const headerHeight = useHeaderHeight();
 
   const title = view?.thread?.title || 'Thread';
   useEffect(() => {
@@ -27,11 +31,15 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.bg }]}>
+    <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={[styles.screen, { backgroundColor: colors.bg }]}>
       <ThreadHeader view={view} />
       <ThreadBody view={view} live={live} />
-      <ThreadFooter />
-    </View>
+      {live && view.thread ? (
+        <ThreadFooter>
+          <ThreadComposer live={live} thread={view.thread} />
+        </ThreadFooter>
+      ) : null}
+    </KeyboardAvoidingView>
   );
 }
 

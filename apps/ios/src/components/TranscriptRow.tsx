@@ -3,25 +3,21 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { TranscriptItem } from '../live/transcript';
 import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
+import { UserBubble } from './UserBubble';
 
-/** One folded transcript item. Read only: the phone draws what the desktop draws, and sending comes later. */
+/** One folded transcript item, as the desktop draws it. */
 export function TranscriptRow({ item, onLoadWhole }: { item: TranscriptItem; onLoadWhole: (eventId: number) => void }) {
   const { colors } = useOmniTheme();
 
   switch (item.kind) {
     case 'user':
       return (
-        <View style={styles.userWrap}>
-          <View style={[styles.bubble, { backgroundColor: colors.surface2 }]}>
-            <Text selectable style={[styles.bubbleText, { color: colors.fg }]}>
-              {item.text}
-            </Text>
-            <Text style={[styles.caption, { color: colors.fg3 }]}>
-              {[item.mode ? MODE_LABEL[item.mode] : null, item.dropped ? 'Not delivered' : null].filter(Boolean).join(' · ') || 'You'}
-            </Text>
-            {item.clipped ? <LoadWhole onPress={() => onLoadWhole(item.key)} /> : null}
-          </View>
-        </View>
+        <UserBubble
+          text={item.text}
+          caption={[item.mode ? MODE_LABEL[item.mode] : null, item.dropped ? 'Not delivered' : null].filter(Boolean).join(' · ') || 'You'}
+        >
+          {item.clipped ? <LoadWhole onPress={() => onLoadWhole(item.key)} /> : null}
+        </UserBubble>
       );
 
     case 'text':
@@ -104,20 +100,6 @@ function LoadWhole({ onPress }: { onPress: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  userWrap: {
-    alignItems: 'flex-end',
-  },
-  bubble: {
-    maxWidth: '86%',
-    borderRadius: radius.xl,
-    paddingHorizontal: space.s8,
-    paddingVertical: space.s6,
-    gap: space.s2,
-  },
-  bubbleText: {
-    fontSize: fontSize.input,
-    lineHeight: Math.round(fontSize.input * lineHeight.body),
-  },
   block: {
     gap: space.s2,
   },

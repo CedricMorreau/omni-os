@@ -45,6 +45,13 @@ export interface Acceptance {
 
 export type PostedThread = Thread & { request: Acceptance };
 
+/** One row of GET /threads/:id/requests: a message the server accepted, by the id the client sent it under. */
+export interface MessageRequestRow {
+  id: string;
+  request_id: string;
+  state: DeliveryState;
+}
+
 /** POST /threads/:id/messages, without files. A prompt, context, or both. */
 export interface SendMessageRequest {
   prompt: string;
@@ -66,5 +73,7 @@ export function messagesApi(http: HttpClient) {
     answerQuestion: (id: string, questionId: string, answers: readonly Answer[]) =>
       http.request<AnswerResult>('POST', apiPath`/threads/${id}/questions/${questionId}/answer`, { body: { answers } }),
     stop: (id: string) => http.request<Thread>('POST', apiPath`/threads/${id}/stop`),
+    /** The thread's accepted messages, newest first. A user row on the stream carries no `request_id`, so this is how a client learns whether its own send landed. */
+    requests: (id: string) => http.request<MessageRequestRow[]>('GET', apiPath`/threads/${id}/requests`),
   };
 }
