@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { portLabel, RUN_STATE_LABEL, SETUP_MODE_LABEL, type ActionRun, type ChannelAction } from '@omni/shared/channel-actions.ts';
+import { liveRun, portLabel, RUN_STATE_LABEL, SETUP_MODE_LABEL, type ActionRun, type ChannelAction } from '@omni/shared/channel-actions.ts';
 import type { Thread } from '../../../api.ts';
-import { liveRun, outputCut, RUN_GLYPH, runSummary, useThreadActions } from '../../../channel-actions.ts';
+import { outputCut, RUN_GLYPH, runSummary, useThreadActions } from '../../../channel-actions.ts';
 import { relTime } from '../../../format.ts';
 import { href } from '../../../router.ts';
 import { Button, Chip, Empty, ErrorNote, Icon, IconButton, Loading, StatusPill } from '../../ui.tsx';

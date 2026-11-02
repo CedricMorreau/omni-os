@@ -64,5 +64,7 @@ export function channelsApi(http: HttpClient) {
     channelThreads: (id: string, o?: ListArchived) => http.request<Thread[]>('GET', apiPath`/channels/${id}/threads`, { query: archivedQuery(o) }),
     /** Every folder, or one channel's. */
     folders: (channel?: string) => http.request<Folder[]>('GET', apiPath`/folders`, { query: { channel } }),
+    /** Opens or closes a folder in every client's channel list: the server keeps the state. A 404 for a folder it does not have. */
+    setFolderCollapsed: (id: string, collapsed: boolean) => http.request<Folder>('PATCH', apiPath`/folders/${id}`, { body: { collapsed } }),
   };
 }

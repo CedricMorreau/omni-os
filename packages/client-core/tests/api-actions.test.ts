@@ -143,3 +143,44 @@ describe('sending', () => {
     expect(sent).toEqual([{ method: 'POST', url: at('/threads/t1/stop') }]);
   });
 });
+
+describe('channel actions in a thread', () => {
+  it("reads a thread's actions and runs, in one call", async () => {
+    const reply = { actions: [{ id: 'a1', name: 'Tests' }], runs: [], blocked: null, setup_run: null };
+    const { sent, api: a } = api({ json: reply });
+    expect(await a.threadActions('t 1')).toEqual(reply);
+    expect(sent).toEqual([{ method: 'GET', url: at('/threads/t%201/actions') }]);
+  });
+
+  it('runs, stops and retries with no body, each answering with the run', async () => {
+    const run = { id: 'r1', state: 'running' };
+    const { sent, api: a } = api({ status: 201, json: run });
+    expect(await a.runAction('t1', 'a/1')).toEqual(run);
+    await a.stopActionRun('t1', 'r1');
+    await a.retryActionRun('t1', 'r1');
+    expect(sent).toEqual([
+      { method: 'POST', url: at('/threads/t1/actions/a%2F1/run') },
+      { method: 'POST', url: at('/threads/t1/action-runs/r1/stop') },
+      { method: 'POST', url: at('/threads/t1/action-runs/r1/retry') },
+    ]);
+  });
+
+  it("surfaces the server's reason when a thread cannot run an action", async () => {
+    const { api: a } = api({ status: 409, json: { error: 'Its worktree is still being prepared.' } });
+    const error = await a.runAction('t1', 'a1').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OmniHttpError);
+    expect((error as OmniHttpError).failure).toMatchObject({ kind: 'http', status: 409, message: 'Its worktree is still being prepared.' });
+  });
+});
+
+describe('folders', () => {
+  it('opens and closes one by id, sending only collapsed', async () => {
+    const { sent, api: a } = api({ json: { id: 'f 1', collapsed: 1 } });
+    expect(await a.setFolderCollapsed('f 1', true)).toEqual({ id: 'f 1', collapsed: 1 });
+    await a.setFolderCollapsed('f 1', false);
+    expect(sent).toEqual([
+      { method: 'PATCH', url: at('/folders/f%201'), body: { collapsed: true } },
+      { method: 'PATCH', url: at('/folders/f%201'), body: { collapsed: false } },
+    ]);
+  });
+});
