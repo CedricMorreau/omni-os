@@ -87,6 +87,8 @@ export interface LiveHub {
   refreshLibrary(): Promise<void>;
   /** The file's bytes, fetched with the token here and handed on as content. Nothing downstream holds the token. */
   fetchArtifactFile(artifact: Pick<Artifact, 'id' | 'updated_at'>, signal?: AbortSignal): Promise<RawResponse>;
+  /** One request that is not part of the live state, such as a search or a settings change. It retries once after a 401. */
+  call<T>(run: (api: OmniApi) => Promise<T>): Promise<T>;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -385,6 +387,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     refreshChannels,
     refreshActivity: activity.refresh,
     refreshLibrary: library.refresh,
+    call: (run) => withAuth(() => run(requireApi())),
     fetchArtifactFile: (artifact, signal) => withAuth(() => requireApi().artifactFile(artifact, signal)),
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);

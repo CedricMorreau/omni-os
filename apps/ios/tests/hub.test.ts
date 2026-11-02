@@ -169,6 +169,25 @@ describe('channel list', () => {
     hub.close();
   });
 
+  it('runs a one-off request with the same retry, and refuses when unpaired', async () => {
+    let searches = 0;
+    const refreshAuth = vi.fn(async () => true);
+    const { fetch } = fakeFetch((path) => {
+      if (!path.startsWith('/api/search')) return { body: [] };
+      searches += 1;
+      return searches === 1 ? { status: 401, body: { error: 'expired' } } : { body: [{ thread_id: 't1' }] };
+    });
+    const hub = createLiveHub({ session: session({ refreshAuth }), transport: fakeTransport().transport, fetch });
+    await settle();
+    expect(await hub.call((api) => api.search('fix'))).toEqual([{ thread_id: 't1' }]);
+    expect(refreshAuth).toHaveBeenCalledOnce();
+    hub.close();
+
+    const unpaired = createLiveHub({ session: session({ serverUrl: null }), transport: fakeTransport().transport, fetch });
+    await expect(unpaired.call((api) => api.search('fix'))).rejects.toThrow('Not paired');
+    unpaired.close();
+  });
+
   it('keeps the last list on screen when a refetch fails', async () => {
     let fail = false;
     const { fetch } = fakeFetch(() => (fail ? { status: 500, body: { error: 'down' } } : { body: [channel('kept')] }));

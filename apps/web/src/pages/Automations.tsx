@@ -5,7 +5,8 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { api, errorText, useApi, type Automation, type Thread, type SyncStatus } from '../api.ts';
 import { DeliveryHistory } from '../components/DeliveryHistory.tsx';
 import { Button, Chip, CopyButton, Empty, ErrorNote, Icon, InlineConfirm, Loading, PageHeader, Picker, StatusDot, Toggle } from '../components/ui.tsx';
-import { artifactChannels, describeArtifactSource, describeCron, describeEvent, describeWebhookSource, nextRunLabel, relTime, shortPath } from '../format.ts';
+import { describeCron } from '@omni/shared/cron.ts';
+import { artifactChannels, describeArtifactSource, describeEvent, describeWebhookSource, nextRunLabel, relTime, shortPath } from '../format.ts';
 import { href, navigate } from '../router.ts';
 import { useApp, useFeed } from '../store.tsx';
 

@@ -6,14 +6,14 @@ import { ConnectScreen } from '../screens/ConnectScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { useHasSession } from '../session/ActiveSession';
 import { useOmniTheme } from '../theme';
-import { detailScreens, serversButton, Stack, stackOptions } from './detail-screens';
+import { detailScreens, rootHeader, Stack, stackOptions } from './detail-screens';
 import { createNativeTabsNavigator } from './native-tabs';
 import { activityTabLabel, needsBadge } from './tabs-model';
 import type { TabsParamList } from './types';
 
 const Tab = createNativeTabsNavigator<TabsParamList>();
 
-/** No session shows Connect alone. Any session opens the tabs on Activity, with Servers one tap away on each tab's root. */
+/** No session shows Connect alone. Any session opens the tabs on Activity, with Search and Settings one tap away on each tab's root. */
 export function RootNavigator() {
   const { colors } = useOmniTheme();
   const { ready } = usePairing();
@@ -56,7 +56,7 @@ function ActivityStack() {
       <Stack.Screen
         name="Activity"
         component={ActivityScreen}
-        options={({ navigation }) => ({ title: 'Activity', headerRight: serversButton(navigation) })}
+        options={({ navigation }) => ({ title: 'Activity', ...rootHeader(navigation) })}
       />
       {detailScreens({ backTitle: 'Activity' })}
     </Stack.Navigator>
@@ -70,7 +70,7 @@ function LibraryStack() {
       <Stack.Screen
         name="Library"
         component={LibraryScreen}
-        options={({ navigation }) => ({ title: 'Library', headerRight: serversButton(navigation) })}
+        options={({ navigation }) => ({ title: 'Library', ...rootHeader(navigation) })}
       />
       {detailScreens({ backTitle: 'Library' })}
     </Stack.Navigator>
@@ -84,7 +84,7 @@ function ChannelsStack() {
       <Stack.Screen
         name="Channels"
         component={ChannelsScreen}
-        options={({ navigation }) => ({ title: 'Channels', headerRight: serversButton(navigation) })}
+        options={({ navigation }) => ({ title: 'Channels', ...rootHeader(navigation) })}
       />
       {detailScreens({ backTitle: 'Channels' })}
     </Stack.Navigator>
