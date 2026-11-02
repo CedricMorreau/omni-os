@@ -15,6 +15,7 @@ import {
   type HttpClient,
   type OmniApi,
   type PendingMsg,
+  type RawResponse,
   type SSEClient,
   type SSEState,
   type SSETransport,
@@ -25,6 +26,7 @@ import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
 import { createActivityLive, type ActivityState } from './activity';
 import { linkOf, type Link } from './connection';
+import { createLibraryLive, type LibraryState } from './library';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
 
@@ -79,8 +81,12 @@ export interface LiveHub {
   /** The header's link state, reduced from the feed and the open thread. */
   readonly link: Store<Link>;
   readonly activity: Store<ActivityState>;
+  readonly library: Store<LibraryState>;
   refreshChannels(): Promise<void>;
   refreshActivity(): Promise<void>;
+  refreshLibrary(): Promise<void>;
+  /** The file's bytes, fetched with the token here and handed on as content. Nothing downstream holds the token. */
+  fetchArtifactFile(artifact: Pick<Artifact, 'id' | 'updated_at'>, signal?: AbortSignal): Promise<RawResponse>;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -128,6 +134,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   }
 
   const activity = createActivityLive({ api, withAuth, now });
+  const library = createLibraryLive({ api, withAuth, now });
 
   function requireApi(): OmniApi {
     if (!api) throw new Error('Not paired');
@@ -182,11 +189,13 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       onMessage: (message) => {
         if (isListChange(message)) scheduleRefresh();
         activity.applyFeed(message);
+        library.applyFeed(message);
       },
       // The feed keeps no replay, so every reconnect refetches the list. The open thread catches up through its own stream.
       onReconnect: () => {
         void refreshChannels();
         void activity.refresh();
+        void library.refresh();
       },
       onState: (state) => {
         feedState = state;
@@ -364,6 +373,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     startFeed(http);
     void refreshChannels();
     void activity.refresh();
+    void library.refresh();
   }
   recomputeLink();
 
@@ -371,8 +381,11 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     channels,
     link,
     activity: activity.state,
+    library: library.state,
     refreshChannels,
     refreshActivity: activity.refresh,
+    refreshLibrary: library.refresh,
+    fetchArtifactFile: (artifact, signal) => withAuth(() => requireApi().artifactFile(artifact, signal)),
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -391,6 +404,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         for (const t of openThreads) t.resume();
         void refreshChannels();
         void activity.refresh();
+        void library.refresh();
       }
       recomputeLink();
     },
@@ -402,6 +416,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     close() {
       if (refreshTimer !== null) clearTimeout(refreshTimer);
       refreshTimer = null;
+      library.close();
       feed?.close();
       feed = null;
       for (const t of [...openThreads]) t.close();

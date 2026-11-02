@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useState, useSyncExternalStore, t
 import { AppState } from 'react-native';
 import EventSource from 'react-native-sse';
 
-import { createLiveHub, type LiveHub, type ThreadLive, type ThreadView } from './hub';
+import { clearArtifactCache } from '../artifacts/files';
+import { createLiveHub,type LiveHub, type ThreadLive, type ThreadView } from './hub';
 import type { Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
@@ -19,6 +20,7 @@ export function LiveProvider({ session, children }: { session: OmniSession; chil
   const [hub, setHub] = useState<LiveHub | null>(null);
 
   useEffect(() => {
+    clearArtifactCache();
     const next = createLiveHub({ session, transport: eventSourceTransport(EventSource) });
     setHub(next);
     const appState = AppState.addEventListener('change', (state) => next.setForeground(state === 'active'));
@@ -62,14 +64,18 @@ export function useNeedsYouCount(): number {
 }
 
 /** A pull-to-refresh that shows its spinner only for a pull. A refresh the app starts itself, as on returning to the front, stays quiet. */
-export function usePullRefresh() {
+export function usePullRefresh(load: (hub: LiveHub) => Promise<unknown> = (hub) => Promise.all([hub.refreshChannels(), hub.refreshActivity()])) {
   const hub = useLiveHub();
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = () => {
     setRefreshing(true);
-    void Promise.all([hub.refreshChannels(), hub.refreshActivity()]).finally(() => setRefreshing(false));
+    void load(hub).finally(() => setRefreshing(false));
   };
   return { refreshing, onRefresh };
+}
+
+export function useLibrary() {
+  return useStore(useLiveHub().library);
 }
 
 export function useLink(): Link {
