@@ -4,6 +4,7 @@ import { duration, plural } from '../format.ts';
 import { href } from '../router.ts';
 import { useApp } from '../store.tsx';
 import { DelegationCard } from './Delegation.tsx';
+import { HtmlRender } from './HtmlRender.tsx';
 import { PublishedCard } from './Published.tsx';
 import { CloudAgentCard } from './thread/CloudAgentCard.tsx';
 import { PRWakeList } from './thread/PRWatch.tsx';
@@ -16,6 +17,7 @@ import { slashPieces } from '@omni/shared/slash-pills.ts';
 import { statusLabel } from '../status-line.ts';
 import type { SlashHit } from '@omni/shared/slash.ts';
 import { publishedFrom, type Published } from '@omni/shared/published.ts';
+import { renderedFrom } from '@omni/shared/html-render.ts';
 import { handoverNote, switchText } from '@omni/shared/run-switch.ts';
 import { ContextChips, hasContext } from '../message-context/ContextChips.tsx';
 import { buildItems, buildTasks, keepSame, same, type FoldPlan, type Item, toolLabel, toolSummary, type ReportP, type ResultP, type Todo, type ModLine, type SwitchItem, type ToolCall, type UserP } from '@omni/shared/transcript-fold.ts';
@@ -356,6 +358,12 @@ const ItemRow = memo(
         case 'tools': {
           const { agents, rest, agentsFirst } = splitGroup(it.calls);
           const cards = [
+            // Pages html_render showed, right under the call, before the reply.
+            ...flatten(it.calls).flatMap((c) => {
+              const r = renderedFrom(c.name, c.input, c.result);
+              const a = r && artifacts.find((x) => x.id === r.artifact);
+              return a ? [<HtmlRender key={`r${c.id}`} a={a} title={r.title} />] : [];
+            }),
             ...delegations(it.calls).map((d) => (
               <DelegationCard key={`d${d.key}`} lead={d.lead && withLive(d.lead, byId)} branches={d.branches.map((b) => withLive(b, byId))} reports={reports} />
             )),

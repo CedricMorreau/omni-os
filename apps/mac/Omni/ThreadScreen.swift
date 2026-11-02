@@ -530,6 +530,12 @@ private struct TranscriptRow: View {
           ToolGroupView(group: kept, live: live && kept.hasPending, running: running, cwd: cwd, ui: ui, agents: agents)
         }
         if !agentsFirst { subagentCard(subagents) }
+        // Pages html_render showed, right under the call, before the reply.
+        ForEach(RenderedPage.shown(in: group), id: \.artifact) { page in
+          if let a = artifacts.first(where: { $0.id == page.artifact }) {
+            HtmlRenderView(artifact: a, page: page, model: model)
+          }
+        }
         ForEach(cards) { DelegationCard(delegation: $0, model: model, reports: reports) }
         ForEach(pages[group.eventID] ?? []) { page in
           PublishedCard(page: page, threadID: threadID, artifact: artifacts.last { $0.url == page.url }, model: model)

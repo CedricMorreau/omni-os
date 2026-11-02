@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import { existsSync, readFileSync } from 'node:fs';
 import { relative } from 'node:path';
+import { isRenderPath, withFrameScript } from '@omni/shared/html-render.ts';
 import { mimeFor } from './artifacts.ts';
 import { paths } from './config.ts';
 import { artifacts } from './db.ts';
@@ -26,5 +27,7 @@ artifactsApi.get('/:id/raw', async (c) => {
   // Opened in a tab of its own, an HTML or SVG artifact would run on Omni's origin and pass requestGuard. Sandboxed, its origin is opaque.
   if (a.kind === 'html' || a.kind === 'svg') c.header('Content-Security-Policy', 'sandbox allow-scripts allow-popups');
   if (c.req.query('download')) c.header('Content-Disposition', `attachment; filename="${a.name}"`);
+  // A page html_render showed, in the transcript's frame: it reports its height and takes Omni's theme.
+  else if (c.req.query('frame') && isRenderPath(a.path)) return c.body(withFrameScript(readFileSync(a.path, 'utf8')));
   return c.body(readFileSync(a.path));
 });

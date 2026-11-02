@@ -11,6 +11,8 @@ import { ContextChips, hasContext } from '../message-context/ContextChips.tsx';
 import { changesView } from '@omni/shared/changes-view.ts';
 import { atStart } from '@omni/shared/history.ts';
 import { href } from '../router.ts';
+import { isRenderPath } from '@omni/shared/html-render.ts';
+import { HtmlRender } from '../components/HtmlRender.tsx';
 import { ArtifactCard, ChangesCard, Clamped, Delegation, MoProse, NowLine, Outcome, Plan, Report, StepsRow, type TurnView } from './ThreadCards.tsx';
 import { MoBubble } from './parts.tsx';
 import { shortTime } from './rows.ts';
@@ -82,10 +84,14 @@ function TurnBody({ t, last, c }: { t: TurnView; last: boolean; c: TurnCtx }) {
         )}
         {t.error && <Clamped text={t.error} />}
         {t.cloud && <CloudAgentCard p={t.cloud} />}
+        {/* Pages html_render showed go above the reply, as on desktop. */}
+        {t.artifacts.filter((a) => isRenderPath(a.path)).map((a) => (
+          <HtmlRender key={a.id} a={a} title={a.name} onOpen={() => viewer(a)} />
+        ))}
         {t.prose && <MoProse text={t.prose} />}
         {t.prose && t.proseClipped && <ClippedNote event={t.proseClipped.key} clipped={t.proseClipped.clipped} />}
         {delegated}
-        {t.artifacts.map((a) => (
+        {t.artifacts.filter((a) => !isRenderPath(a.path)).map((a) => (
           <ArtifactCard key={a.id} a={a} sub={`#${ch?.name ?? thread.channel_id} · ${shortTime(a.updated_at, now)}`} onOpen={() => viewer(a)} />
         ))}
         {last && changes && changes.files.length > 0 && <ChangesCard files={changes.files} onOpen={() => shell.open(href.threadView(thread.id, pr?.pr ? 'pr' : 'changes'))} />}
