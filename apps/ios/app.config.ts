@@ -23,6 +23,7 @@ const config: ExpoConfig = {
         cameraPermission: 'Omni OS uses the camera to scan the pairing code shown on your computer.',
       },
     ],
+    ['expo-image-picker', { photosPermission: 'Omni OS reads the photos you pick so you can attach them to a message.' }],
   ],
   experiments: { reactCompiler: true },
 };
