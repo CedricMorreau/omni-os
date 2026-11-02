@@ -43,8 +43,6 @@ export function outputCut(run: ActionRun): string | null {
 /** A run's state as a dot: going is solid, failed is a ring, finished is faint. */
 export const runTone = (state: ActionRunState): 'ok' | 'warn' | 'muted' => (state === 'running' ? 'ok' : state === 'failed' ? 'warn' : 'muted');
 
-/** The line under an action's name: its command, then the port setting. */
 export const actionDetail = (action: Pick<ChannelAction, 'port'>) => portLabel(action.port);
 
-/** What a run row says first: when it started, then its summary. */
 export const runWhen = (run: ActionRun, now: number) => [shortAgo(run.started_at, now), runSummary(run, now)].filter(Boolean).join(' · ');

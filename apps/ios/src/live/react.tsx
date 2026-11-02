@@ -123,7 +123,6 @@ export function useThreadView(live: ThreadLive | null): ThreadView | null {
   );
 }
 
-/** Opens a thread's actions for as long as the calling screen is mounted. */
 export function useActionsLive(threadId: string): ActionsLive | null {
   const hub = useLiveHub();
   const [live, setLive] = useState<ActionsLive | null>(null);
@@ -140,7 +139,6 @@ export function useActionsLive(threadId: string): ActionsLive | null {
 
 const idleActions = createStore<null>(null);
 
-/** The thread's actions and runs, or null until the screen has opened them. */
 export function useActionsView(live: ActionsLive | null): ActionsView | null {
   return useSyncExternalStore(
     (listener) => (live ? live.view.subscribe(listener) : idleActions.subscribe(listener)),

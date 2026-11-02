@@ -50,6 +50,25 @@ describe('createActionsLive', () => {
     t.live.close();
   });
 
+  it('does not let a load that started before Run erase the run it started', async () => {
+    const t = setup(data([]));
+    await settle();
+    let answer!: (d: ThreadActions) => void;
+    t.api.threadActions.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const slow = t.live.reload();
+    await t.live.run(action('a'));
+    expect(t.live.view.get().data?.runs.map((r) => r.id)).toEqual(['run-a']);
+    t.serve(data([run('run-a', 'running')]));
+    answer(data([]));
+    await slow;
+    await settle();
+    expect(t.live.view.get().data?.runs.map((r) => r.id)).toEqual(['run-a']);
+    const calls = t.api.threadActions.mock.calls.length;
+    await settle(POLL_MS);
+    expect(t.api.threadActions.mock.calls.length).toBeGreaterThan(calls);
+    t.live.close();
+  });
+
   it('keeps the runs on screen when a poll fails, and tries again', async () => {
     const t = setup(data([run('r', 'running')]));
     await settle();

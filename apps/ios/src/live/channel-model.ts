@@ -111,7 +111,6 @@ export interface FolderSection {
   collapsed: boolean;
   /** Every row in the folder, busy and finished. */
   count: number;
-  /** The busy rows. */
   running: number;
   active: ThreadRow[];
   recent: ThreadRow[];

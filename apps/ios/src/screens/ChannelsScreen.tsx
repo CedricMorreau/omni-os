@@ -98,7 +98,7 @@ function ChannelRow({ channel, needs, onPress }: { channel: ChannelWithRunning; 
   const { colors } = useOmniTheme();
   const running = channel.running || 0;
   const subtitle = channelSubtitle(channel);
-  const label = [channel.name, needs > 0 && `${needs} need you`, running > 0 && `${running} running`].filter(Boolean).join(', ');
+  const label = [channel.name, needs > 0 && `${needs} ${needs === 1 ? 'needs' : 'need'} you`, running > 0 && `${running} running`].filter(Boolean).join(', ');
   return (
     <Pressable
       accessibilityRole="button"

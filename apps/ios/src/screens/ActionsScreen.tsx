@@ -12,7 +12,6 @@ import { fontSize, minTarget, radius, space, useOmniTheme } from '../theme';
 
 const MONO = 'Menlo';
 
-/** Ticks while a run runs, so its duration counts up. */
 function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {

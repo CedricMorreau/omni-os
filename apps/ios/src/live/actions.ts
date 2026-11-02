@@ -3,7 +3,6 @@ import type { OmniApi } from '@omni/client-core';
 
 import { createStore, type Store } from './store';
 
-/** How often a thread's runs are fetched again while one is going. */
 export const POLL_MS = 1000;
 
 export interface ActionsView {
@@ -24,7 +23,6 @@ export interface ActionsLive {
   run(action: ChannelAction): Promise<ActionRun | undefined>;
   stop(run: ActionRun): Promise<ActionRun | undefined>;
   retry(run: ActionRun): Promise<ActionRun | undefined>;
-  /** Stops polling while the app is in the background. */
   pause(): void;
   resume(): void;
   close(): void;
@@ -46,6 +44,7 @@ export function createActionsLive({ api, withAuth, threadId }: ActionsLiveOption
   let paused = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let loading: Promise<void> | null = null;
+  let answered = 0;
 
   const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'Something went wrong');
 
@@ -61,16 +60,20 @@ export function createActionsLive({ api, withAuth, threadId }: ActionsLiveOption
     if (!api || closed) return Promise.resolve();
     if (loading) return loading;
     view.set((v) => ({ ...v, loading: true }));
+    const startedAt = answered;
+    let stale = false;
     loading = (async () => {
       try {
         const data = await withAuth(() => api.threadActions(threadId));
-        if (!closed) view.set((v) => ({ ...v, data, error: null, loading: false }));
+        stale = startedAt !== answered;
+        if (!closed && !stale) view.set((v) => ({ ...v, data, error: null, loading: false }));
       } catch (e) {
         if (!closed) view.set((v) => ({ ...v, error: messageOf(e), loading: false }));
       }
     })().finally(() => {
       loading = null;
-      schedule();
+      if (stale && !closed) void reload();
+      else schedule();
     });
     return loading;
   }
@@ -81,6 +84,7 @@ export function createActionsLive({ api, withAuth, threadId }: ActionsLiveOption
     try {
       const run = await withAuth(call);
       if (closed) return run;
+      answered++;
       view.set((v) => ({ ...v, data: v.data ? withRun(v.data, run) : v.data }));
       return run;
     } catch (e) {

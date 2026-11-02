@@ -25,7 +25,7 @@ import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
 import { createActionsLive, type ActionsLive } from './actions';
 import { createActivityLive, type ActivityState } from './activity';
-import { createFolderCollapse } from './folders';
+import { createFolderCollapse, createPendingFolders } from './folders';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
@@ -86,7 +86,6 @@ export interface LiveHub {
   /** Opens or closes a folder for every client. Resolves to the failure's message, or null. */
   setFolderCollapsed(folderId: string, collapsed: boolean): Promise<string | null>;
   openThread(threadId: string): ThreadLive;
-  /** A thread's channel actions and runs, for as long as the screen holds it. */
   openActions(threadId: string): ActionsLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -146,6 +145,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     return http;
   }
 
+  const pendingFolders = createPendingFolders();
+
   // One refetch at a time. A call that arrives meanwhile asks for one more pass, so the last state wins.
   let refreshing: Promise<void> | null = null;
   let refreshAgain = false;
@@ -161,7 +162,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         refreshAgain = false;
         try {
           const list = await withAuth(() => requireApi().channels());
-          channels.set({ channels: list, loading: false, error: null, loadedAt: now() });
+          channels.set({ channels: pendingFolders.apply(list), loading: false, error: null, loadedAt: now() });
         } catch (e) {
           channels.set((s) => ({ ...s, loading: false, error: messageOf(e) }));
         }
@@ -172,7 +173,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     return refreshing;
   }
 
-  const setFolderCollapsed = createFolderCollapse({ api, withAuth, channels, refresh: refreshChannels });
+  const setFolderCollapsed = createFolderCollapse({ api, withAuth, channels, refresh: refreshChannels, pending: pendingFolders });
 
   function scheduleRefresh() {
     if (refreshTimer !== null) return;

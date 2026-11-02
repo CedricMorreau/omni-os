@@ -27,7 +27,7 @@ export function HandoffRowView({ row, open, onToggle, onOpenThread }: HandoffRow
       <ThreadRowView row={row} onPress={() => onOpenThread(row.id)} />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${open ? 'Hide' : 'Show'} ${summary} threads for ${row.title}`}
+        accessibilityLabel={`${open ? 'Hide' : 'Show'} ${children.length} delegated ${children.length === 1 ? 'thread' : 'threads'} for ${row.title}${running > 0 ? `, ${running} running` : ''}`}
         accessibilityState={{ expanded: open }}
         onPress={onToggle}
         hitSlop={4}
