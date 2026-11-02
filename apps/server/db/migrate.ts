@@ -548,4 +548,14 @@ export function migrate() {
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );`);
+  // Which alerts a device gets (apps/server/push-preferences.ts). A row exists only once the device changes something:
+  // no row means every kind is on. Deleted when the session ends, like its token.
+  db.exec(`CREATE TABLE IF NOT EXISTS push_preferences (
+    session_id TEXT PRIMARY KEY REFERENCES device_sessions(id) ON DELETE CASCADE,
+    needs_input INTEGER NOT NULL DEFAULT 1,
+    finished INTEGER NOT NULL DEFAULT 1,
+    failed INTEGER NOT NULL DEFAULT 1,
+    crew_report INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+  );`);
 }

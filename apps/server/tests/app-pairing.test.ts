@@ -10,6 +10,7 @@ const { app } = await import('../app.ts');
 const auth = await import('../google-auth.ts');
 const pairing = await import('../app-pairing.ts');
 const push = await import('../push-tokens.ts');
+const { pushTargets } = await import('../push-preferences.ts');
 const { sessionCookieName } = await import('../api-token.ts');
 
 const MASTER = process.env.OMNI_TOKEN!;
@@ -480,10 +481,10 @@ describe('push token', () => {
     await put(live.token, { ...PUSH, token: '11'.repeat(32) });
     await put(idle.token, { ...PUSH, token: '22'.repeat(32) });
     await put(gone.token, { ...PUSH, token: '33'.repeat(32) });
-    expect(push.livePushTokens().map((x) => x.sessionId).sort()).toEqual([live.sessionId, idle.sessionId, gone.sessionId].sort());
+    expect(pushTargets('needsInput').map((x) => x.sessionId).sort()).toEqual([live.sessionId, idle.sessionId, gone.sessionId].sort());
     r.db.db.prepare('UPDATE device_sessions SET last_seen_at = ? WHERE id = ?').run(new Date(Date.now() - 91 * 86_400_000).toISOString(), idle.sessionId);
     r.db.db.prepare('UPDATE device_sessions SET revoked_at = ? WHERE id = ?').run(new Date().toISOString(), gone.sessionId);
-    expect(push.livePushTokens().map((x) => x.sessionId)).toEqual([live.sessionId]);
+    expect(pushTargets('needsInput').map((x) => x.sessionId)).toEqual([live.sessionId]);
   });
 
   it('is deleted when its session is revoked, however that happens', async () => {

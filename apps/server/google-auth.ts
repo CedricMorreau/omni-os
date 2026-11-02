@@ -58,8 +58,8 @@ export function owner(): Owner | null {
 }
 
 /**
- * End the live sessions `where` selects: mark them revoked, drop their push tokens, and close the SSE streams they
- * hold. Returns their ids. The streams close after the rows commit, so a client that reconnects at once is refused.
+ * End the live sessions `where` selects: mark them revoked, drop their push tokens and alert choices, and close the SSE
+ * streams they hold. Returns their ids. The streams close after the rows commit, so a client that reconnects at once is refused.
  */
 function endSessions(where: string, ...params: string[]): string[] {
   const ids = tx(() => {
@@ -67,8 +67,9 @@ function endSessions(where: string, ...params: string[]): string[] {
     const ids = rows.map((r) => r.id);
     const at = now();
     for (const id of ids) db.prepare('UPDATE device_sessions SET revoked_at = ? WHERE id = ?').run(at, id);
-    // Their push tokens go with them (push-tokens.ts), in the same commit as the revoke.
+    // Their push tokens and alert choices go with them (push-tokens.ts, push-preferences.ts), in the same commit as the revoke.
     for (const id of ids) db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(id);
+    for (const id of ids) db.prepare('DELETE FROM push_preferences WHERE session_id = ?').run(id);
     return ids;
   });
   closeSessionStreams(ids);

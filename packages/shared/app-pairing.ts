@@ -34,6 +34,15 @@ export interface AppPushTokenStatus {
   updatedAt?: string;
 }
 
+/** The four things an alert can be about. The payload's `kind` is one of these. */
+export type AppPushKind = 'needsInput' | 'finished' | 'failed' | 'crewReport';
+
+/** Per-device alert choices. Each defaults to on until the device changes it. */
+export type AppPushPreferences = Record<AppPushKind, boolean>;
+
+/** A partial update: only the kinds sent change. */
+export type AppPushPreferencesUpdate = Partial<AppPushPreferences>;
+
 export interface ServerCapabilities {
   api: number;
   auth: {
