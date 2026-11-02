@@ -43,8 +43,8 @@ const DRAWN = new Set(['html', 'image', 'svg']);
 const ext = (name: string) => (name.includes('.') ? name.split('.').pop()! : 'file');
 const ENDED: Record<string, [string, string]> = { done: ['Done', 'Done in'], failed: ['Failed', 'Failed after'], stopped: ['Stopped', 'Stopped after'] };
 
-function MoProse({ text }: { text: string }) {
-  return <Markdown text={text} className="text-[15px] leading-[1.6] text-pretty" />;
+function MoProse({ text, files }: { text: string; files?: Artifact[] }) {
+  return <Markdown text={text} files={files} className="text-[15px] leading-[1.6] text-pretty" />;
 }
 
 function Outcome({ t, harness }: { t: TurnView; harness: string }) {
@@ -567,7 +567,7 @@ export function ThreadScreen() {
         )}
         {t.error && <Clamped text={t.error} />}
         {t.cloud && <CloudAgentCard p={t.cloud} />}
-        {t.prose && <MoProse text={t.prose} />}
+        {t.prose && <MoProse text={t.prose} files={files} />}
         {t.prose && t.proseClipped && <ClippedNote event={t.proseClipped.key} clipped={t.proseClipped.clipped} />}
         {delegated}
         {t.artifacts.map((a) => (

@@ -1,7 +1,7 @@
 // The screens pushed from a thread: its steps, changes and PR, the channel browser, the shell, details and a file.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { turnCount } from '@omni/shared/history.ts';
-import { api, artifactUrl, errorText, useApi, type HarnessWithRunning, type PRDetail } from '../api.ts';
+import { api, artifactUrl, errorText, useApi, type Artifact, type HarnessWithRunning, type PRDetail } from '../api.ts';
 import { HarnessMark, harnessLabel } from '../components/brand.tsx';
 import { ArtifactBody } from '../components/ArtifactViewer.tsx';
 import { AnnotateLayer, canAnnotate, useAfterAdd } from '../components/BrowserAnnotate.tsx';
@@ -87,9 +87,9 @@ function Step({ c, depth, running, cwd, tails }: { c: ToolCall; depth: number; r
   );
 }
 
-function StepItem({ it, running, cwd, tails }: { it: Item; running: boolean; cwd: string; tails: boolean }) {
+function StepItem({ it, running, cwd, tails, files }: { it: Item; running: boolean; cwd: string; tails: boolean; files: Artifact[] }) {
   if (it.type === 'tools') return it.calls.map((c) => <Step key={c.id} c={c} depth={0} running={running} cwd={cwd} tails={tails} />);
-  if (it.type === 'text') return <Markdown text={it.p.text} className="px-1 py-1 text-[14px] leading-[1.55] text-fg-2" />;
+  if (it.type === 'text') return <Markdown text={it.p.text} files={files} className="px-1 py-1 text-[14px] leading-[1.55] text-fg-2" />;
   if (it.type === 'error') return <ErrorNote>{it.p.text}</ErrorNote>;
   return null;
 }
@@ -114,7 +114,7 @@ export function StepsScreen({ turn }: { turn?: number }) {
       <MoHeader onBack={shell.back} title="Steps" sub={thread?.title} />
       <ThreadIdCtx.Provider value={thread?.id ?? ''}>
         <Body className="gap-2">
-          {t ? t.items.map((it) => <StepItem key={it.key} it={it} running={running} cwd={thread?.cwd ?? ''} tails={tails} />) : <MoEmpty>{held ? 'No steps yet.' : 'Loading'}</MoEmpty>}
+          {t ? t.items.map((it) => <StepItem key={it.key} it={it} running={running} cwd={thread?.cwd ?? ''} tails={tails} files={files} />) : <MoEmpty>{held ? 'No steps yet.' : 'Loading'}</MoEmpty>}
           {t && !t.steps && <MoEmpty>This turn answered without calling a tool.</MoEmpty>}
         </Body>
       </ThreadIdCtx.Provider>

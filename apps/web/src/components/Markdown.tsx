@@ -1,8 +1,10 @@
-import { memo, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink } from './LinkChip.tsx';
 import { MermaidDiagram } from './MermaidDiagram.tsx';
+import { Icon } from './ui.tsx';
+import { rehypeArtifactDownloads, type FileRef } from '../artifact-downloads.ts';
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g;
 const UUID_EXACT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -36,7 +38,15 @@ const components: Components = {
     }
     return <pre>{children}</pre>;
   },
-  a({ href, children }) {
+  a({ node, href, children }) {
+    const file = node?.properties.dataArtifactDownload;
+    if (typeof file === 'string') {
+      return (
+        <a href={href} download={file} aria-label={`Download ${file}`} title={`Download ${file}`} className="md-download">
+          <Icon name="download" size={13} />
+        </a>
+      );
+    }
     const internal = href?.startsWith('#');
     if (href && /^https?:\/\//i.test(href)) return <ExternalLink href={href}>{children}</ExternalLink>;
     return (
@@ -74,10 +84,13 @@ const components: Components = {
   },
 };
 
-export const Markdown = memo(function Markdown({ text, className = '' }: { text: string; className?: string }) {
+const NO_FILES: FileRef[] = [];
+
+export const Markdown = memo(function Markdown({ text, className = '', files = NO_FILES }: { text: string; className?: string; files?: FileRef[] }) {
+  const rehype = useMemo(() => (files.length ? [() => rehypeArtifactDownloads(files)] : undefined), [files]);
   return (
     <div className={`md ${className}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehype} components={components}>
         {linkThreadIds(text)}
       </ReactMarkdown>
     </div>

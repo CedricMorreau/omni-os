@@ -1141,7 +1141,7 @@ export const Transcript = memo(function Transcript({
       case 'text':
         return (
           <div key={it.key} className="group/msg flex flex-col">
-            <Markdown text={it.p.text ?? ''} />
+            <Markdown text={it.p.text ?? ''} files={artifacts} />
             <ClippedNote event={it.key} clipped={it.clipped} />
             <CopyMsg text={it.p.text ?? ''} />
           </div>
