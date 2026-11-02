@@ -60,6 +60,12 @@ Pass `follows` to `openThreadLive` and return false while the user reads older p
 
 `handOff`, `takeOver`, `cancelHandoff`, `continuePreview`, `continueThread` and `closeTerminal` reject with an `OmniHttpError` when the server refuses. A refusal's parsed reply is `error.failure.body` on an `http` failure. For a 409 from `continueThread` that body is `{code: 'busy', block}`, `{code: 'changed', preview}` or `{code: 'request_reused'}`. Pass the error to `startError` from `@omni/shared/continue-flow.ts` to read it. The sheet's reducer, the Start body with its retry-stable request id, and the Machine chip's rows are in `@omni/shared/continue-flow.ts` and `@omni/shared/thread-machine.ts`, the same code the Web UI runs.
 
+## Files
+
+`sendMessage` and `createThread` take the files as a last argument: `api.sendMessage(id, { prompt, request_id }, { files, onProgress, signal })`. A file is `{ uri, name, type }`, the part React Native's `FormData` reads from disk when the request goes out. With no files the call is the plain JSON request. With files it is multipart: the JSON body in a `payload` field and one `files` field per file, as the server's `readBody` reads them. A retry must send the same files under the same `request_id`, or the server does not call it a retry.
+
+`fetch` reports no upload progress in React Native. Pass `upload: xhrUploadTransport()` to `createHttpClient` and `onProgress` receives `{ sent, total }` as the body goes out. Without it uploads use `fetch` and never call `onProgress`. `signal` cancels either as `{ kind: 'cancelled' }`. The redirect guard applies to both. `XMLHttpRequest` follows a redirect itself, so a redirect to another origin is caught by the answer's `responseURL`, the same limit `fetch` has in React Native. `api.status()` reads `maxUploadMb`, the largest file the server takes.
+
 ## Protocol notes
 
 The server replays rows after the last thread event ID when the missing rows fit its budget. Otherwise it sends a recent snapshot. Snapshot application keeps the old and new spans apart, so the app can page the gap. Event IDs are global and need not be consecutive. The client deduplicates rows by ID, not stream messages, because EventSource implementations carry the last ID onto later messages without an ID.
@@ -68,6 +74,5 @@ T3 Code uses Effect atoms for its mobile presentation state. This package keeps 
 
 Server and integration limits:
 
-- JSON message and thread creation requests cannot include file uploads through this client. The server supports multipart requests, but this package does not yet wrap them.
 - The server returns HTTP 500 for an unknown channel during thread creation, rather than a client-error status.
 - The iOS scaffold and pairing service are separate work. No device runtime or pairing flow was tested here.

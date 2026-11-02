@@ -1,6 +1,6 @@
 import type { MessageContext } from '@omni/shared/message-context.ts';
 import type { Answer, AnswerPayload, QuestionState } from '@omni/shared/question.ts';
-import { apiPath, type HttpClient } from '../http.ts';
+import { apiPath, sendWithFiles, type HttpClient, type WithFiles } from '../http.ts';
 import type { Thread } from './threads.ts';
 
 export interface Attachment {
@@ -52,7 +52,7 @@ export interface MessageRequestRow {
   state: DeliveryState;
 }
 
-/** POST /threads/:id/messages, without files. A prompt, context, or both. */
+/** POST /threads/:id/messages. A prompt, context, or both. Files go beside it as a second argument to `sendMessage`. */
 export interface SendMessageRequest {
   prompt: string;
   /** Left out: `steer`. */
@@ -67,8 +67,12 @@ export type AnswerResult = { state: QuestionState; via: AnswerPayload['via'] };
 
 export function messagesApi(http: HttpClient) {
   return {
-    /** Send with a `request_id` and retry with the same one: the second answer is the first, marked `duplicate`. */
-    sendMessage: (id: string, body: SendMessageRequest) => http.request<PostedThread>('POST', apiPath`/threads/${id}/messages`, { body }),
+    /**
+     * Send with a `request_id` and retry with the same one: the second answer is the first, marked `duplicate`. With
+     * `files` the message goes as multipart, and the retry must send the same files for the server to call it a retry.
+     */
+    sendMessage: (id: string, body: SendMessageRequest, withFiles?: WithFiles) =>
+      sendWithFiles<PostedThread>(http, 'POST', apiPath`/threads/${id}/messages`, body, withFiles),
     /** One answer per question, null to skip it. */
     answerQuestion: (id: string, questionId: string, answers: readonly Answer[]) =>
       http.request<AnswerResult>('POST', apiPath`/threads/${id}/questions/${questionId}/answer`, { body: { answers } }),

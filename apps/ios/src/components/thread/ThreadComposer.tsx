@@ -1,8 +1,11 @@
-import { useRef, type ComponentRef, type ReactNode } from 'react';
+import { useRef, useState, type ComponentRef, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { HarnessInfo, Thread } from '@omni/client-core';
 
+import { AttachControl, AttachNotice } from '../../attachments/AttachControl';
+import { AttachmentChips } from '../../attachments/AttachmentChips';
+import { clearStaged, getStaged, removeStagedFile, restoreStaged, useStaged } from '../../attachments/staged';
 import type { ThreadLive } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canStop, composerPlaceholder, sendLabel } from '../../send/rules';
@@ -37,10 +40,13 @@ export function ThreadComposer({
   const catalog = useStore(live.catalog);
   const { outbox, stopping, notice } = useStore(live.send.state);
   const draft = useDraft(thread.id);
+  const files = useStaged(thread.id);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   useFocusRequests(thread.id, input);
 
-  const placeholder = composerPlaceholder(thread, catalog);
+  // The server takes files only with a message, so a file with no text says what is missing.
+  const placeholder = files.length > 0 && draft.trim() === '' ? 'Add a message to send with the files' : composerPlaceholder(thread, catalog);
   const empty = draft.trim() === '';
   const slotTaken = outbox.item !== null;
   const showStop = empty && !slotTaken && canStop(thread);
@@ -48,10 +54,16 @@ export function ThreadComposer({
   const send = async () => {
     if (empty || slotTaken) return;
     const text = draft;
+    const attached = getStaged(thread.id);
     setDraft(thread.id, '');
-    const sent = await live.send.submit(thread, text);
-    // A failed send keeps its text in the outbox. Nothing in the slot and nothing sent means it never started.
-    if (!sent && live.send.state.get().outbox.item === null) restoreDraft(thread.id, text);
+    clearStaged(thread.id);
+    setAttachNotice(null);
+    const sent = await live.send.submit(thread, text, attached);
+    // A failed send keeps its text and files in the outbox. Nothing in the slot and nothing sent means it never started.
+    if (!sent && live.send.state.get().outbox.item === null) {
+      restoreDraft(thread.id, text);
+      restoreStaged(thread.id, attached);
+    }
   };
 
   return (
@@ -64,7 +76,14 @@ export function ThreadComposer({
           {notice}
         </Text>
       ) : null}
+      {attachNotice ? <AttachNotice text={attachNotice} /> : null}
+      {files.length > 0 ? (
+        <View style={styles.chips}>
+          <AttachmentChips files={files} onRemove={(id) => removeStagedFile(thread.id, id)} />
+        </View>
+      ) : null}
       <View style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}>
+        <AttachControl scope={thread.id} disabled={slotTaken} onNotice={setAttachNotice} />
         <TextInput
           ref={input}
           accessibilityLabel={placeholder}
@@ -126,6 +145,9 @@ const styles = StyleSheet.create({
   nextTurn: {
     flexDirection: 'row',
   },
+  chips: {
+    paddingHorizontal: space.s2,
+  },
   notice: {
     fontSize: fontSize.meta,
     paddingHorizontal: space.s6,
@@ -135,7 +157,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     borderRadius: radius.xl,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingLeft: space.s6,
+    paddingLeft: space.s2,
     paddingRight: space.s2,
     paddingVertical: space.s2,
     gap: space.s2,

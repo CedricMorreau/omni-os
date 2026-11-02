@@ -1,5 +1,8 @@
 import type { ExpoConfig } from 'expo/config';
 
+// expo-camera and expo-image-picker both write NSCameraUsageDescription, so they share one sentence for both uses.
+const CAMERA = 'Omni OS uses the camera to scan the pairing code shown on your computer and to take photos you attach to a message.';
+
 /**
  * The APNs environment the build's `aps-environment` entitlement names. Only the development-client profiles talk to
  * Apple's sandbox. An internal-distribution (`preview`) or store build is signed for production, and the app registers
@@ -26,14 +29,10 @@ const config: ExpoConfig = {
   plugins: [
     'expo-dev-client',
     ['expo-build-properties', { ios: { deploymentTarget: '18.0' } }],
-    [
-      'expo-camera',
-      {
-        cameraPermission: 'Omni OS uses the camera to scan the pairing code shown on your computer.',
-      },
-    ],
+    ['expo-camera', { cameraPermission: CAMERA }],
     ['expo-notifications', { mode: apsEnvironment(process.env.EAS_BUILD_PROFILE) }],
-    ['expo-image-picker', { photosPermission: 'Omni OS reads the photos you pick so you can attach them to a message.' }],
+    // Photos only: no video, so no microphone.
+    ['expo-image-picker', { photosPermission: 'Omni OS reads the photos you pick so you can attach them to a message.', cameraPermission: CAMERA, microphonePermission: false }],
   ],
   experiments: { reactCompiler: true },
 };

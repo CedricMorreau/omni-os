@@ -1,6 +1,7 @@
 import { OmniHttpError } from '@omni/client-core';
 import { describe, expect, it } from 'vitest';
 
+import type { Staged } from '../attachments/model';
 import { beginSend, classifyFailure, EMPTY_OUTBOX, failSend, retrySend, settleSend, takeFailed, type Outbox, type SendFailure } from './outbox';
 
 const offline: SendFailure = { kind: 'offline', message: 'offline', ambiguous: true };
@@ -18,7 +19,7 @@ function started(text = 'hello', mode?: 'steer' | 'queue'): Outbox {
 describe('beginSend', () => {
   it('puts the trimmed message in the slot under a new id', () => {
     const o = beginSend(EMPTY_OUTBOX, '  hello \n', 'queue', () => 'a');
-    expect(o?.item).toEqual({ phase: 'sending', requestId: 'a', key: JSON.stringify(['hello', 'queue']), text: 'hello', mode: 'queue' });
+    expect(o?.item).toEqual({ phase: 'sending', requestId: 'a', key: JSON.stringify(['hello', 'queue', '']), text: 'hello', files: [], mode: 'queue' });
   });
 
   it('sends nothing for blank text', () => {
@@ -84,6 +85,33 @@ describe('retry without duplicates', () => {
   });
 });
 
+const photo: Staged = { id: 'p1', uri: 'file:///cache/a.jpg', name: 'a.jpg', type: 'image/jpeg', size: 1000, image: true, source: 'library' };
+const doc: Staged = { id: 'd1', uri: 'file:///cache/b.pdf', name: 'b.pdf', type: 'application/pdf', size: 2000, image: false, source: 'files' };
+
+describe('a message with files', () => {
+  it('holds its files in the slot and gives them back with its text on Edit', () => {
+    const o = beginSend(EMPTY_OUTBOX, 'look', undefined, () => 'a', [photo, doc])!;
+    expect(o.item).toMatchObject({ phase: 'sending', files: [photo, doc] });
+    const taken = takeFailed(failSend(o, 'a', offline))!;
+    expect(taken.text).toBe('look');
+    expect(taken.files).toEqual([photo, doc]);
+  });
+
+  it('keeps the request id for the same words with the same files, and takes a new one for other files', () => {
+    const o = beginSend(EMPTY_OUTBOX, 'look', undefined, () => 'first', [photo])!;
+    const { outbox } = takeFailed(failSend(o, 'first', offline))!;
+    expect(beginSend(outbox, 'look', undefined, () => 'second', [photo])?.item?.requestId).toBe('first');
+    expect(beginSend(outbox, 'look', undefined, () => 'third', [photo, doc])?.item?.requestId).toBe('third');
+    expect(beginSend(outbox, 'look', undefined, () => 'fourth')?.item?.requestId).toBe('fourth');
+  });
+
+  it('retries with the same files under the same id', () => {
+    const o = beginSend(EMPTY_OUTBOX, 'look', undefined, () => 'a', [photo])!;
+    const retried = retrySend(failSend(o, 'a', { kind: 'cancelled', message: 'x', ambiguous: true }))!;
+    expect(retried.item).toMatchObject({ phase: 'sending', requestId: 'a', files: [photo] });
+  });
+});
+
 describe('what can be retried', () => {
   it('retries a refused or server-failed message, not one the server signed out', () => {
     const o = started();
@@ -107,6 +135,9 @@ describe('classifyFailure', () => {
     ['no answer', new OmniHttpError({ kind: 'unreachable', detail: 'Network request failed' }), 'offline', true],
     ['timeout', new OmniHttpError({ kind: 'unreachable', detail: 'timed out' }), 'offline', true],
     ['a 401', http(401), 'signed-out', false],
+    ['a cancelled upload', new OmniHttpError({ kind: 'cancelled' }), 'cancelled', true],
+    ['a 413', http(413, '<html>Request Entity Too Large</html>'), 'refused', false],
+    ['a 415', http(415, 'Unsupported Media Type'), 'refused', false],
     ['a 409', http(409, 'This thread is on your other Mac.'), 'refused', false],
     ['a 400', http(400), 'refused', false],
     ['a 500', http(500, 'database is locked'), 'server', true],

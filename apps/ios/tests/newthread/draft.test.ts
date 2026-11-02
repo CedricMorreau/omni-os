@@ -257,3 +257,22 @@ describe('where a new thread runs', () => {
     expect(rows[2]?.sub).toBe('Asleep or offline');
   });
 });
+
+describe('a new thread with files', () => {
+  const request = { channel: 'acme', prompt: 'Look' } as never;
+  const photo = { id: 'p1', uri: 'file:///c/a.jpg', name: 'a.jpg', type: 'image/jpeg', size: 10, image: true, source: 'library' } as const;
+  const doc = { id: 'd1', uri: 'file:///c/b.pdf', name: 'b.pdf', type: 'application/pdf', size: 20, image: false, source: 'files' } as const;
+
+  it('keeps the thread id for the same words and files, and takes a new one for other files', () => {
+    const ids = ['one', 'two', 'three'];
+    const newId = () => ids.shift()!;
+    const first = attemptFor(null, request, newId, [photo]);
+    expect(attemptFor(first, { ...(request as object) } as never, newId, [photo])).toBe(first);
+    expect(attemptFor(first, request, newId, [photo, doc]).id).toBe('two');
+    expect(attemptFor(first, request, newId).id).toBe('three');
+  });
+
+  it('says a cancelled upload was cancelled, and that nothing was made', () => {
+    expect(createFailure(new OmniHttpError({ kind: 'cancelled' }))).toMatchObject({ kind: 'cancelled', message: expect.stringMatching(/cancel/i) });
+  });
+});

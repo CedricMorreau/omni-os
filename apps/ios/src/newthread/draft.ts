@@ -4,6 +4,7 @@ import type { Device } from '@omni/shared/handoff.ts';
 import { HERE, runOnRequest, runOnRows, type RunOnRow } from '@omni/shared/thread-machine.ts';
 import { AUTO_CHOICE, asksAuto } from '@omni/shared/thread-run.ts';
 
+import { filesKey, type Staged } from '../attachments/model';
 import { classifyFailure, type SendFailure } from '../send/outbox';
 import { runChipLabel, runSheetModel, type RunSheetModel, type RunThread } from '../thread/run-model';
 
@@ -117,10 +118,10 @@ export interface Attempt {
 
 /**
  * The id to send. The same request keeps its id across tries, so a reply lost on the way cannot leave two threads. Any change
- * to the request (the text, the channel, the model) is a different thread and takes a new id.
+ * to the request (the text, the channel, the model, the files) is a different thread and takes a new id.
  */
-export function attemptFor(prev: Attempt | null, request: Omit<CreateThreadRequest, 'id'>, newId: () => string): Attempt {
-  const key = JSON.stringify(request);
+export function attemptFor(prev: Attempt | null, request: Omit<CreateThreadRequest, 'id'>, newId: () => string, files: readonly Staged[] = []): Attempt {
+  const key = JSON.stringify([request, filesKey(files)]);
   return prev?.key === key ? prev : { key, id: newId() };
 }
 
@@ -152,12 +153,14 @@ export type CreateOutcome = { kind: 'created'; thread: Thread } | { kind: 'faile
 const ONCE = 'A second try will not start a second thread.';
 const OFFLINE = `Cannot reach the server. Try again when you are connected. ${ONCE}`;
 const SIGNED_OUT = 'The server no longer accepts this phone, so the thread was not started.';
+const CANCELLED = 'Upload cancelled, so the thread was not started. Try again, or remove a file.';
 
 /** A failure that may have reached the server says a retry is safe, because the request keeps its id. */
 export function createFailure(error: unknown): CreateFailure {
   const f = classifyFailure(error);
   if (f.kind === 'offline') return { kind: f.kind, message: OFFLINE };
   if (f.kind === 'signed-out') return { kind: f.kind, message: SIGNED_OUT };
+  if (f.kind === 'cancelled') return { kind: f.kind, message: CANCELLED };
   return { kind: f.kind, message: f.ambiguous ? `${f.message} ${ONCE}` : f.message };
 }
 

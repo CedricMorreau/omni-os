@@ -1,6 +1,6 @@
 import type { Run } from '@omni/shared/run-switch.ts';
 import type { BasePick } from '@omni/shared/worktree-base.ts';
-import { apiPath, type HttpClient } from '../http.ts';
+import { apiPath, sendWithFiles, type HttpClient, type WithFiles } from '../http.ts';
 
 export type ThreadStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'imported';
 export type ThreadSource = 'manual' | 'automation' | 'conductor' | 'import' | 'capture' | 'team';
@@ -99,7 +99,7 @@ export function threadsApi(http: HttpClient) {
   return {
     threads: (o: ListThreads = {}) => http.request<Thread[]>('GET', apiPath`/threads`, { query: { ...o } }),
     /** Starts its first turn, or its worktree's setup. On another machine, the thread here is `stopped`. */
-    createThread: (body: CreateThreadRequest) => http.request<Thread>('POST', apiPath`/threads`, { body }),
+    createThread: (body: CreateThreadRequest, withFiles?: WithFiles) => sendWithFiles<Thread>(http, 'POST', apiPath`/threads`, body, withFiles),
     /** Any of the edits at once. A 409 for pinning an archived thread or marking a running or queued one done. */
     patchThread: patch,
     /** A 409 for a running or queued thread. */

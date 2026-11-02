@@ -1,6 +1,7 @@
-import type { Fetch, SSEConnection, SSESink, SSETransport } from '@omni/client-core';
+import type { Fetch, SSEConnection, SSESink, SSETransport, UploadInit, UploadTransport } from '@omni/client-core';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { Staged } from '../src/attachments/model';
 import { createLiveHub } from '../src/live/hub';
 import type { OmniSession } from '../src/live/session';
 import { composerPlaceholder, sendLabel, sendModeFor } from '../src/send/rules';
@@ -216,7 +217,7 @@ describe('a dropped connection', () => {
     await live.send.submit(t, 'first');
     expect(await live.send.submit(t, 'second')).toBeNull();
     expect(posts()).toHaveLength(1);
-    expect(live.send.edit()).toBe('first');
+    expect(live.send.edit()).toEqual({ text: 'first', files: [] });
     expect(live.send.state.get().outbox.item).toBeNull();
     hub.close();
   });
@@ -428,6 +429,133 @@ describe('held messages offer what each can safely do', () => {
     await live.send.resume();
     expect(posts()[0]).toMatchObject({ path: '/api/threads/t1/requests/resume', body: {} });
     expect(live.send.state.get().heldBusy).toBeNull();
+    hub.close();
+  });
+});
+
+const photo: Staged = { id: 'p1', uri: 'file:///cache/a.jpg', name: 'a.jpg', type: 'image/jpeg', size: 1000, image: true, source: 'library' };
+const doc: Staged = { id: 'd1', uri: 'file:///cache/b.pdf', name: 'b.pdf', type: 'application/pdf', size: 2000, image: false, source: 'files' };
+
+type UploadReply = { status?: number; body?: unknown } | 'drop' | 'wait';
+
+/** A thread whose files go through an upload transport the test drives, as the phone's XMLHttpRequest one does. */
+async function withUpload(reply: (init: UploadInit, call: number) => UploadReply) {
+  const uploads: { url: string; init: UploadInit }[] = [];
+  const upload: UploadTransport = (url, init) => {
+    uploads.push({ url, init });
+    const r = reply(init, uploads.length);
+    if (r === 'drop') return Promise.reject(new TypeError('Network request failed'));
+    if (r === 'wait') {
+      return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }))));
+    }
+    return Promise.resolve({
+      status: r.status ?? 200,
+      headers: { get: (n: string) => (n.toLowerCase() === 'content-type' ? 'application/json' : null) },
+      text: async () => JSON.stringify(r.body ?? {}),
+    });
+  };
+  const s = server((req) => {
+    if (req.method === 'GET' && req.path === '/api/threads/t1/requests') return { body: [] };
+    if (req.method === 'GET' && req.path === '/api/harnesses') return { body: harnesses };
+    if (req.method === 'GET' && req.path === '/api/threads/t1') return { body: detail() };
+    if (req.method === 'GET') return { body: [] };
+    return undefined;
+  });
+  const session: OmniSession = { serverUrl: BASE, token: async () => 'token', refreshAuth: async () => false };
+  const hub = createLiveHub({ session, transport, fetch: s.fetch, upload });
+  const live = hub.openThread('t1');
+  await vi.waitFor(() => expect(live.view.get().status).toBe('ready'));
+  await vi.waitFor(() => expect(live.catalog.get()).not.toBeNull());
+  return { live, hub, uploads, posts: s.posts };
+}
+
+describe('sending files', () => {
+  it('uploads the files with the message as one multipart request, and sends no separate JSON post', async () => {
+    const { live, hub, uploads, posts } = await withUpload(() => ({ body: accepted('x') }));
+    const out = await live.send.submit(live.view.get().thread!, 'look at these', [photo, doc]);
+    expect(out).not.toBeNull();
+    expect(posts()).toHaveLength(0);
+    expect(uploads).toHaveLength(1);
+    expect(new URL(uploads[0].url).pathname).toBe('/api/threads/t1/messages');
+    expect(uploads[0].init.headers).toMatchObject({ authorization: 'Bearer token' });
+    expect(uploads[0].init.files).toEqual([
+      { uri: photo.uri, name: 'a.jpg', type: 'image/jpeg' },
+      { uri: doc.uri, name: 'b.pdf', type: 'application/pdf' },
+    ]);
+    expect(JSON.parse(uploads[0].init.payload)).toEqual({ prompt: 'look at these', request_id: expect.any(String) });
+    expect(live.send.state.get().outbox.item).toBeNull();
+    hub.close();
+  });
+
+  it('shows the share of the body sent, in whole percents, and clears it when the send ends', async () => {
+    const seen: (number | null)[] = [];
+    const { live, hub } = await withUpload((init) => {
+      for (const sent of [10, 11, 50, 100]) init.onProgress?.({ sent, total: 100 });
+      return { body: accepted('x') };
+    });
+    live.send.state.subscribe(() => seen.push(live.send.state.get().progress));
+    await live.send.submit(live.view.get().thread!, 'hi', [photo]);
+    expect(seen.filter((p, i) => p !== null && p !== seen[i - 1])).toEqual([0.1, 0.11, 0.5, 1]);
+    expect(live.send.state.get().progress).toBeNull();
+    hub.close();
+  });
+
+  it('sends text alone as plain JSON, with no upload', async () => {
+    const { live, hub, uploads } = await withUpload(() => ({ body: accepted('x') }));
+    await live.send.submit(live.view.get().thread!, 'no files');
+    expect(uploads).toHaveLength(0);
+    hub.close();
+  });
+
+  it('keeps the text and files when offline, and retries them under the same request id', async () => {
+    const { live, hub, uploads } = await withUpload((_, call) => (call === 1 ? 'drop' : { body: accepted('x') }));
+    const t = live.view.get().thread!;
+    await live.send.submit(t, 'look', [photo]);
+    expect(live.send.state.get().outbox.item).toMatchObject({ phase: 'failed', text: 'look', files: [photo], failure: { kind: 'offline' } });
+
+    expect(await live.send.retry()).not.toBeNull();
+    expect(uploads).toHaveLength(2);
+    expect(uploads[1].init.files).toEqual(uploads[0].init.files);
+    expect(JSON.parse(uploads[1].init.payload).request_id).toBe(JSON.parse(uploads[0].init.payload).request_id);
+    expect(live.send.state.get().outbox.item).toBeNull();
+    hub.close();
+  });
+
+  it('cancels an upload in flight, and keeps the message and its files to retry or edit', async () => {
+    const { live, hub, uploads } = await withUpload(() => 'wait');
+    const sending = live.send.submit(live.view.get().thread!, 'big one', [doc]);
+    await vi.waitFor(() => expect(uploads).toHaveLength(1));
+    live.send.cancelUpload();
+    expect(await sending).toBeNull();
+    expect(live.send.state.get().outbox.item).toMatchObject({ phase: 'failed', files: [doc], failure: { kind: 'cancelled' } });
+    expect(live.send.state.get().progress).toBeNull();
+    expect(live.send.edit()).toEqual({ text: 'big one', files: [doc] });
+    hub.close();
+  });
+
+  it('tells Ben a file is too large in the server’s words, and keeps the files', async () => {
+    const { live, hub } = await withUpload(() => ({ status: 400, body: { error: '"clip.mov" is 31.0 MB, over the 25 MB limit' } }));
+    await live.send.submit(live.view.get().thread!, 'hi', [doc]);
+    expect(live.send.state.get().outbox.item).toMatchObject({ phase: 'failed', files: [doc], failure: { kind: 'refused', message: '"clip.mov" is 31.0 MB, over the 25 MB limit' } });
+    hub.close();
+  });
+
+  it('ends in signed-out for a revoked phone, with nothing to retry', async () => {
+    const { live, hub, uploads } = await withUpload(() => ({ status: 401, body: { error: 'unauthorized' } }));
+    await live.send.submit(live.view.get().thread!, 'hi', [photo]);
+    expect(live.send.state.get().outbox.item).toMatchObject({ failure: { kind: 'signed-out' }, files: [photo] });
+    expect(await live.send.retry()).toBeNull();
+    expect(uploads).toHaveLength(1);
+    hub.close();
+  });
+
+  it('is a different message when the same words go with other files', async () => {
+    const { live, hub, uploads } = await withUpload((_, call) => (call === 1 ? 'drop' : { body: accepted('x') }));
+    const t = live.view.get().thread!;
+    await live.send.submit(t, 'look', [photo]);
+    const taken = live.send.edit()!;
+    await live.send.submit(t, taken.text, [photo, doc]);
+    expect(JSON.parse(uploads[1].init.payload).request_id).not.toBe(JSON.parse(uploads[0].init.payload).request_id);
     hub.close();
   });
 });

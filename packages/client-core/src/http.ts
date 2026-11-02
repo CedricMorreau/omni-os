@@ -1,4 +1,5 @@
 // No retries and no offline queue: a request that fails throws once, and the caller decides what to do next.
+import { fetchUpload } from './upload.ts';
 
 /** A server address `parseBaseUrl` accepted: http or https, a host, an optional path prefix, no trailing slash. */
 export type BaseUrl = string & { readonly __brand: 'BaseUrl' };
@@ -35,11 +36,43 @@ export type Fetch = (
   },
 ) => Promise<FetchResponse>;
 
+/** A file on the device, as React Native's FormData takes it: the bytes stay where they are until the request reads them. */
+export interface UploadFile {
+  uri: string;
+  name: string;
+  type: string;
+}
+
+export interface UploadProgress {
+  /** Bytes of the request body sent so far. */
+  sent: number;
+  /** The whole body's size, multipart framing included. */
+  total: number;
+}
+
+/** What an upload sends: the JSON `payload` field and one `files` part per file, as `readBody` in the server reads them. */
+export interface UploadInit {
+  method: 'POST' | 'PATCH';
+  headers: Record<string, string>;
+  payload: string;
+  files: readonly UploadFile[];
+  signal?: AbortSignal;
+  /** Called as the body goes out. A transport that cannot tell never calls it. */
+  onProgress?: (progress: UploadProgress) => void;
+  /** Always `manual`, as for `Fetch`. */
+  redirect: 'manual';
+}
+
+/** Sends a multipart request. `fetchUpload` and `xhrUploadTransport` (upload.ts) are the two this package makes. */
+export type UploadTransport = (url: string, init: UploadInit) => Promise<FetchResponse>;
+
 export interface HttpClientConfig {
   baseUrl: BaseUrl;
   /** Sent as `Authorization: Bearer`. A function is read again on every request. */
   token: string | null | (() => string | null | Promise<string | null>);
   fetch?: Fetch;
+  /** Sends uploads. Defaults to `fetchUpload` over `fetch`, which reports no progress. */
+  upload?: UploadTransport;
   /** Gives up on a request, its body read included, after this long. The request then fails as `unreachable`. */
   timeoutMs?: number;
 }
@@ -64,6 +97,26 @@ export interface RawRequestOptions {
   signal?: AbortSignal;
   /** Refuses a longer body, by its Content-Length before it is read and by its size after. Fails as `decoding`. */
   maxBytes: number;
+}
+
+/** A multipart request: `payload` as JSON in its own field, then the files. */
+export interface UploadOptions<T> extends Omit<RequestOptions<T>, 'body'> {
+  payload: unknown;
+  files: readonly UploadFile[];
+  onProgress?: (progress: UploadProgress) => void;
+}
+
+/** Files to send with a call that takes a JSON body otherwise. With none, the call is the plain JSON request. */
+export interface WithFiles {
+  files: readonly UploadFile[];
+  onProgress?: (progress: UploadProgress) => void;
+  signal?: AbortSignal;
+}
+
+/** One call, JSON or multipart by whether there are files, so a caller has one path to retry. */
+export function sendWithFiles<T>(http: HttpClient, method: 'POST', path: ApiPath, body: unknown, withFiles?: WithFiles): Promise<T> {
+  if (!withFiles?.files.length) return http.request<T>(method, path, { body, signal: withFiles?.signal });
+  return http.upload<T>(method, path, { payload: body, files: withFiles.files, onProgress: withFiles.onProgress, signal: withFiles.signal });
 }
 
 export type HttpFailure =
@@ -167,6 +220,8 @@ export interface HttpClient {
   request<T = unknown>(method: HttpMethod, path: ApiPath, options?: RequestOptions<T>): Promise<T>;
   /** GETs a file, not JSON, with the same token, redirect refusal, timeout and errors as `request`. */
   requestBytes(path: ApiPath, options: RawRequestOptions): Promise<RawResponse>;
+  /** Like `request`, with files. The same checks apply: no redirect is followed, and `signal` cancels it as `cancelled`. */
+  upload<T = unknown>(method: 'POST' | 'PATCH', path: ApiPath, options: UploadOptions<T>): Promise<T>;
 }
 
 /**
@@ -182,6 +237,7 @@ function redirected(res: FetchResponse, serverOrigin: string | null): boolean {
 
 export function createHttpClient(config: HttpClientConfig): HttpClient {
   const send = config.fetch ?? (globalThis.fetch as unknown as Fetch);
+  const sendUpload = config.upload ?? fetchUpload(send);
   const serverOrigin = originOf(config.baseUrl);
 
   const url = (path: ApiPath, query?: Query) => {
@@ -203,7 +259,7 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
   async function exchange<B>(
     method: HttpMethod,
     path: ApiPath,
-    options: { query?: Query; body?: unknown; signal?: AbortSignal },
+    options: { query?: Query; body?: unknown; signal?: AbortSignal; files?: Omit<UploadOptions<unknown>, 'query' | 'signal' | 'parse'> },
     accept: string,
     read: (res: FetchResponse) => Promise<B>,
   ): Promise<Exchange<B>> {
@@ -212,6 +268,7 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     const token = typeof config.token === 'function' ? await config.token() : config.token;
     if (token?.trim()) headers.authorization = `Bearer ${token.trim()}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
+    const files = options.files;
 
     // One controller covers the caller's signal and the timeout. The timer runs through the body read.
     const timeout = config.timeoutMs === undefined ? null : new AbortController();
@@ -227,13 +284,17 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     else signal?.addEventListener('abort', onAbort);
 
     try {
-      const res = await send(url(path, options.query), {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: timeout ? timeout.signal : signal,
-        redirect: 'manual',
-      });
+      const target = url(path, options.query);
+      const sendSignal = timeout ? timeout.signal : signal;
+      const res = files
+        ? await sendUpload(target, { method: method as 'POST' | 'PATCH', headers, payload: JSON.stringify(files.payload), files: files.files, signal: sendSignal, onProgress: files.onProgress, redirect: 'manual' })
+        : await send(target, {
+            method,
+            headers,
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: sendSignal,
+            redirect: 'manual',
+          });
       if (redirected(res, serverOrigin)) throw new OmniHttpError({ kind: 'redirect' });
       return {
         status: res.status,
@@ -259,7 +320,7 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     return new OmniHttpError({ kind: 'http', status, message: errorMessage(data, contentType, status), body: data, retryAfter });
   }
 
-  async function request<T>(method: HttpMethod, path: ApiPath, options: RequestOptions<T> = {}): Promise<T> {
+  async function request<T>(method: HttpMethod, path: ApiPath, options: RequestOptions<T> & { files?: Omit<UploadOptions<T>, 'query' | 'signal' | 'parse'> } = {}): Promise<T> {
     const { status, contentType, retryAfter, body: text } = await exchange(method, path, options, 'application/json', (res) => res.text());
     if (!isOk(status)) throw httpError(status, text, contentType, retryAfter);
     if (!isJson(contentType)) throw new OmniHttpError({ kind: 'not-json', status, contentType });
@@ -292,5 +353,8 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     return { bytes: body, contentType };
   }
 
-  return { baseUrl: config.baseUrl, url, request, requestBytes };
+  const upload = <T>(method: 'POST' | 'PATCH', path: ApiPath, options: UploadOptions<T>) =>
+    request<T>(method, path, { query: options.query, signal: options.signal, parse: options.parse, files: options });
+
+  return { baseUrl: config.baseUrl, url, request, requestBytes, upload };
 }

@@ -1,4 +1,4 @@
-import { eventSourceTransport, type NeedsYou } from '@omni/client-core';
+import { eventSourceTransport, xhrUploadTransport, type NeedsYou } from '@omni/client-core';
 import { useIsFocused } from '@react-navigation/native';
 import { addNetworkStateListener } from 'expo-network';
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -23,7 +23,7 @@ export function LiveProvider({ session, children }: { session: OmniSession; chil
 
   useEffect(() => {
     clearArtifactCache();
-    const next = createLiveHub({ session, transport: eventSourceTransport(EventSource) });
+    const next = createLiveHub({ session, transport: eventSourceTransport(EventSource), upload: xhrUploadTransport() });
     setHub(next);
     const appState = AppState.addEventListener('change', (state) => next.setForeground(state === 'active'));
     const network = addNetworkStateListener((state) => {

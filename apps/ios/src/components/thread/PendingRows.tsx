@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { PendingMsg } from '@omni/client-core';
 
+import { AttachmentRow } from '../../attachments/AttachmentRow';
 import type { ThreadLive, ThreadView } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canSendAgain, isParked, pendingLabel, recoveredCount } from '../../send/rules';
@@ -22,14 +23,14 @@ export function PendingRows({ view, live }: { view: ThreadView; live: ThreadLive
     <View style={styles.rows}>
       <ResumeAll count={recoveredCount(view.pending)} live={live} />
       {view.pending.map((m) => (
-        <PendingRow key={m.uuid} message={m} blocked={blocked} live={live} />
+        <PendingRow key={m.uuid} message={m} threadId={view.threadId} blocked={blocked} live={live} />
       ))}
       <OutboxRow live={live} threadId={view.threadId} />
     </View>
   );
 }
 
-function PendingRow({ message, blocked, live }: { message: PendingMsg; blocked: boolean; live: ThreadLive }) {
+function PendingRow({ message, threadId, blocked, live }: { message: PendingMsg; threadId: string; blocked: boolean; live: ThreadLive }) {
   const { colors } = useOmniTheme();
   const quiet = message.kind === 'crew_report';
   return (
@@ -38,6 +39,7 @@ function PendingRow({ message, blocked, live }: { message: PendingMsg; blocked: 
       <Text numberOfLines={3} style={[styles.text, { color: quiet ? colors.fg3 : colors.fg2 }]}>
         {message.text}
       </Text>
+      <AttachmentRow threadId={threadId} items={message.attachments ?? []} />
       {isParked(message) ? <HeldActions uuid={message.uuid} again={canSendAgain(message)} live={live} /> : null}
     </View>
   );
