@@ -44,6 +44,8 @@ export interface PairingApi {
   }): Promise<AppPairingRedeemResponse>;
   fetchCapabilities(input: { origin: string; token: string }): Promise<ServerCapabilities>;
   signOut(input: { origin: string; token: string }): Promise<void>;
+  /** Takes this phone's push token off the server. Needs the session, so it runs before `signOut`. Deleting what is not there succeeds. */
+  deletePushToken(input: { origin: string; token: string }): Promise<void>;
 }
 
 export interface PairingApiOptions {
@@ -105,6 +107,12 @@ export function createPairingApi(options: PairingApiOptions = {}): PairingApi {
           const failure = error instanceof OmniHttpError ? error.failure : null;
           if (failure?.kind !== 'not-json' && failure?.kind !== 'decoding') throw error;
         });
+      });
+    },
+
+    deletePushToken({ origin, token }) {
+      return call(origin, token, { 401: 'unauthorized' }, 'server-error', async (http) => {
+        await http.request('DELETE', apiPath`/auth/push-token`);
       });
     },
   };
