@@ -4,16 +4,20 @@ import type { ThreadRow } from '../live/channel-model';
 import { fontSize, lineHeight, minTarget, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
 
-/** A thread in a list: its state dot, title, and the state word and age on a second line. */
-export function ThreadRowView({ row, onPress, onLongPress }: { row: ThreadRow; onPress: () => void; onLongPress?: () => void }) {
+/**
+ * A thread in a list: its state dot, title, and the state word and age on a second line. A row from several channels
+ * names its channel there first.
+ */
+export function ThreadRowView({ row, onPress, onLongPress }: { row: ThreadRow & { channel?: string }; onPress: () => void; onLongPress?: () => void }) {
   const { colors } = useOmniTheme();
   const tone: DotTone = row.status === 'failed' ? 'warn' : row.busy ? 'ok' : 'muted';
+  const channel = row.channel ? `#${row.channel}` : null;
   const marked = row.target.done ? 'Marked done' : null;
-  const meta = [row.pinned ? 'Pinned' : null, marked, row.statusLabel, row.ago].filter(Boolean).join(' · ');
+  const meta = [channel, row.pinned ? 'Pinned' : null, marked, row.statusLabel, row.ago].filter(Boolean).join(' · ');
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[row.title, row.pinned ? 'pinned' : null, marked ? 'marked done' : null, row.statusLabel].filter(Boolean).join(', ')}
+      accessibilityLabel={[row.title, channel, row.pinned ? 'pinned' : null, marked ? 'marked done' : null, row.statusLabel].filter(Boolean).join(', ')}
       accessibilityHint={onLongPress ? 'Swipe left for pin, done and archive. Hold for more.' : undefined}
       onPress={onPress}
       onLongPress={onLongPress}

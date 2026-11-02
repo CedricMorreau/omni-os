@@ -1,99 +1,76 @@
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StyleSheet, View } from 'react-native';
-
-import { HeaderButton } from '../components/HeaderButton';
+import { useNeedsYouCount } from '../live/react';
 import { usePairing } from '../pairing/PairingProvider';
-import { ChannelScreen } from '../screens/ChannelScreen';
+import { ActivityScreen } from '../screens/ActivityScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
-import { NewThreadScreen } from '../screens/NewThreadScreen';
-import { NotificationSettingsScreen } from '../screens/NotificationSettingsScreen';
-import { NotificationsIntroScreen } from '../screens/NotificationsIntroScreen';
-import { ServersScreen } from '../screens/ServersScreen';
-import { ThreadScreen } from '../screens/ThreadScreen';
 import { useHasSession } from '../session/ActiveSession';
-import { space, useOmniTheme } from '../theme';
-import type { RootStackParamList } from './types';
+import { useOmniTheme } from '../theme';
+import { detailScreens, rootActions, serversButton, Stack, stackOptions } from './detail-screens';
+import { createNativeTabsNavigator } from './native-tabs';
+import { activityTabLabel, needsBadge } from './tabs-model';
+import type { TabsParamList } from './types';
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createNativeTabsNavigator<TabsParamList>();
 
-/** No session shows Connect alone. Any session makes Channels the home screen, with Servers one tap away. */
+/** No session shows Connect alone. Any session opens the tabs on Activity, with Servers one tap away on each tab's root. */
 export function RootNavigator() {
   const { colors } = useOmniTheme();
   const { ready } = usePairing();
   const hasSession = useHasSession();
+  const needs = useNeedsYouCount();
 
   if (!ready) return null;
 
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.bg },
-        headerTintColor: colors.fg,
-        headerTitleStyle: { color: colors.fg },
-        headerShadowVisible: false,
-        contentStyle: { backgroundColor: colors.bg },
-      }}
-    >
-      {hasSession ? (
-        <>
-          <Stack.Screen
-            name="Channels"
-            component={ChannelsScreen}
-            options={({ navigation }) => ({
-              title: 'Channels',
-              headerRight: () => (
-                <View style={styles.actions}>
-                  <HeaderButton label="Servers" onPress={() => navigation.navigate('Servers')} />
-                  <HeaderButton label="New" accessibilityLabel="New thread" onPress={() => navigation.navigate('NewThread')} />
-                </View>
-              ),
-            })}
-          />
-          <Stack.Screen
-            name="Channel"
-            component={ChannelScreen}
-            options={({ navigation, route }) => ({
-              title: 'Channel',
-              headerBackTitle: 'Channels',
-              headerRight: () => (
-                <HeaderButton label="New" accessibilityLabel="New thread" onPress={() => navigation.navigate('NewThread', { channel: route.params.id })} />
-              ),
-            })}
-          />
-          <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
-          <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
-          <Stack.Screen
-            name="Servers"
-            component={ServersScreen}
-            options={{ title: 'Servers', headerBackTitle: 'Channels' }}
-          />
-          <Stack.Screen
-            name="AddServer"
-            component={ConnectScreen}
-            options={{ title: 'Add server', headerBackTitle: 'Back' }}
-          />
-          <Stack.Screen
-            name="NotificationSettings"
-            component={NotificationSettingsScreen}
-            options={{ title: 'Notifications', headerBackTitle: 'Back' }}
-          />
-          <Stack.Screen
-            name="NotificationsIntro"
-            component={NotificationsIntroScreen}
-            options={{ title: 'Notifications', presentation: 'modal' }}
-          />
-        </>
-      ) : (
+  if (!hasSession) {
+    return (
+      <Stack.Navigator screenOptions={stackOptions(colors)}>
         <Stack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect to a server' }} />
-      )}
+      </Stack.Navigator>
+    );
+  }
+
+  return (
+    <Tab.Navigator initialRouteName="ActivityTab">
+      <Tab.Screen
+        name="ActivityTab"
+        component={ActivityStack}
+        options={{
+          title: 'Activity',
+          icon: 'tray',
+          selectedIcon: 'tray.fill',
+          tabBadge: needsBadge(needs),
+          tabAccessibilityLabel: activityTabLabel(needs),
+        }}
+      />
+      <Tab.Screen name="ChannelsTab" component={ChannelsStack} options={{ title: 'Channels', icon: 'number' }} />
+    </Tab.Navigator>
+  );
+}
+
+function ActivityStack() {
+  const { colors } = useOmniTheme();
+  return (
+    <Stack.Navigator screenOptions={stackOptions(colors)}>
+      <Stack.Screen
+        name="Activity"
+        component={ActivityScreen}
+        options={({ navigation }) => ({ title: 'Activity', headerRight: serversButton(navigation) })}
+      />
+      {detailScreens({ backTitle: 'Activity' })}
     </Stack.Navigator>
   );
 }
 
-const styles = StyleSheet.create({
-  actions: {
-    flexDirection: 'row',
-    gap: space.s8,
-  },
-});
+function ChannelsStack() {
+  const { colors } = useOmniTheme();
+  return (
+    <Stack.Navigator screenOptions={stackOptions(colors)}>
+      <Stack.Screen
+        name="Channels"
+        component={ChannelsScreen}
+        options={({ navigation }) => ({ title: 'Channels', headerRight: rootActions(navigation) })}
+      />
+      {detailScreens({ backTitle: 'Channels' })}
+    </Stack.Navigator>
+  );
+}

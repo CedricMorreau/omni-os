@@ -1,6 +1,7 @@
 // The wire shapes are copied here because this package imports neither the server nor the Web UI. Replies are cast to
 // them, not validated. One file per domain: a domain owns its types and the calls that return them.
 import type { HttpClient } from '../http.ts';
+import { activityApi } from './activity.ts';
 import { channelsApi } from './channels.ts';
 import { crewApi } from './crew.ts';
 import { detailApi } from './detail.ts';
@@ -11,6 +12,7 @@ import { pushApi } from './push.ts';
 import { recoveryApi } from './recovery.ts';
 import { threadsApi } from './threads.ts';
 
+export * from './activity.ts';
 export * from './channels.ts';
 export * from './crew.ts';
 export * from './detail.ts';
@@ -35,5 +37,6 @@ export function createOmniApi(http: HttpClient) {
     ...needsYouApi(http),
     ...harnessesApi(http),
     ...pushApi(http),
+    ...activityApi(http),
   };
 }

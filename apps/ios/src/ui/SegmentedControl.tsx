@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { fontSize, minTarget, radius, space, useOmniTheme } from '../theme';
 
 interface SegmentedControlProps<T extends string> {
-  options: readonly { value: T; label: string }[];
+  options: readonly { value: T; label: string; count?: number }[];
   value: T;
   onChange: (value: T) => void;
 }
@@ -23,13 +23,14 @@ export function SegmentedControl<T extends string>({
           <Pressable
             key={option.value}
             accessibilityRole="button"
-            accessibilityLabel={option.label}
+            accessibilityLabel={option.count === undefined ? option.label : `${option.label}, ${option.count}`}
             accessibilityState={{ selected }}
             onPress={() => onChange(option.value)}
             style={[styles.segment, selected && { backgroundColor: colors.bg }]}
           >
-            <Text style={[styles.label, { color: selected ? colors.fg : colors.fg3 }]}>
+            <Text numberOfLines={1} style={[styles.label, { color: selected ? colors.fg : colors.fg3 }]}>
               {option.label}
+              {option.count === undefined ? null : <Text style={[styles.count, { color: colors.fg4 }]}>{` ${option.count}`}</Text>}
             </Text>
           </Pressable>
         );
@@ -54,5 +55,9 @@ const styles = StyleSheet.create({
   label: {
     fontSize: fontSize.body,
     fontWeight: '600',
+  },
+  count: {
+    fontSize: fontSize.meta,
+    fontVariant: ['tabular-nums'],
   },
 });

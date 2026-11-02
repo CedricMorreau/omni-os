@@ -33,6 +33,7 @@ import { createCatalog, createSenders, newRequestId, type ThreadSender } from '.
 import { runNeedsAction, type NeedsAction } from '../needs/actions';
 import { withoutResult } from '../needs/inbox';
 import { coalesced } from './coalesce';
+import { createActivityLive, type ActivityState } from './activity';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
@@ -105,12 +106,14 @@ export interface LiveHub {
   /** The header's link state, reduced from the feed and the open thread. */
   readonly link: Store<Link>;
   readonly needsYou: Store<NeedsYouState>;
+  readonly activity: Store<ActivityState>;
   refreshChannels(): Promise<void>;
   /** Runs one API call with the session's credentials, retried once after a 401. Rejects with 'Not paired' without a server. */
   request<T>(call: (api: OmniApi) => Promise<T>): Promise<T>;
   /** Puts a thread row the server just returned into the open thread's view and refetches the channel lists. */
   applyThread(thread: Thread): void;
   refreshNeedsYou(): Promise<void>;
+  refreshActivity(): Promise<void>;
   /** Ben saw this result. The inbox drops it now and the server confirms. */
   markResultRead(uid: string): Promise<void>;
   openThread(threadId: string): ThreadLive;
@@ -158,6 +161,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       throw e;
     }
   }
+
+  const activity = createActivityLive({ api, withAuth, now });
 
   function requireApi(): OmniApi {
     if (!api) throw new Error('Not paired');
@@ -235,11 +240,13 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       onMessage: (message) => {
         if (isListChange(message)) scheduleRefresh();
         if (isNeedsYouChange(message)) void refreshNeedsYou();
+        activity.applyFeed(message);
       },
       // The feed keeps no replay, so every reconnect refetches the list. The open thread catches up through its own stream.
       onReconnect: () => {
         void refreshChannels();
         void refreshNeedsYou();
+        void activity.refresh();
       },
       onState: (state) => {
         feedState = state;
@@ -468,6 +475,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     startFeed(http);
     void refreshChannels();
     void refreshNeedsYou();
+    void activity.refresh();
   }
   recomputeLink();
 
@@ -475,6 +483,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     channels,
     link,
     needsYou,
+    activity: activity.state,
     refreshChannels,
     request: (call) => withAuth(() => call(requireApi())),
     applyThread(thread) {
@@ -483,6 +492,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     },
     refreshNeedsYou,
     markResultRead,
+    refreshActivity: activity.refresh,
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -501,6 +511,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         for (const t of openThreads) t.resume();
         void refreshChannels();
         void refreshNeedsYou();
+        void activity.refresh();
       }
       recomputeLink();
     },
