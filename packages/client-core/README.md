@@ -1,0 +1,67 @@
+# Omni client core
+
+This package gives the iOS app a typed HTTP client and a bounded thread stream. It does not pair a device or store credentials. Supply the server URL and a token provider from the pairing/session layer.
+
+## Connect
+
+Install an EventSource implementation that supports request headers, such as `react-native-sse`. The browser's native EventSource cannot send bearer headers. It can use a paired cookie instead.
+
+```ts
+import EventSource from 'react-native-sse';
+import {
+  apiPath, createHttpClient, createOmniApi, eventSourceTransport,
+  openThreadLive, parseBaseUrl, type HistoryEvent, type ThreadOpen,
+} from '@omni/client-core';
+
+const baseUrl = parseBaseUrl(serverUrl);
+if (!baseUrl) throw new Error('Invalid server URL');
+const token = () => sessionStore.getToken();
+const http = createHttpClient({ baseUrl, token });
+const api = createOmniApi(http);
+const transport = eventSourceTransport(EventSource);
+
+const live = await openThreadLive<HistoryEvent, ThreadOpen>({
+  load: () => api.thread(threadId),
+  streamUrl: after => http.url(apiPath`/threads/${threadId}/stream`, { after }),
+  token,
+  transport,
+  refreshAuth: () => sessionStore.refresh(), // Return false if pairing is revoked.
+  onDetail: detail => updateDetail(detail),
+  onHistory: state => updateHistory(state.history),
+  onOther: message => handleThreadMessage(message),
+  onState: state => updateConnectionState(state),
+});
+```
+
+`onDetail` receives the initial detail and every stream sync. A replay sync has an empty `events` array. Render the rows from `state.history`, not from the sync detail. `onOther` receives thread, artifact, context and other non-row messages. The history object is replaced on each update, but the `ThreadHistory` holder stays the same.
+
+Call `live.stream.pause()` when the app backgrounds and `live.stream.resume()` when it returns. Call `live.stream.close()` when leaving the thread. Load an older page or fill a gap with `live.history.page`:
+
+```ts
+await live.history.page(cursor, query =>
+  http.request('GET', apiPath`/threads/${threadId}/history`, { query }),
+);
+updateHistory(live.history.history);
+```
+
+Use `fullRow` with `api.event` for a clipped row. Import cursor types and helpers from `@omni/shared/history.ts`.
+
+The global feed has no replay. Use `openFeed` with the same transport and token provider. Its `onReconnect` callback must refetch each visible global view. The first connection does not call `onReconnect`.
+
+HTTP writes make one request. An offline or failed request rejects; the package does not queue or retry writes. Callers can pass a stable `request_id` to `sendMessage` when retrying an uncertain send. A 401 from HTTP is an `OmniHttpError`; the app owns session refresh and pairing UI. The stream calls `refreshAuth` once on a reported 401 and enters `unauthorized` if refresh fails. An EventSource implementation must expose the HTTP status on its error event for that hook to run. While `refreshAuth` is pending the state is `connecting`, and `resume()` abandons a refresh that never settles and reconnects.
+
+Pass `follows` to `openThreadLive` and return false while the user reads older pages. Past 2,000 loaded rows, a live row then trims nothing the user is looking at, up to the 6,000 row hard limit. It defaults to true, which trims the oldest rows.
+
+`eventSourceTransport` wraps `react-native-sse` so that a stream the server closes ends as an error and the client reconnects after its backoff. Version 1.2.1 otherwise ends such a stream silently, and the client would wait for its 50 second watchdog. The wrapper overrides `_pollAgain`, which is not public API. It leaves an implementation without that method unchanged. Recheck it when upgrading `react-native-sse`. That library also keeps the whole response in `responseText` for the life of one connection, so a long-lived stream grows in memory until the connection drops and reopens. Background pauses reset it, and the app can also call `pause()` then `resume()` on a long foreground session.
+
+## Protocol notes
+
+The server replays rows after the last thread event ID when the missing rows fit its budget. Otherwise it sends a recent snapshot. Snapshot application keeps the old and new spans apart, so the app can page the gap. Event IDs are global and need not be consecutive. The client deduplicates rows by ID, not stream messages, because EventSource implementations carry the last ID onto later messages without an ID.
+
+T3 Code uses Effect atoms for its mobile presentation state. This package keeps framework-independent history and stream objects instead. Omni already owns the history span operations in `@omni/shared`, and the iOS app can wrap their updates in its chosen state library without adding Effect to this package.
+
+Server and integration limits:
+
+- JSON message and thread creation requests cannot include file uploads through this client. The server supports multipart requests, but this package does not yet wrap them.
+- The server returns HTTP 500 for an unknown channel during thread creation, rather than a client-error status.
+- The iOS scaffold and pairing service are separate work. No device runtime or pairing flow was tested here.
