@@ -121,7 +121,7 @@ function CallDetail({ call }: { call: ToolCall }) {
 
   const text = result ? result.text + (more?.text ?? '') : '';
   const lines = text.trimEnd().split('\n');
-  const cut = lines.length > SHOWN_LINES;
+  const cut = more === null && lines.length > SHOWN_LINES;
 
   return (
     <View style={[styles.detail, { backgroundColor: colors.surface, borderColor: colors.line }]}>

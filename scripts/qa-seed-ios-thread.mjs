@@ -2,8 +2,7 @@
 // Seeds a throwaway QA stack (scripts/qa-stack.sh up) with the threads the iOS app's rich thread rendering is checked
 // against, so phone web and the simulator open the same transcripts:
 //   "Corpus: <case>"  one thread per case in packages/test-fixtures/transcript/corpus.json, events untouched
-//   "Rich kinds"      every apps/ios/tests/fixtures/*.json ({ name, events: [{ kind, payload, created_at? }] }) in file
-//                     order, each led by a user row naming the fixture (--no-labels leaves that row out)
+//   "Rich: <name>"    one thread per apps/ios/tests/fixtures/*.json ({ name, status?, events: [{ kind, payload, created_at? }] })
 //   "Long thread"     packages/test-fixtures/long-thread.ts longThread(), about 3,500 events (--no-long skips it)
 //
 //   node scripts/qa-seed-ios-thread.mjs [--port 4757] [--dir /tmp/omni-qa-4757] [--out seeded.json]
@@ -37,7 +36,6 @@ const { values: opts } = parseArgs({
     'token-file': { type: 'string' },
     channel: { type: 'string', default: 'ios-qa' },
     out: { type: 'string' },
-    'no-labels': { type: 'boolean', default: false },
     'no-long': { type: 'boolean', default: false },
   },
 });
@@ -79,14 +77,10 @@ const fixtureDir = join(ROOT, 'apps/ios/tests/fixtures');
 if (existsSync(fixtureDir)) {
   const files = readdirSync(fixtureDir).filter((f) => f.endsWith('.json')).sort();
   if (files.length) {
-    /** @type {SeedEvent[]} */
-    const events = [];
     for (const f of files) {
       const fx = JSON.parse(readFileSync(join(fixtureDir, f), 'utf8'));
-      if (!opts['no-labels']) events.push({ kind: 'user', payload: { text: `Fixture: ${fx.name ?? basename(f, '.json')}`, source: 'ben' } });
-      events.push(...fx.events);
+      plan.push({ title: `Rich: ${fx.name ?? basename(f, '.json')}`, events: fx.events, status: fx.status });
     }
-    plan.push({ title: 'Rich kinds', events });
   }
 }
 
@@ -145,7 +139,7 @@ const deleteThread = db.prepare('DELETE FROM threads WHERE id = ?');
 const deleteFts = db.prepare('DELETE FROM search_fts WHERE thread_id = ?');
 const insertThread = db.prepare(
   `INSERT INTO threads (id, channel_id, title, status, harness, session_id, has_run, cwd, source, last_text, created_at, updated_at)
-   VALUES (?, ?, ?, 'done', 'claude-code', ?, 1, ?, 'manual', ?, ?, ?)`,
+   VALUES (?, ?, ?, ?, 'claude-code', ?, 1, ?, 'manual', ?, ?, ?)`,
 );
 const insertEvent = db.prepare('INSERT INTO events (uid, thread_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?)');
 const insertFts = db.prepare('INSERT INTO search_fts (body, thread_id, event_id) VALUES (?, ?, ?)');
@@ -153,8 +147,8 @@ const insertFts = db.prepare('INSERT INTO search_fts (body, thread_id, event_id)
 const iso = (ms) => new Date(ms).toISOString();
 const now = Date.now();
 
-// The channel lists newest first: Rich kinds on top, then Long thread, then the corpus cases in file order.
-const order = (t) => (t.title === 'Rich kinds' ? 0 : t.title === 'Long thread' ? 1 : 2);
+// The channel lists newest first: Rich fixtures on top, then Long thread, then the corpus cases in file order.
+const order = (t) => (t.title.startsWith('Rich: ') ? 0 : t.title === 'Long thread' ? 1 : 2);
 plan.sort((a, b) => order(a) - order(b));
 
 const seeded = [];
@@ -167,7 +161,7 @@ plan.forEach((t, n) => {
   try {
     deleteFts.run(id);
     deleteThread.run(id);
-    insertThread.run(id, opts.channel, t.title, randomUUID(), stateDir, lastText(t.events), iso(first), iso(updated));
+    insertThread.run(id, opts.channel, t.title, t.status ?? 'done', randomUUID(), stateDir, lastText(t.events), iso(first), iso(updated));
     t.events.forEach((e, i) => {
       const payload = typeof e.payload === 'string' ? e.payload : JSON.stringify(e.payload);
       if (!isJson(payload)) {
