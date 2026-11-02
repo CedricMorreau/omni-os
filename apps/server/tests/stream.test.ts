@@ -204,6 +204,7 @@ describe('parseEvent: rate limits and results', () => {
         unifiedWindows: {
           five_hour: { utilization: 0.04, resetsAt: 1790328600 },
           seven_day: { utilization: 0.06, resetsAt: 1790769600 },
+          seven_day_overage_included: { utilization: 0.64, resetsAt: 1790769600 },
         },
       },
     });
@@ -211,6 +212,7 @@ describe('parseEvent: rate limits and results', () => {
     expect(out.usage).toMatchObject({
       five_hour: { utilization: 0.04, resetsAt: 1790328600 },
       seven_day: { utilization: 0.06, resetsAt: 1790769600 },
+      fable_week: { utilization: 0.64, resetsAt: 1790769600 },
       status: 'allowed',
     });
     expect(Number.isNaN(Date.parse(out.usage!.updated_at))).toBe(false);

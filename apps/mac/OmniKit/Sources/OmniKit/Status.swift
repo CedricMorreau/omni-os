@@ -90,6 +90,7 @@ public struct MonthlyUsage: Decodable, Hashable, Sendable {
 public struct Usage: Decodable, Hashable, Sendable {
   public let fiveHour: UsageWindow?
   public let sevenDay: UsageWindow?
+  public let fableWeek: UsageWindow?
   public let monthly: MonthlyUsage?
   public let status: String?
   public let updatedAt: Date?
@@ -98,6 +99,7 @@ public struct Usage: Decodable, Hashable, Sendable {
     case status, monthly
     case fiveHour = "five_hour"
     case sevenDay = "seven_day"
+    case fableWeek = "fable_week"
     case updatedAt = "updated_at"
   }
 
@@ -108,6 +110,7 @@ public struct Usage: Decodable, Hashable, Sendable {
     status = try? c.decodeIfPresent(String.self, forKey: .status)
     fiveHour = try? c.decodeIfPresent(UsageWindow.self, forKey: .fiveHour)
     sevenDay = try? c.decodeIfPresent(UsageWindow.self, forKey: .sevenDay)
+    fableWeek = try? c.decodeIfPresent(UsageWindow.self, forKey: .fableWeek)
     monthly = try? c.decodeIfPresent(MonthlyUsage.self, forKey: .monthly)
     updatedAt = try? c.decodeIfPresent(Date.self, forKey: .updatedAt)
   }

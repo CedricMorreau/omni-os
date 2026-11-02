@@ -294,12 +294,9 @@ export const harnessLabel = (harness: string) => HARNESS[harness]?.label ?? harn
 export const HARNESS_ROWS: { id: HarnessId; name: string }[] = [
   { id: 'claude-code', name: 'Claude' },
   { id: 'codex', name: 'Codex' },
-  { id: 'cursor', name: 'Cursor' },
-  { id: 'hermes', name: 'Hermes' },
 ];
 
-/** The harnesses the running-slots line counts: the usage rows, plus Cursor Cloud, which reports no usage of its own. */
-export const SLOT_ROWS: { id: HarnessId; name: string }[] = [...HARNESS_ROWS, { id: 'cursor-cloud', name: 'Cursor Cloud' }];
+export const SLOT_ROWS = HARNESS_ROWS;
 
 /** The bare logo. Harnesses without one (Hermes) get their two-letter label. */
 export function HarnessLogo({ harness, size = 14, title }: { harness: string; size?: number; title?: string }) {

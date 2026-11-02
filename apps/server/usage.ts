@@ -9,6 +9,8 @@ import { HARNESS_IDS, type HarnessId } from './harness/types.ts';
 const key = (harness: string) => `usage:${harness}`;
 
 export function recordUsage(harness: HarnessId, usage: Usage) {
+  const fable = usageFor(harness)?.fable_week;
+  if (!usage.fable_week && fable && fable.resetsAt * 1000 > Date.now()) usage = { ...usage, fable_week: fable };
   kv.set(key(harness), usage);
   publishFeed({ type: 'usage', harness, usage });
 }

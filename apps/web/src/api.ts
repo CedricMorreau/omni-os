@@ -56,6 +56,7 @@ export interface MonthlyUsage extends UsageWindow {
 export interface Usage {
   five_hour?: UsageWindow;
   seven_day?: UsageWindow;
+  fable_week?: UsageWindow;
   monthly?: MonthlyUsage;
   status?: string;
   updated_at?: string;

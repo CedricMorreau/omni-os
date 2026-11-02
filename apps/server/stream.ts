@@ -179,6 +179,7 @@ export interface MonthlyUsage {
 export interface Usage {
   five_hour?: { utilization: number; resetsAt: number };
   seven_day?: { utilization: number; resetsAt: number };
+  fable_week?: { utilization: number; resetsAt: number };
   monthly?: MonthlyUsage;
   status?: string;
   updated_at: string;
@@ -300,6 +301,7 @@ export function parseEvent(evt: any): Parsed {
       out.usage = {
         five_hour: w.five_hour,
         seven_day: w.seven_day,
+        fable_week: w.seven_day_overage_included,
         status: info.status,
         updated_at: new Date().toISOString(),
       };

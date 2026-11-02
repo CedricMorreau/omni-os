@@ -171,10 +171,6 @@ private func view(ok: Bool = true, focus: Bool = true, used: Double = 100) throw
     #expect(m.window.utilization == 0.4308)
     #expect(m.startsAt == Date(timeIntervalSince1970: 1_790_233_029))
     #expect(m.spendCents == 56_436 && m.includedCents == 7000 && m.bonusCents == 49_436)
-    let rows = HarnessUsageRow.rows(usage: usage, slots: [:])
-    let cursor = try #require(rows.first { $0.id == .cursor })
-    #expect(cursor.hasData && !cursor.hasWindows)
-    #expect(cursor.month?.meter.percent == 43)
   }
 
   @Test func aMonthlyCycleInAShapeThisAppDoesNotKnowIsNoData() throws {

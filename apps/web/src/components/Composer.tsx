@@ -146,6 +146,20 @@ export function useAttachments() {
   return { files, error, setError, add, remove, clear, over, onPaste, dropZone };
 }
 
+const DROP_EVENTS = { dragenter: 'onDragEnter', dragover: 'onDragOver', dragleave: 'onDragLeave', drop: 'onDrop' } as const;
+
+function useWindowDrop(zone: ReturnType<typeof useAttachments>['dropZone']) {
+  const latest = useRef(zone);
+  latest.current = zone;
+  useEffect(() => {
+    const handlers = Object.entries(DROP_EVENTS).map(([type, name]) => [type, (e: Event) => latest.current[name](e as unknown as ReactDragEvent)] as const);
+    for (const [type, h] of handlers) window.addEventListener(type, h);
+    return () => {
+      for (const [type, h] of handlers) window.removeEventListener(type, h);
+    };
+  }, []);
+}
+
 function Thumb({ file }: { file: File }) {
   const url = useMemo(() => URL.createObjectURL(file), [file]);
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
@@ -831,6 +845,7 @@ export function ReplyComposer({
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const att = useAttachments();
+  useWindowDrop(att.dropZone);
   const context = useDraftContext(threadId);
   const sendReply = useReplySend(threadId);
   useAutosize(ref, text, 240);
@@ -932,7 +947,7 @@ export function ReplyComposer({
   };
 
   return (
-    <div className={shell('rounded-xl bg-surface', att.over)} {...att.dropZone}>
+    <div className={shell('rounded-xl bg-surface', att.over)}>
       <DropHint over={att.over} />
       {slashMenu.menu && <SlashMenu {...slashMenu.menu} />}
       {fileMenu.menu && <FileMenu {...fileMenu.menu} />}

@@ -79,7 +79,7 @@ function UsageCard() {
   const footer = SLOT_ROWS.filter((r) => slots[r.id]).map((r) => `${r.name} ${slots[r.id]!.running}/${slots[r.id]!.cap}`).join(' · ');
   const peak = HARNESS_ROWS.reduce<number | null>((max, r) => {
     const u = usage[r.id];
-    for (const p of [windowPct(u?.five_hour), windowPct(u?.seven_day), windowPct(u?.monthly)]) if (p !== null && (max === null || p > max)) max = p;
+    for (const p of [windowPct(u?.five_hour), windowPct(u?.seven_day), windowPct(u?.fable_week), windowPct(u?.monthly)]) if (p !== null && (max === null || p > max)) max = p;
     return max;
   }, null);
   return (
@@ -113,7 +113,10 @@ function UsageCard() {
             <span className="flex-1">Week</span>
           </div>
           {HARNESS_ROWS.map((r) => (
-            <HarnessUsageRow key={r.id} id={r.id} name={r.name} usage={usage[r.id]} />
+            <Fragment key={r.id}>
+              <HarnessUsageRow id={r.id} name={r.name} usage={usage[r.id]} />
+              {usage[r.id]?.fable_week && <HarnessUsageRow id={r.id} name="Fable" usage={{ seven_day: usage[r.id]!.fable_week }} />}
+            </Fragment>
           ))}
           <div className="flex items-center gap-2 border-t border-line pt-2.5 text-[11px] text-fg-3">
             {footer ? (

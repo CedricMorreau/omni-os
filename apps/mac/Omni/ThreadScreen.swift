@@ -43,6 +43,8 @@ private struct ThreadView: View {
   @State private var markdown = MarkdownCache<Int>()
   @State private var ticket = ThreadTicket()
   @State private var panels = ThreadPanelsModel()
+  @State private var replyBox = ReplyBox()
+  @State private var dropOver = false
 
   var body: some View {
     switch store.loadState {
@@ -77,7 +79,13 @@ private struct ThreadView: View {
             .overlay(alignment: .topTrailing) { ModToastStack(store: store) }
             .overlay(alignment: .trailing) { TicketDraftDrawer(threadID: store.id, holder: ticket, panels: panels) }
             .overlay(alignment: .top) { TicketRouteDrawer(client: model.client, store: store, holder: ticket, panels: panels) }
-          ReplyComposerHost(model: model, store: store, thread: thread)
+          ReplyComposerHost(model: model, store: store, thread: thread, box: replyBox, dropOver: dropOver)
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+          replyBox.model?.addFiles(urls.compactMap(StagedFile.at))
+          return true
+        } isTargeted: {
+          dropOver = $0
         }
         .readsShownResult(model: model, threadID: thread.id, status: thread.status)
         #if DEBUG

@@ -71,29 +71,30 @@ public struct HarnessUsageRow: Hashable, Sendable, Identifiable {
   /// A monthly cycle, drawn across both columns when the harness has no 5-hour or weekly window (Cursor).
   public let month: MonthMeter?
   public let slot: HarnessSlot?
+  public var fable: UsageMeter? = nil
+
+  public var fableRow: HarnessUsageRow? {
+    fable.map { HarnessUsageRow(id: id, name: "Fable", fiveHour: nil, week: $0, month: nil, slot: nil) }
+  }
 
   public var hasWindows: Bool { fiveHour != nil || week != nil }
   public var hasData: Bool { hasWindows || month != nil }
 
-  static let harnesses: [(id: HarnessID, name: String)] = [(.claudeCode, "Claude"), (.codex, "Codex"), (.cursor, "Cursor"), (.hermes, "Hermes")]
+  static let harnesses: [(id: HarnessID, name: String)] = [(.claudeCode, "Claude"), (.codex, "Codex")]
 
   public static func rows(usage: [HarnessID: Usage], slots: [HarnessID: HarnessSlot]) -> [HarnessUsageRow] {
     harnesses.map { h in
       let u = usage[h.id]
       return HarnessUsageRow(
         id: h.id, name: h.name, fiveHour: u?.fiveHour.map(UsageMeter.init), week: u?.sevenDay.map(UsageMeter.init),
-        month: u?.monthly.map(MonthMeter.init), slot: slots[h.id]
+        month: u?.monthly.map(MonthMeter.init), slot: slots[h.id], fable: u?.fableWeek.map(UsageMeter.init)
       )
     }
   }
 
-  /// Harnesses that run slots but report no plan usage, so they have no meter row: only the running count.
-  static let slotOnly: [(id: HarnessID, name: String)] = [(.cursorCloud, "Cursor Cloud")]
-
-  /// The card's collapsed line, "Claude 1/4 · Codex 0/4 · … · Cursor Cloud 0/4", as SLOT_ROWS in brand.tsx. Harnesses
-  /// the server sent no slot for are left out.
+  /// The card's collapsed line, "Claude 1/4 · Codex 0/4", as SLOT_ROWS in brand.tsx. Harnesses the server sent no
+  /// slot for are left out.
   public static func slotSummary(_ rows: [HarnessUsageRow], slots: [HarnessID: HarnessSlot]) -> [String] {
-    let meters = rows.compactMap { r in r.slot.map { "\(r.name) \($0.running)/\($0.cap)" } }
-    return meters + slotOnly.compactMap { h in slots[h.id].map { "\(h.name) \($0.running)/\($0.cap)" } }
+    rows.compactMap { r in r.slot.map { "\(r.name) \($0.running)/\($0.cap)" } }
   }
 }

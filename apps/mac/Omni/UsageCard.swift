@@ -13,7 +13,7 @@ struct UsageCard: View {
     let slots = HarnessUsageRow.slotSummary(rows, slots: running)
     let live = model.connectionNotice == nil && model.supervisor.isRunning
     let summary = slots.isEmpty ? (live ? "Connected" : "Connecting") : slots.joined(separator: " · ")
-    let peak = rows.flatMap { [$0.fiveHour, $0.week, $0.month?.meter] }.compactMap { $0 }.max { $0.fraction < $1.fraction }
+    let peak = rows.flatMap { [$0.fiveHour, $0.week, $0.fable, $0.month?.meter] }.compactMap { $0 }.max { $0.fraction < $1.fraction }
     VStack(alignment: .leading, spacing: z(8)) {
       Button {
         withAnimation(.snappy(duration: 0.2)) { open.toggle() }
@@ -52,9 +52,11 @@ struct UsageCard: View {
         .font(.omni(size: 11, weight: .medium))
         .foregroundStyle(Tok.fg4)
         .padding(.top, z(2))
-        ForEach(rows) { UsageRow(row: $0) }
+        ForEach(rows) { row in
+          UsageRow(row: row)
+          if let fable = row.fableRow { UsageRow(row: fable) }
+        }
         Rectangle().fill(Tok.line).frame(height: 1)
-        // Five harnesses' slots outrun the sidebar's width: wrap, so Cursor Cloud's stays in view.
         Text(summary)
           .monospacedDigit()
           .lineLimit(2)

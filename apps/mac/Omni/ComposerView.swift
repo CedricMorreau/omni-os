@@ -9,13 +9,8 @@ struct ReplyComposerHost: View {
   let model: AppModel
   let store: ThreadStore
   let thread: OmniThread
-  @State private var box = ReplyBox()
-
-  /// Made on first use, once per thread screen: reading the draft is a file read.
-  @MainActor private final class ReplyBox {
-    var model: ReplyComposerModel?
-    var menu: SlashMenuModel?
-  }
+  let box: ReplyBox
+  let dropOver: Bool
 
   var body: some View {
     let reply = box.model ?? ReplyComposerModel(threadID: store.id, api: model.client, context: store.draftContext)
@@ -24,13 +19,19 @@ struct ReplyComposerHost: View {
       commands: SlashCommandsStore(api: model.client, source: .thread(store.id)),
       files: FileMentionsStore(api: model.client, source: .thread(store.id)), placement: .reply, harness: thread.harness.rawValue)
     box.menu = menu
-    return ReplyComposerView(model: model, store: store, thread: thread, reply: reply, menu: menu)
+    return ReplyComposerView(model: model, store: store, thread: thread, reply: reply, menu: menu, dropOver: dropOver)
     .frame(maxWidth: ThreadStyle.thread)
     .padding(.horizontal, z(24))
     .padding(.top, z(4))
     .padding(.bottom, z(16))
     .frame(maxWidth: .infinity)
   }
+}
+
+/// Made on first use, once per thread screen: reading the draft is a file read.
+@MainActor final class ReplyBox {
+  var model: ReplyComposerModel?
+  var menu: SlashMenuModel?
 }
 
 /// Interrupt in the toolbar. It reads Interrupting until the turn stops.
@@ -139,6 +140,7 @@ private struct ReplyComposerView: View {
   let thread: OmniThread
   @Bindable var reply: ReplyComposerModel
   let menu: SlashMenuModel
+  let dropOver: Bool
   @State private var caret: CaretRequest?
   @State private var omniBusy = false
   @State private var omniError: String?
@@ -236,7 +238,7 @@ private struct ReplyComposerView: View {
         .padding(.bottom, menu.hint == nil ? 0 : 10)
         .padding(.top, menu.hint == nil ? 0 : 2)
     }
-    .composerShell(radius: 12, focused: focused, over: over)
+    .composerShell(radius: 12, focused: focused, over: over || dropOver)
     .dropDestination(for: URL.self) { urls, _ in
       stage(urls)
       return true
