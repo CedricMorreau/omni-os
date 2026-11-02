@@ -51,6 +51,12 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
     });
   }, [navigation, title, hasThread]);
 
+  // A machine can fall asleep while the thread stays open: read the list again each time the menu opens.
+  const { reload: reloadMachines } = machine;
+  useEffect(() => {
+    if (menuOpen) reloadMachines();
+  }, [menuOpen, reloadMachines]);
+
   // Fork opens a screen, and a screen cannot present while the menu sheet is still dismissing. The menu reports that it is
   // gone through onClose (the sheet's onDismiss), and a timer covers a dismissal that never reports.
   const forking = useRef(false);
