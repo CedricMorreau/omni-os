@@ -6,6 +6,7 @@ import { startRunner } from './runner-boot.ts';
 
 const r = await startRunner();
 const { askQuestion } = await import('../runner/questions.ts');
+const { failSetup } = await import('../runner/setup.ts');
 const { installPushSender, noopPushSender, notifyCrewReport, notifyEnded } = await import('../push-sender.ts');
 type PushEvent = import('../push-sender.ts').PushEvent;
 type ThreadStatus = import('../db.ts').ThreadStatus;
@@ -82,6 +83,19 @@ describe('a turn ends', () => {
     expect(sent).toEqual([]);
     notifyEnded(child, 'failed');
     expect(sent).toEqual([{ kind: 'failed', threadId: child, channelId: 'scratch' }]);
+  });
+});
+
+describe('a thread that could not be prepared', () => {
+  it('alerts as failed when its worktree cannot be made', () => {
+    const id = thread();
+    failSetup(id, 'git worktree add failed');
+    expect(sent).toEqual([{ kind: 'failed', threadId: id, channelId: 'scratch' }]);
+  });
+
+  it('stays quiet when Ben stopped it while it was being prepared', () => {
+    failSetup(thread(), 'stopped', true);
+    expect(sent).toEqual([]);
   });
 });
 

@@ -57,7 +57,7 @@ Alerts go out on these events:
 
 - `needsInput`: the agent asks a question and waits for an answer.
 - `finished`: a turn ends with the thread done. A finished child thread does not alert, because its parent gets the crew report.
-- `failed`: a turn ends with an error. A failed child does alert.
+- `failed`: a turn ends with an error, or Omni cannot prepare the thread's worktree. A failed child does alert.
 - `crewReport`: a crew report lands in a Conductor thread. A report in any other channel does not alert.
 
 A stopped turn, a queued turn and a turn cut short by Omni shutting down do not alert.
