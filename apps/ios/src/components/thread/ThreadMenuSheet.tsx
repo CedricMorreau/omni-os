@@ -3,13 +3,18 @@ import type { ThreadActionIcon, ThreadActionId } from '@omni/shared/thread-actio
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
+import type { ThreadMachineControl } from '../../machine/hooks';
+import { machineNote } from '../../machine/state';
 import { fontSize, space, useOmniTheme } from '../../theme';
 import type { ThreadAction } from '../../thread/actions';
 import { useThreadActions } from '../../thread/hooks';
+import { menuExtras } from '../../thread/menu';
 import { folderChoices, organizeItems, type ThreadTarget } from '../../thread/target';
 import { Callout } from '../../ui/Callout';
 import { OptionGroup, OptionRow } from '../../ui/OptionRow';
 import { Sheet } from '../../ui/Sheet';
+import { MachineList } from './MachineSheet';
+import { TakeoverPrompt } from './TakeoverSheet';
 
 const GLYPH: Record<ThreadActionIcon, string> = {
   pin: '📌',
@@ -30,13 +35,17 @@ interface ThreadMenuSheetProps {
   onClose: () => void;
   /** An action went through: say what it did where the user is looking. */
   onChanged: (message: string) => void;
+  /** The open thread's machine state. With a machine to pick, the menu has a Runs on row. A list row passes none. */
+  machine?: ThreadMachineControl;
+  /** Opens Continue for the open thread. Without it the menu has no Fork thread row. */
+  onFork?: () => void;
 }
 
 /** The thread menu as a sheet: pin, done, rename, move to folder and archive, from the header and from a list row. */
-export function ThreadMenuSheet({ target, folders, onClose, onChanged }: ThreadMenuSheetProps) {
+export function ThreadMenuSheet({ target, folders, onClose, onChanged, machine, onFork }: ThreadMenuSheetProps) {
   const { colors } = useOmniTheme();
   const run = useThreadActions();
-  const [page, setPage] = useState<'menu' | 'move'>('menu');
+  const [asked, setPage] = useState<'menu' | 'move' | 'machine' | 'takeover'>('menu');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const open = target !== null;
@@ -47,7 +56,11 @@ export function ThreadMenuSheet({ target, folders, onClose, onChanged }: ThreadM
     setError(null);
   }, [open]);
 
+  const picker = machine?.machine ?? null;
+  // The machine pages fall back to the menu when the picker goes away, as when a handoff starts from the other machine.
+  const page = (asked === 'machine' || asked === 'takeover') && !picker ? 'menu' : asked;
   const items = useMemo(() => (target ? organizeItems(target) : []), [target]);
+  const extras = useMemo(() => (target ? menuExtras(target, picker, !!onFork) : []), [target, picker, onFork]);
   const choices = useMemo(() => folderChoices(folders, target?.folderId ?? null), [folders, target?.folderId]);
 
   async function perform(action: ThreadAction) {
@@ -77,16 +90,32 @@ export function ThreadMenuSheet({ target, folders, onClose, onChanged }: ThreadM
     else if (id === 'move') setPage('move');
   }
 
-  const accessory = pending ? (
+  function openMachine() {
+    machine?.dismissError();
+    setPage('machine');
+  }
+
+  async function pickMachine(value: string) {
+    const result = await machine?.pick(value);
+    if (result === 'done') onClose();
+    else if (result === 'ask') setPage('takeover');
+  }
+
+  async function takeOver() {
+    if (await machine?.takeOver()) onClose();
+  }
+
+  const sending = !!machine?.ui.sending;
+  const accessory = pending || sending ? (
     <ActivityIndicator color={colors.fg3} />
-  ) : page === 'move' ? (
-    <Pressable accessibilityRole="button" accessibilityLabel="Back" hitSlop={8} onPress={() => setPage('menu')}>
+  ) : page !== 'menu' ? (
+    <Pressable accessibilityRole="button" accessibilityLabel="Back" hitSlop={8} onPress={() => setPage(page === 'takeover' ? 'machine' : 'menu')}>
       <Text style={[styles.back, { color: colors.fg }]}>‹ Back</Text>
     </Pressable>
   ) : null;
 
   return (
-    <Sheet visible={open} title={page === 'move' ? 'Move to folder' : 'Thread'} onClose={onClose} accessory={accessory}>
+    <Sheet visible={open} title={TITLES[page]} onClose={onClose} accessory={accessory}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {error ? <Callout message={error} /> : null}
         {page === 'menu' ? (
@@ -104,7 +133,7 @@ export function ThreadMenuSheet({ target, folders, onClose, onChanged }: ThreadM
               />
             ))}
           </OptionGroup>
-        ) : (
+        ) : page === 'move' ? (
           <>
             <OptionGroup>
               {choices.map((choice, i) => (
@@ -123,11 +152,41 @@ export function ThreadMenuSheet({ target, folders, onClose, onChanged }: ThreadM
               <Text style={[styles.note, { color: colors.fg3 }]}>This channel has no folders yet. Make one on the Web UI or the Mac app, then move threads into it here.</Text>
             ) : null}
           </>
-        )}
+        ) : null}
+        {page === 'menu' && extras.length > 0 ? (
+          <OptionGroup>
+            {extras.map((extra, i) => (
+              <OptionRow
+                key={extra.id}
+                label={extra.label}
+                sub={extra.sub}
+                leading={<Text style={[styles.glyph, { color: colors.fg }]}>{extra.id === 'machine' ? '🖥' : GLYPH.branch}</Text>}
+                opens={extra.id === 'machine'}
+                disabled={pending || !!extra.off}
+                onPress={() => (extra.id === 'machine' ? openMachine() : onFork?.())}
+                last={i === extras.length - 1}
+              />
+            ))}
+          </OptionGroup>
+        ) : null}
+        {page === 'machine' && machine && picker ? (
+          <MachineList rows={picker.rows} value={picker.value} note={machineNote(picker)} busy={sending} error={machine.handOffError} onPick={(value) => void pickMachine(value)} />
+        ) : null}
+        {page === 'takeover' && machine && picker?.kind === 'held' ? (
+          <TakeoverPrompt
+            takeover={picker.takeover}
+            busy={machine.ui.sending === 'takeOver'}
+            error={machine.takeOverError}
+            onConfirm={() => void takeOver()}
+            onCancel={() => setPage('machine')}
+          />
+        ) : null}
       </ScrollView>
     </Sheet>
   );
 }
+
+const TITLES = { menu: 'Thread', move: 'Move to folder', machine: 'Runs on', takeover: 'Take over' } as const;
 
 const styles = StyleSheet.create({
   content: {

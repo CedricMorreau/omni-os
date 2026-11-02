@@ -26,6 +26,7 @@ import {
   type Thread,
   type ThreadOpen,
 } from '@omni/client-core';
+import type { HandoffView, Takeover } from '@omni/shared/handoff.ts';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 import type { Answer } from '@omni/shared/question.ts';
 
@@ -67,6 +68,10 @@ export interface ThreadView {
   pending: PendingMsg[];
   live: boolean;
   blocked: string | null;
+  /** The handoff in flight on this thread, from either machine's side. Null when there is none. */
+  handoff: HandoffView | null;
+  /** Another machine holds the thread and this server could take it. Null when this one holds it. */
+  takeover: Takeover | null;
   /** The loaded rows in order: the newest page, then any older pages Ben loaded. */
   rows: readonly HistoryEvent[];
   hasOlder: boolean;
@@ -122,6 +127,8 @@ export interface LiveHub {
   refreshLibrary(): Promise<void>;
   /** The file's bytes, fetched with the token here and handed on as content. Nothing downstream holds the token. */
   fetchArtifactFile(artifact: Pick<Artifact, 'id' | 'updated_at'>, signal?: AbortSignal): Promise<RawResponse>;
+  /** Puts the thread and handoff a handoff, takeover or cancel answer carried into the open thread's view, before the stream repeats them. */
+  applyHandoff(thread: Thread, handoff: HandoffView | null): void;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -289,6 +296,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         pending: [],
         live: false,
         blocked: null,
+        handoff: null,
+        takeover: null,
         rows: [],
         hasOlder: false,
         loadingOlder: false,
@@ -385,6 +394,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         pending: detail.pending ?? [],
         live: detail.live ?? false,
         blocked: detail.blocked ?? null,
+        handoff: detail.handoff ?? null,
+        takeover: detail.takeover ?? null,
       });
     }
 
@@ -397,6 +408,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         pending: Array.isArray(message.pending) ? (message.pending as PendingMsg[]) : [],
         live: message.live === true,
         blocked: typeof message.blocked === 'string' ? message.blocked : null,
+        handoff: isRecord(message.handoff) ? (message.handoff as unknown as HandoffView) : null,
+        takeover: isRecord(message.takeover) ? (message.takeover as unknown as Takeover) : null,
       });
     }
 
@@ -453,6 +466,10 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       if (thread.id === this.threadId) this.patch({ thread });
     }
 
+    applyHandoff(thread: Thread, handoff: HandoffView | null) {
+      if (thread.id === this.threadId) this.patch({ thread, handoff, takeover: null });
+    }
+
     pause() {
       this.stream?.pause();
     }
@@ -506,6 +523,10 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     refreshActivity: activity.refresh,
     refreshLibrary: library.refresh,
     fetchArtifactFile: (artifact, signal) => withAuth(() => requireApi().artifactFile(artifact, signal)),
+    applyHandoff(thread, handoff) {
+      for (const t of openThreads) t.applyHandoff(thread, handoff);
+      void refreshChannels();
+    },
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);

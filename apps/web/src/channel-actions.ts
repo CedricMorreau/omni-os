@@ -11,8 +11,9 @@ import {
   type SetupMode,
   type ThreadActions,
 } from '@omni/shared/channel-actions.ts';
+import { bytes } from '@omni/shared/format.ts';
 import { api, errorText, useApi, type Thread } from './api.ts';
-import { bytes, duration } from './format.ts';
+import { duration } from './format.ts';
 
 export const POLL_MS = 1000;
 

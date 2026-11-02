@@ -1,5 +1,5 @@
-// Continuing an idle thread on another local harness (#221), the Web UI's side: which harnesses the sheet offers and
-// the run it opens on, the Start request and its retries, the sheet's states, the preview's sections as both sheets
+// Continuing an idle thread on another local harness (#221), what every client's sheet does: which harnesses it offers
+// and the run it opens on, the Start request and its retries, the sheet's states, the preview's sections as the sheets
 // draw them, and the links between the two threads. The shapes are packages/shared/continue.ts.
 import {
   carryoverSize,
@@ -15,29 +15,42 @@ import {
   type ContinueBody,
   type ContinueLink,
   type ContinuePreview,
-} from '@omni/shared/continue.ts';
-import { sameRun, type Run } from '@omni/shared/run-switch.ts';
-import { ApiError, errorText, type HarnessWithRunning, type Thread } from './api.ts';
+} from './continue.ts';
 import { bytes } from './format.ts';
-import { requestIdFor, type PendingRequest } from './requests.ts';
+import { requestIdFor, type PendingRequest } from './request-id.ts';
+import { sameRun, type Run } from './run-switch.ts';
 
 /** The thread a sheet continues. */
-export type ContinueSource = Pick<Thread, 'id' | 'title' | 'harness' | 'channel_id'>;
+export interface ContinueSource {
+  id: string;
+  title: string;
+  harness: string;
+  channel_id: string;
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Why the thread actions cannot offer continuing this thread, or null when they can. */
 export const sourceRefusal = continueSourceRefusal;
 
 // ---------- targets ----------
 
-export interface ContinueTargets {
+/** What the sheet reads of a harness in GET /api/harnesses. The rest of a row (name, fix, running) rides along in `H`. */
+export interface ContinueHarness {
+  id: string;
+  available: boolean;
+  models: readonly { id: string; default?: boolean }[];
+}
+
+export interface ContinueTargets<H extends ContinueHarness = ContinueHarness> {
   /** The local harnesses, for the pickers. One that is not installed or logged in stays, with its fix. */
-  offered: HarnessWithRunning[];
+  offered: H[];
   /** The remote harnesses, each with why it cannot take the thread. */
   refused: { id: string; reason: string }[];
 }
 
-export function continueTargets(catalog: readonly HarnessWithRunning[]): ContinueTargets {
-  const offered: HarnessWithRunning[] = [];
+export function continueTargets<H extends ContinueHarness>(catalog: readonly H[]): ContinueTargets<H> {
+  const offered: H[] = [];
   const refused: ContinueTargets['refused'] = [];
   for (const h of catalog) {
     const reason = continueRefusal(h.id);
@@ -51,7 +64,7 @@ export function continueTargets(catalog: readonly HarnessWithRunning[]): Continu
  * The run a sheet opens on: the first ready local harness other than the source's, at its default model and effort.
  * The source's own harness when it is the only one ready, and null when none is.
  */
-export function defaultRun(offered: readonly HarnessWithRunning[], sourceHarness: string): Run | null {
+export function defaultRun(offered: readonly ContinueHarness[], sourceHarness: string): Run | null {
   const order = [...offered.filter((h) => h.id !== sourceHarness), ...offered.filter((h) => h.id === sourceHarness)];
   for (const h of order) {
     const model = h.models.find((m) => m.default) ?? h.models[0];
@@ -92,8 +105,19 @@ export type StartError =
 /** A refused Start's 409 body (apps/server/continue-api.ts). */
 type Refused = { code?: string; block?: ContinueBlock; preview?: ContinuePreview };
 
+/**
+ * The 409 body of a refused request, from either client's error: the Web UI's ApiError (`status`, `body`) or
+ * client-core's OmniHttpError (`failure`, an `http` one with the same two).
+ */
+function refusedBody(e: unknown): Refused | null {
+  if (!e || typeof e !== 'object') return null;
+  const x = e as { status?: unknown; body?: unknown; failure?: { kind?: unknown; status?: unknown; body?: unknown } | null };
+  const http = x.failure?.kind === 'http' ? x.failure : x;
+  return http.status === 409 && http.body && typeof http.body === 'object' ? (http.body as Refused) : null;
+}
+
 export function startError(e: unknown): StartError {
-  const d = e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object' ? (e.body as Refused) : null;
+  const d = refusedBody(e);
   if (d?.code === 'changed' && d.preview) return { kind: 'changed', preview: d.preview };
   if (d?.code === 'busy' && d.block) return { kind: 'busy', block: d.block };
   if (d?.code === 'request_reused') return { kind: 'reused', error: errorText(e) };
@@ -344,7 +368,10 @@ export const NO_LINKS: ThreadLinks = { from: null, into: [] };
 export const linksOf = (d: { continued_from?: ContinueLink | null; continued_in?: ContinueLink[] }): ThreadLinks =>
   d.continued_from || d.continued_in?.length ? { from: d.continued_from ?? null, into: d.continued_in ?? [] } : NO_LINKS;
 
-const linkOf = (t: Thread, carried: ContinueLink['carried']): ContinueLink => ({
+/** The part of a thread row a continuation link shows. */
+export type LinkedThread = Pick<ContinueLink, 'id' | 'title' | 'harness' | 'model' | 'status' | 'created_at'> & { continued_from: string | null };
+
+const linkOf = (t: LinkedThread, carried: ContinueLink['carried']): ContinueLink => ({
   id: t.id,
   title: t.title,
   harness: t.harness,
@@ -358,7 +385,7 @@ const linkOf = (t: Thread, carried: ContinueLink['carried']): ContinueLink => ({
  * The links once the feed brings `t`: a thread that continues this one is added or kept current, and so is the thread
  * this one continues. What the server said was carried stays. Links `t` does not touch come back unchanged.
  */
-export function linksWith(links: ThreadLinks, threadId: string, t: Thread): ThreadLinks {
+export function linksWith(links: ThreadLinks, threadId: string, t: LinkedThread): ThreadLinks {
   const from = links.from?.id === t.id ? linkOf(t, links.from.carried) : links.from;
   let into = links.into;
   if (t.continued_from === threadId) {

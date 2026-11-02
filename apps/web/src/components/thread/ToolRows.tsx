@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { duration, plural, toDate } from '../../format.ts';
+import { duration, plural } from '../../format.ts';
 import { useNow } from '../../store.tsx';
 import { BranchFace, RailItem, ROW_CARD } from '../Delegation.tsx';
 import { ClippedNote } from './HistoryEdgeRow.tsx';
@@ -8,6 +8,7 @@ import { CheckItem, Icon, Loader, StatusDot } from '../ui.tsx';
 import { str, toolLabel, toolSummary, type TaskView, type Todo, type ToolCall } from '@omni/shared/transcript-fold.ts';
 import { agentStatus, TASK_END } from '../../transcript/delegation.ts';
 import { exitCodeOf, outputMeta } from '@omni/shared/tool-output.ts';
+import { toDate } from '@omni/shared/format.ts';
 
 export const TaskCtx = createContext<Map<string, TaskView>>(new Map());
 

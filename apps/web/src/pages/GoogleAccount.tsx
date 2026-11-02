@@ -1,8 +1,8 @@
 import { useState } from 'react';
+import { relTime } from '@omni/shared/format.ts';
 import { api, errorText, useApi } from '../api.ts';
 import { GoogleSignIn } from '../components/GoogleSignIn.tsx';
 import { Button, Chip, ErrorNote, InlineConfirm } from '../components/ui.tsx';
-import { relTime } from '../format.ts';
 import { Card, InfoRow } from './settings-parts.tsx';
 
 // Settings, Sharing & access, Google sign-in: the Google account that owns this Omni and the devices that signed in with it

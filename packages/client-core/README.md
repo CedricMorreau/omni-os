@@ -56,6 +56,10 @@ Pass `follows` to `openThreadLive` and return false while the user reads older p
 
 `eventSourceTransport` wraps `react-native-sse` so that a stream the server closes ends as an error and the client reconnects after its backoff. Version 1.2.1 otherwise ends such a stream silently, and the client would wait for its 50 second watchdog. The wrapper overrides `_pollAgain`, which is not public API. It leaves an implementation without that method unchanged. Recheck it when upgrading `react-native-sse`. That library also keeps the whole response in `responseText` for the life of one connection, so a long-lived stream grows in memory until the connection drops and reopens. Background pauses reset it, and the app can also call `pause()` then `resume()` on a long foreground session.
 
+## Machines and continuing a thread
+
+`handOff`, `takeOver`, `cancelHandoff`, `continuePreview`, `continueThread` and `closeTerminal` reject with an `OmniHttpError` when the server refuses. A refusal's parsed reply is `error.failure.body` on an `http` failure. For a 409 from `continueThread` that body is `{code: 'busy', block}`, `{code: 'changed', preview}` or `{code: 'request_reused'}`. Pass the error to `startError` from `@omni/shared/continue-flow.ts` to read it. The sheet's reducer, the Start body with its retry-stable request id, and the Machine chip's rows are in `@omni/shared/continue-flow.ts` and `@omni/shared/thread-machine.ts`, the same code the Web UI runs.
+
 ## Protocol notes
 
 The server replays rows after the last thread event ID when the missing rows fit its budget. Otherwise it sends a recent snapshot. Snapshot application keeps the old and new spans apart, so the app can page the gap. Event IDs are global and need not be consecutive. The client deduplicates rows by ID, not stream messages, because EventSource implementations carry the last ID onto later messages without an ID.

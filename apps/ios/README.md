@@ -8,6 +8,20 @@ New starts a thread, from the Channels screen (the Conductor is the first choice
 
 What waits on you shows in the thread: answer a question the agent asked, retry a setup that failed, schedule or cancel a resume after a usage limit, and resume or discard messages the server held. Opening a thread marks its result read.
 
+## Machines and continue
+
+The app talks to whichever server it is paired with, and that server decides what the machines are. The phone only shows and sends. How to set up several machines for testing is documented elsewhere.
+
+The thread menu has a Runs on row when the thread has a machine to pick. It opens the list of synced machines as a page of the menu. Picking another machine hands the thread off at once, as on the phone web, and the answer shows in the thread before the stream repeats it. An offline machine is greyed out with its last seen time. When another machine holds the thread, the list names it and picking this machine opens the Take over confirm, in the same words the web uses. The list loads only while the thread is this machine's to give away.
+
+Between the header and the transcript, a banner shows a handoff while it is under way or went wrong, with Cancel handoff or Cancel request until the other machine takes it, and one quiet line once it settled. A thread another machine holds shows a Take over note with a button, greyed out with the server's reason when it cannot be taken over now. A request the server refuses stays on screen as a sentence, and a phone the server no longer accepts says so and goes back to Connect.
+
+New asks for a machine too. With another synced machine, a Run on chip next to the model chip picks where the thread starts. Until one is picked the request leaves it out, so the default from Settings on the computer applies. The phone cannot read that setting yet, so the chip says Run on until a machine is picked.
+
+Fork thread in the thread menu opens Continue, a modal over the thread. It picks another local harness and model, lists the source's attachments with a switch each, takes the first message, and shows what the new thread will be given (goal, constraints, changed files, checks, recent history, what was left out, and the exact text). A thread that is not idle shows why, with Close terminal when an open shell is the reason. Start opens the new linked thread in place of the screen. Fork is greyed out, with the reason, for a harness whose files are not on the machine (Hermes, Cursor Cloud).
+
+Not built: a machine picker in the composer of an open thread (the menu row is the only entry), the default machine in Settings, and a slide to confirm for Take over (the phone web slides, here it is a button).
+
 ## Run on the iOS simulator
 
 Install Xcode, an iOS simulator runtime, Node 24.3 or later in the 24.x line or Node 26 or later, npm 11.19.0, and CocoaPods. From the repository root:

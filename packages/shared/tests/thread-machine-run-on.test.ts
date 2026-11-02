@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Device } from '@omni/shared/handoff.ts';
-import { HERE, offersRunOn, runOnDefault, runOnPick, runOnRequest, runOnRows, runOnSetting, settingPick } from '../src/run-on.ts';
+import type { Device } from '../handoff.ts';
+import { HERE, offersRunOn, runOnDefault, runOnPick, runOnRequest, runOnRows, runOnSetting, settingPick } from '../thread-machine.ts';
 
 const now = Date.parse('2026-10-29T20:00:00Z');
 const omarchy: Device = { id: 'omarchy-id', name: 'omarchy', reachability: 'online', dnsName: 'omarchy.tail.ts.net', lastSeen: null };

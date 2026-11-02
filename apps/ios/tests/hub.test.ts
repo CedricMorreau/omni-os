@@ -303,6 +303,38 @@ describe('thread changes made in the app', () => {
     hub.close();
   });
 
+  it('reads the handoff and takeover from the detail and the stream, and clears them when the stream stops sending them', async () => {
+    const t = fakeTransport();
+    const takeover = { from: { id: 'm2', name: 'Studio' }, to: { id: 'm1', name: 'Laptop' }, running: true, refused: null };
+    const handoff = { id: 'h1', from: { id: 'm1', name: 'Laptop' }, to: { id: 'm2', name: 'Studio' }, outgoing: true, at: '', state: { phase: 'offered', stale: false }, leftBehind: null, idle: false, requested: false };
+    const { fetch } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: threadDetail({ takeover, blocked: 'Running on Studio.' }) } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    expect(live.view.get()).toMatchObject({ takeover, handoff: null, blocked: 'Running on Studio.' });
+
+    const [stream] = t.threadStreams('t1');
+    stream?.sink.open();
+    stream?.sink.message(frame({ kind: 'thread', thread: { id: 't1', channel_id: 'c', title: 'Fix build', status: 'running' }, pending: [], live: true, handoff }));
+    expect(live.view.get()).toMatchObject({ handoff, takeover: null, blocked: null });
+    live.close();
+    hub.close();
+  });
+
+  it('puts the answer of a handoff into the open thread at once', async () => {
+    const { fetch } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: threadDetail() } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    const handoff = { id: 'h1', state: { phase: 'preparing', step: 'stopping' } };
+    hub.applyHandoff({ ...threadDetail().thread, status: 'stopped' } as never, handoff as never);
+    expect(live.view.get()).toMatchObject({ thread: { status: 'stopped' }, handoff, takeover: null });
+    hub.applyHandoff({ ...threadDetail().thread, id: 'other' } as never, null);
+    expect(live.view.get().handoff).toEqual(handoff);
+    live.close();
+    hub.close();
+  });
+
   it('leaves other open threads alone', async () => {
     const { fetch } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: threadDetail() } : { body: [] }));
     const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });

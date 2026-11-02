@@ -1,5 +1,7 @@
 import type { ChannelWithRunning, CreateThreadRequest, CrewRole, HarnessInfo, Thread } from '@omni/client-core';
 import { draftRun, draftRunRequest, type DraftRun } from '@omni/shared/draft-run.ts';
+import type { Device } from '@omni/shared/handoff.ts';
+import { HERE, runOnRequest, runOnRows, type RunOnRow } from '@omni/shared/thread-machine.ts';
 import { AUTO_CHOICE, asksAuto } from '@omni/shared/thread-run.ts';
 
 import { classifyFailure, type SendFailure } from '../send/outbox';
@@ -22,6 +24,25 @@ export function roleOf(target: string, crew: readonly CrewRole[]): CrewRole | un
   return target === CONDUCTOR ? crew.find((r) => r.id === CONDUCTOR) : undefined;
 }
 
+/** Where the new thread runs. `pick` is null until one is made, and then the server's default (Settings on the computer) applies. */
+export interface RunOnInputs {
+  pick: string | null;
+  /** The other synced machines, or null with none (no Run on then). */
+  devices: Device[] | null;
+}
+
+/**
+ * The request's `device`: only for a machine the list still has, and only once one was picked, so a phone that cannot
+ * read Settings never overrides its default. This machine is always listed.
+ */
+export function runOnBody({ pick, devices }: RunOnInputs): { device?: string } {
+  if (!pick || !devices?.length) return {};
+  return pick === HERE || devices.some((d) => d.id === pick) ? runOnRequest(pick, devices) : {};
+}
+
+/** The machine list for the picker, this machine first under its own name. */
+export const runOnList = (devices: Device[], hereName: string | null): RunOnRow[] => runOnRows(devices, { hereName });
+
 /** A pick belongs to the target it was made for. */
 export interface DraftInputs {
   target: string;
@@ -32,6 +53,7 @@ export interface DraftInputs {
   crew: readonly CrewRole[];
   /** Null until `/harnesses` loads. */
   harnesses: readonly HarnessInfo[] | null;
+  runOn?: RunOnInputs;
 }
 
 export function shownDraftRun({ target, picked, channels, crew, harnesses }: DraftInputs): DraftRun | null {
@@ -49,6 +71,7 @@ export function createRequest(inputs: DraftInputs): Omit<CreateThreadRequest, 'i
     prompt,
     role: roleOf(inputs.target, inputs.crew)?.id,
     ...draftRunRequest(inputs.picked ? (shown ?? inputs.picked) : null),
+    ...(inputs.runOn ? runOnBody(inputs.runOn) : {}),
   };
 }
 

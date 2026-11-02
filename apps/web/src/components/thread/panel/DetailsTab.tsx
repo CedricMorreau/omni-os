@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from 'react';
+import { type ThreadLinks } from '@omni/shared/continue-flow.ts';
 import type { BackgroundTask, Channel, Thread } from '../../../api.ts';
 import { HarnessMark } from '../../brand.tsx';
 import { Chip, CopyButton, Icon, StatusDot } from '../../ui.tsx';
 import { duration, fullDate, plural } from '../../../format.ts';
 import { href } from '../../../router.ts';
 import { cloudAgentUrl } from '@omni/shared/cloud-agent.ts';
-import type { ThreadLinks } from '../../../continue.ts';
 import type { PanelTab } from '../../../pages/useThreadSession.ts';
 import type { PRNext } from '../../../thread-glance.ts';
 import { AgentsSection } from './AgentsSection.tsx';

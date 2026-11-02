@@ -10,12 +10,15 @@ import {
   draftSheetModel,
   newThreadId,
   roleOf,
+  runOnBody,
+  runOnList,
   shownDraftRun,
   startThread,
   targetsOf,
   uuidV4,
   type DraftInputs,
 } from '../../src/newthread/draft';
+import { device } from '../machine/fixtures';
 import { catalog, thread } from '../thread/fixtures';
 
 const harnesses = catalog();
@@ -217,5 +220,40 @@ describe('when the start fails', () => {
     attempt = attemptFor(attempt, { channel: 'acme', prompt: 'hi' }, newThreadId);
     expect((await startThread(create, { channel: 'acme', prompt: 'hi', id: attempt.id })).kind).toBe('created');
     expect(seen[0]).toBe(seen[1]);
+  });
+});
+
+describe('where a new thread runs', () => {
+  const devices = [device(), device({ id: 'm3', name: 'Mini', reachability: 'offline' })];
+
+  it('sends the machine that was picked, with the request', () => {
+    expect(createRequest(inputs({ runOn: { pick: 'm2', devices } }))).toMatchObject({ channel: 'conductor', device: 'm2' });
+    expect(createRequest(inputs({ runOn: { pick: 'here', devices } }))).toMatchObject({ device: 'here' });
+  });
+
+  it('leaves it to the server default until one is picked', () => {
+    expect(createRequest(inputs({ runOn: { pick: null, devices } }))).not.toHaveProperty('device');
+  });
+
+  it('sends nothing with one machine, or for a machine that is no longer listed', () => {
+    expect(runOnBody({ pick: 'm2', devices: null })).toEqual({});
+    expect(runOnBody({ pick: 'm2', devices: [] })).toEqual({});
+    expect(runOnBody({ pick: 'gone', devices })).toEqual({});
+  });
+
+  it('sends a different request, so a new thread id, when the machine changes', () => {
+    const a = createRequest(inputs({ runOn: { pick: 'm2', devices } }))!;
+    const b = createRequest(inputs({ runOn: { pick: 'here', devices } }))!;
+    expect(attemptFor(null, a, () => 'x').key).not.toBe(attemptFor(null, b, () => 'x').key);
+  });
+
+  it('lists this machine first under its name, and greys out an offline one', () => {
+    const rows = runOnList(devices, 'Laptop');
+    expect(rows.map((r) => [r.value, r.label, r.disabled])).toEqual([
+      ['here', 'Laptop', false],
+      ['m2', 'Studio', false],
+      ['m3', 'Mini', true],
+    ]);
+    expect(rows[2]?.sub).toBe('Asleep or offline');
   });
 });

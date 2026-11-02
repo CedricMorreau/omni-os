@@ -1,10 +1,13 @@
 import type { DraftRun } from '@omni/shared/draft-run.ts';
+import { offersRunOn } from '@omni/shared/thread-machine.ts';
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { HeaderButton } from '../components/HeaderButton';
+import { MachineSheet } from '../components/thread/MachineSheet';
 import { RunOptions } from '../components/thread/RunOptions';
 import { useChannels } from '../live/react';
+import { useMachineFacts } from '../machine/hooks';
 import type { RootScreenProps } from '../navigation/types';
 import {
   applyPick,
@@ -12,6 +15,7 @@ import {
   CONDUCTOR,
   draftChipLabel,
   draftSheetModel,
+  runOnList,
   shownDraftRun,
   targetsOf,
   type DraftInputs,
@@ -24,6 +28,8 @@ import { Button } from '../ui/Button';
 import { Callout } from '../ui/Callout';
 import { Sheet } from '../ui/Sheet';
 
+const RUN_ON_NOTE = 'New threads run on the machine Settings names on the computer unless you pick another here. Replies and Stop follow the thread wherever it runs.';
+
 /** The phone web's New sheet (apps/web/src/mobile/NewSheet.tsx) for iOS. */
 export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThread'>) {
   const { colors } = useOmniTheme();
@@ -33,6 +39,10 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
   const [text, setText] = useState('');
   const [pick, setPick] = useState<{ target: string; run: DraftRun } | null>(null);
   const [picking, setPicking] = useState(false);
+  const [machinePick, setMachinePick] = useState<string | null>(null);
+  const [pickingMachine, setPickingMachine] = useState(false);
+  const { facts } = useMachineFacts(true);
+  const devices = offersRunOn(facts?.devices) ? facts.devices : null;
   const strip = useRef<ComponentRef<typeof ScrollView>>(null);
   const centered = useRef(false);
   const catalog = useHarnessCatalog(target, true);
@@ -46,6 +56,7 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
     channels: channels ?? [],
     crew: crew ?? [],
     harnesses: catalog.harnesses,
+    runOn: { pick: machinePick, devices },
   };
   const request = createRequest(inputs);
   const shown = shownDraftRun(inputs);
@@ -81,6 +92,8 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
   const onPick = (p: DraftPick) => {
     if (shown) setPick({ target, run: applyPick(shown, p) });
   };
+  const machineRows = devices ? runOnList(devices, facts?.hereName ?? null) : null;
+  const machineLabel = machineRows?.find((r) => r.value === machinePick)?.label ?? null;
   const sheet = shown && catalog.harnesses ? draftSheetModel(shown, catalog.harnesses) : null;
 
   return (
@@ -140,6 +153,21 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
             )}
             <Text style={[styles.caret, { color: colors.fg3 }]}>▾</Text>
           </Pressable>
+          {machineRows ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Run on: ${machineLabel ?? 'default machine'}`}
+              accessibilityHint="Opens the list of machines"
+              disabled={starting}
+              onPress={() => setPickingMachine(true)}
+              style={({ pressed }) => [styles.chip, { backgroundColor: pressed ? colors.surface3 : colors.surface2 }]}
+            >
+              <Text numberOfLines={1} style={[styles.chipLabel, { color: colors.fg }]}>
+                {machineLabel ? `On ${machineLabel}` : 'Run on'}
+              </Text>
+              <Text style={[styles.caret, { color: colors.fg3 }]}>▾</Text>
+            </Pressable>
+          ) : null}
         </View>
         {state.status === 'failed' ? (
           <View style={styles.notice}>
@@ -169,6 +197,21 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
           ) : null}
         </ScrollView>
       </Sheet>
+      {machineRows ? (
+        <MachineSheet
+          visible={pickingMachine}
+          onClose={() => setPickingMachine(false)}
+          rows={machineRows}
+          value={machinePick ?? ''}
+          note={RUN_ON_NOTE}
+          busy={false}
+          error={null}
+          onPick={(value) => {
+            setMachinePick(value);
+            setPickingMachine(false);
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -223,6 +266,7 @@ const styles = StyleSheet.create({
   },
   runRow: {
     flexDirection: 'row',
+    gap: space.s4,
     paddingHorizontal: space.s8,
   },
   chip: {

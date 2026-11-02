@@ -4,9 +4,11 @@ import type { HttpClient } from '../http.ts';
 import { activityApi } from './activity.ts';
 import { artifactsApi } from './artifacts.ts';
 import { channelsApi } from './channels.ts';
+import { continueApi } from './continue.ts';
 import { crewApi } from './crew.ts';
 import { detailApi } from './detail.ts';
 import { harnessesApi } from './harnesses.ts';
+import { machinesApi } from './machines.ts';
 import { messagesApi } from './messages.ts';
 import { needsYouApi } from './needs-you.ts';
 import { pushApi } from './push.ts';
@@ -16,10 +18,12 @@ import { threadsApi } from './threads.ts';
 export * from './activity.ts';
 export * from './artifacts.ts';
 export * from './channels.ts';
+export * from './continue.ts';
 export * from './crew.ts';
 export * from './detail.ts';
 export * from './events.ts';
 export * from './harnesses.ts';
+export * from './machines.ts';
 export * from './messages.ts';
 export * from './needs-you.ts';
 export * from './push.ts';
@@ -41,5 +45,7 @@ export function createOmniApi(http: HttpClient) {
     ...pushApi(http),
     ...activityApi(http),
     ...artifactsApi(http),
+    ...machinesApi(http),
+    ...continueApi(http),
   };
 }

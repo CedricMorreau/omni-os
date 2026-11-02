@@ -31,9 +31,11 @@ export type HarnessUsage = Partial<Record<HarnessId, Usage | null>>;
 /** A thread in the Pinned list, the latest pin first. */
 export type PinnedThread = ThreadStub & { pinned_at: string | null };
 
-/** The part of GET /status the phone reads. */
+/** The part of GET /status the phone reads: plan usage for Activity, and the machine the server runs on for the machine picker. */
 export interface ServerStatus {
   usage: HarnessUsage;
+  /** The machine the server runs on, under its own name. `here`: the client reaches it directly, not through another device. Older servers leave it out. */
+  device?: { name: string; here: boolean };
 }
 
 export function activityApi(http: HttpClient) {

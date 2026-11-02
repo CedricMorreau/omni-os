@@ -6,6 +6,7 @@ import { HeaderButton } from '../components/HeaderButton';
 import { ArtifactScreen } from '../screens/ArtifactScreen';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
+import { ContinueScreen } from '../screens/ContinueScreen';
 import { NewThreadScreen } from '../screens/NewThreadScreen';
 import { NotificationSettingsScreen } from '../screens/NotificationSettingsScreen';
 import { NotificationsIntroScreen } from '../screens/NotificationsIntroScreen';
@@ -57,6 +58,7 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
       />
       <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
       <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+      <Stack.Screen name="Continue" component={ContinueScreen} options={{ title: 'Continue with another harness', presentation: 'modal' }} />
       <Stack.Screen name="Artifact" component={ArtifactScreen} options={{ title: 'Artifact', headerBackTitle: 'Back' }} />
       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers', headerBackTitle: backTitle }} />
       <Stack.Screen name="AddServer" component={ConnectScreen} options={{ title: 'Add server', headerBackTitle: 'Back' }} />

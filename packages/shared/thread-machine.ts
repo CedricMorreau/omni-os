@@ -1,15 +1,20 @@
-import { canTake, handoffText, type Device, type HandoffView, type Takeover } from '@omni/shared/handoff.ts';
-import type { SyncStatus } from './api.ts';
+import { canTake, handoffText, machineLabel, type Device, type HandoffView, type Takeover } from './handoff.ts';
 import { relTime } from './format.ts';
 
-// What the Web UI shows for handing a running thread to another synced Mac, and for taking one over from the Mac that
-// holds it (packages/shared/handoff.ts owns the shapes and the text). The desktop header, the right-click menu, the
-// note over the reply box and the phone's thread sheet all read these.
+// What a client shows for handing a running thread to another synced Mac, for taking one over from the Mac that holds
+// it, and for choosing where a thread runs (apps/server/run-on.ts). packages/shared/handoff.ts owns the shapes and the
+// text. The Web UI's desktop header, right-click menu, Machine chip, phone sheets and Settings read these, and so does
+// the iOS app. A pick is a device id, or HERE.
 
-type Sync = Pick<SyncStatus, 'configured' | 'enabled' | 'signedOut'>;
+/** The part of GET /api/sync/status that says whether sync can carry an offer. */
+export interface SyncFlags {
+  configured: boolean;
+  enabled: boolean;
+  signedOut: boolean;
+}
 
 /** Sync can carry an offer: signed in and not paused. */
-export const syncCarries = (s: Sync | null | undefined) => !!s && s.configured && s.enabled && !s.signedOut;
+export const syncCarries = (s: SyncFlags | null | undefined) => !!s && s.configured && s.enabled && !s.signedOut;
 
 /** A handoff or a Take over that is still under way, so the thread is not this Mac's to give away or ask for again. */
 const inFlight = (h: HandoffView | null | undefined) => !!h && (h.state.phase === 'requested' || h.state.phase === 'preparing' || h.state.phase === 'offered');
@@ -36,7 +41,7 @@ export type HandoffTargets = { state: 'loading' } | { state: 'none'; reason: str
 export function handoffTargets(
   v: Holding & {
     /** GET /api/sync/status, undefined while it loads. */
-    sync: Sync | null | undefined;
+    sync: SyncFlags | null | undefined;
     /** GET /api/devices, undefined while it loads. */
     devices: Device[] | null | undefined;
   },
@@ -138,4 +143,92 @@ export function blockedNote(
   if (!blocked || inFlight(h) || takeoverShown(takeover, h)?.running) return null;
   const banner = handoffBanner(h, status);
   return banner?.size === 'card' && banner.text === blocked ? null : blocked;
+}
+
+/** This machine, as POST /api/threads takes it. */
+export const HERE = 'here';
+
+/** This machine's row label: its name from GET /api/status `device`, never "This Mac" or "This machine". */
+export const hereLabel = (name: string | null | undefined) => machineLabel(name);
+
+/** One machine in the Run on list. `disabled` for a machine Tailscale sees offline. */
+export interface RunOnRow {
+  value: string;
+  label: string;
+  sub: string;
+  disabled: boolean;
+}
+
+/**
+ * This machine first, under its own name (`hereName`), then the other synced machines as GET /api/devices lists them. The composer disables an offline one,
+ * since the server refuses it; Settings (`asDefault`) does not, as a default may name a machine that sleeps for now.
+ */
+export function runOnRows(
+  devices: Device[],
+  { now = Date.now(), asDefault = false, hereName }: { now?: number; asDefault?: boolean; hereName?: string | null } = {},
+): RunOnRow[] {
+  return [
+    { value: HERE, label: hereLabel(hereName), sub: 'The machine you talk to', disabled: false },
+    ...devices.map((d) => {
+      const row = deviceRow(d, now);
+      return { value: d.id, label: d.name, sub: row.label, disabled: !asDefault && !row.pickable };
+    }),
+  ];
+}
+
+/** Keep a listed machine selected while it is offline, so sending reports the server's refusal. */
+const listed = (id: string | null | undefined, devices: Device[]) => (id && devices.some((d) => d.id === id) ? id : HERE);
+
+/**
+ * What a new thread starts on: Settings' default (`runOn.device`, '' for this machine), or this machine when that one
+ * is gone. An offline default stays selected and the server refuses the send.
+ */
+export const runOnDefault = (setting: string | null | undefined, devices: Device[]) => listed(setting, devices);
+
+/** The composer's pick while it still holds, else the default. */
+export const runOnPick = (picked: string | null, setting: string | null | undefined, devices: Device[]) =>
+  picked && listed(picked, devices) === picked ? picked : runOnDefault(setting, devices);
+
+/** Whether there is anything to pick: another synced machine. Sync off or no peers hides the picker. */
+export const offersRunOn = (devices: Device[] | null | undefined): devices is Device[] => !!devices?.length;
+
+/** The `device` field of POST /api/threads: only when the picker shows, so a hidden one leaves Settings' default. */
+export const runOnRequest = (pick: string, devices: Device[] | null | undefined) => (offersRunOn(devices) ? { device: pick } : {});
+
+/** Settings' value for a pick: '' for this machine. */
+export const runOnSetting = (pick: string) => (pick === HERE ? '' : pick);
+
+/** Settings' saved default as a pick: a machine that is no longer synced shows as this one, where the server runs it. */
+export const settingPick = (setting: string | null | undefined, devices: Device[]) => (setting && devices.some((d) => d.id === setting) ? setting : HERE);
+
+/**
+ * The Machine chip on an existing thread, in the same rows as a new thread's. `holds`: this machine has the thread,
+ * and picking another hands it off. `held`: another machine has it (`takeover`), listed first and selected, and picking
+ * this machine takes it over, or is disabled with why. Null when there is nothing to pick: one machine, the targets still
+ * loading, or a handoff under way (the handoff card says so).
+ */
+export type ThreadMachine = { kind: 'holds'; rows: RunOnRow[]; value: string } | { kind: 'held'; rows: RunOnRow[]; value: string; takeover: Takeover };
+
+export function threadMachine(
+  v: { targets: HandoffTargets; takeover: Takeover | null | undefined; handoff: HandoffView | null | undefined; running: boolean; hereName?: string | null },
+  now = Date.now(),
+): ThreadMachine | null {
+  const t = takeoverShown(v.takeover, v.handoff);
+  if (t) {
+    const can = mayTakeOver(t, v.handoff);
+    return {
+      kind: 'held',
+      value: t.from.id,
+      takeover: t,
+      rows: [
+        { value: t.from.id, label: t.from.name, sub: t.running ? 'Running there now' : 'Last ran there', disabled: false },
+        { value: HERE, label: hereLabel(t.to.name || v.hereName), sub: t.refused ?? (t.running ? 'Take over: stops there, continues here' : 'Take over: next message runs here'), disabled: !can },
+      ],
+    };
+  }
+  if (v.targets.state !== 'ready') return null;
+  const rows = runOnRows(v.targets.devices, { now, hereName: v.hereName });
+  rows[0] = { ...rows[0]!, sub: v.running ? 'Running here now' : 'Runs here' };
+  for (const r of rows.slice(1)) if (!r.disabled) r.sub = `Hand off: ${r.sub}`;
+  return { kind: 'holds', value: HERE, rows };
 }
