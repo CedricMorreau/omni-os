@@ -8,6 +8,7 @@ import { harnessesApi } from './harnesses.ts';
 import { messagesApi } from './messages.ts';
 import { needsYouApi } from './needs-you.ts';
 import { recoveryApi } from './recovery.ts';
+import { statusApi } from './status.ts';
 import { threadsApi } from './threads.ts';
 
 export * from './channels.ts';
@@ -18,6 +19,7 @@ export * from './harnesses.ts';
 export * from './messages.ts';
 export * from './needs-you.ts';
 export * from './recovery.ts';
+export * from './status.ts';
 export * from './threads.ts';
 
 export type OmniApi = ReturnType<typeof createOmniApi>;
@@ -32,5 +34,6 @@ export function createOmniApi(http: HttpClient) {
     ...recoveryApi(http),
     ...needsYouApi(http),
     ...harnessesApi(http),
+    ...statusApi(http),
   };
 }
