@@ -125,14 +125,14 @@ where `payload.apns` is `{"aps":{"alert":{"title":"Omni OS","body":"A thread nee
 
 ## EAS builds
 
-Run EAS commands from `apps/ios` after installing the EAS CLI and signing in to an Expo account. Configure the EAS project and Apple signing before building for a device or TestFlight. The profiles in `eas.json` are:
+Run EAS commands from `apps/ios`. The one-time Apple and Expo setup, the store build and submit commands, the TestFlight steps and the unsigned Release archive check are in [RELEASE.md](RELEASE.md). The profiles in `eas.json` are:
 
 - `development` builds an internal development client.
 - `development-simulator` builds the development client for the simulator.
 - `preview` builds an internal distribution build.
 - `production` builds a production release and increments its build number.
 
-For example, run `eas build --platform ios --profile development-simulator` to build for the simulator. Physical devices and TestFlight require Apple Developer signing and an Expo account.
+For example, run `eas build --platform ios --profile development-simulator` to build for the simulator. Physical devices and TestFlight need Apple Developer signing and an Expo account. See [RELEASE.md](RELEASE.md) before you build for either.
 
 ## Reference setup
 

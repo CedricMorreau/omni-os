@@ -51,4 +51,16 @@ describe('app config', () => {
     expect(config.ios?.privacyManifests?.NSPrivacyTracking).toBe(false);
     expect(config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes).toEqual([]);
   });
+
+  it('declares the required-reason APIs the release binary calls', () => {
+    const reasons = config.ios?.privacyManifests?.NSPrivacyAccessedAPITypes?.map((entry) => [
+      entry.NSPrivacyAccessedAPIType,
+      entry.NSPrivacyAccessedAPITypeReasons,
+    ]);
+    expect(reasons).toEqual([
+      ['NSPrivacyAccessedAPICategoryUserDefaults', ['CA92.1']],
+      ['NSPrivacyAccessedAPICategoryFileTimestamp', ['C617.1']],
+      ['NSPrivacyAccessedAPICategorySystemBootTime', ['35F9.1']],
+    ]);
+  });
 });

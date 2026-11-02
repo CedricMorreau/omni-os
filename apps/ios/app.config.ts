@@ -42,7 +42,13 @@ const config: ExpoConfig = {
       NSPrivacyTrackingDomains: [],
       // The app sends its data to the user's own server, not to the developer, and includes no analytics or crash SDK.
       NSPrivacyCollectedDataTypes: [],
-      NSPrivacyAccessedAPITypes: [],
+      // Required-reason APIs the app binary and its bundled React Native and Expo code call. Verified by nm on the
+      // unsigned Release archive. DiskSpace is declared by ExpoFileSystem's own manifest, so it is not repeated here.
+      NSPrivacyAccessedAPITypes: [
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['CA92.1'] },
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp', NSPrivacyAccessedAPITypeReasons: ['C617.1'] },
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategorySystemBootTime', NSPrivacyAccessedAPITypeReasons: ['35F9.1'] },
+      ],
     },
   },
   plugins: [
