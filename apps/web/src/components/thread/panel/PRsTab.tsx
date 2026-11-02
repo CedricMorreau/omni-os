@@ -3,7 +3,8 @@ import { plural, relTime } from '../../../format.ts';
 import { href } from '../../../router.ts';
 import { OPEN_PR_PROMPT, prBadge, prLine, type PRNext, type PRTone } from '@omni/shared/thread-glance.ts';
 import { Button, Chip, Empty, Icon, LinkButton, Loading, StatusDot } from '../../ui.tsx';
-import { watchCopy, type PRWatchState } from '../PRWatch.tsx';
+import { watchCopy } from '@omni/shared/pr-watch.ts';
+import type { PRWatchState } from '../PRWatch.tsx';
 
 export type ThreadPRs = { pr: PRSummary | null; prs: PRSummary[] } | undefined;
 

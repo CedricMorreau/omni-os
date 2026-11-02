@@ -1,7 +1,7 @@
 // Picking lines in a thread's Changes panel to send to the agent: one pick per panel, then a dock to add a note and
 // put it on the next message as a diff_selection (packages/shared/message-context-diff.ts).
 import { useCallback, useContext, useMemo, useState, type KeyboardEvent } from 'react';
-import { pickedLines, pressLine, type LinePick, type PickedLines } from '@omni/shared/diff-pick.ts';
+import { heldPick, holdPress, noPick, pickedLines, type HeldPick, type PickedLines } from '@omni/shared/diff-pick.ts';
 import { diffSelection, selectRows, type DiffSource } from '@omni/shared/message-context-diff.ts';
 import { NOTE_MAX, newContext } from '@omni/shared/message-context.ts';
 import type { ChangeFileView, ChangeGroupView } from '@omni/shared/changes-view.ts';
@@ -15,14 +15,10 @@ import { Button, ErrorNote, Icon } from '../../ui.tsx';
  * since its indexes would point at other lines.
  */
 export function useLineSelection(scope: string, groups: readonly ChangeGroupView[] | undefined) {
-  const [held, setHeld] = useState<{ scope: string; pick: LinePick | null; diff: string }>({ scope, pick: null, diff: '' });
-  const press = useCallback(
-    (f: ChangeFileView, i: number, extend: boolean) =>
-      setHeld((h) => ({ scope, pick: pressLine(h.scope === scope ? h.pick : null, f.key, f.diff.lines, i, extend), diff: f.file.diff })),
-    [scope],
-  );
-  const clear = useCallback(() => setHeld({ scope, pick: null, diff: '' }), [scope]);
-  const pick = held.scope === scope ? held.pick : null;
+  const [held, setHeld] = useState<HeldPick>(noPick(scope));
+  const press = useCallback((f: ChangeFileView, i: number, extend: boolean) => setHeld((h) => holdPress(h, scope, f, i, extend)), [scope]);
+  const clear = useCallback(() => setHeld(noPick(scope)), [scope]);
+  const pick = heldPick(held, scope);
   const picked = useMemo(() => pickedLines(pick, held.diff, groups), [pick, groups, held.diff]);
   /** For the panel's root: Esc there clears the pick instead of interrupting the thread (useThreadInterruptKey). */
   const root = {

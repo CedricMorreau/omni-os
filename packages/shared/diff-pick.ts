@@ -1,7 +1,7 @@
 // How a press on a diff line becomes a pick, for every client that lets lines be picked to send to the agent: the Web UI's
 // Changes panel (apps/web/src/components/thread/panel/LineSelection.tsx) and the iOS Changes screen (apps/ios/src/changes).
 import type { ChangeKind } from './changes.ts';
-import type { ChangeGroupView } from './changes-view.ts';
+import type { ChangeFileView, ChangeGroupView } from './changes-view.ts';
 import { clampToHunk, type DiffFileLike, type DiffLineLike } from './message-context-diff.ts';
 
 /** Lines `from`..`to` of one file, as indexes into its lines. `to` may be above `from`. */
@@ -42,3 +42,21 @@ export function pickedLines(pick: LinePick | null, diff: string, groups: readonl
   }
   return null;
 }
+
+/**
+ * A screen's pick. `scope` names what is on screen (a turn, or the whole branch): another scope has no pick. `diff` is the
+ * picked file's diff text when it was picked, since a reload that changed it leaves the pick's indexes on other lines.
+ */
+export interface HeldPick {
+  scope: string;
+  pick: LinePick | null;
+  diff: string;
+}
+
+export const noPick = (scope: string): HeldPick => ({ scope, pick: null, diff: '' });
+
+export function holdPress(held: HeldPick, scope: string, f: Pick<ChangeFileView, 'key'> & { diff: Pick<ChangeFileView['diff'], 'lines'>; file: Pick<ChangeFileView['file'], 'diff'> }, i: number, extend: boolean): HeldPick {
+  return { scope, pick: pressLine(held.scope === scope ? held.pick : null, f.key, f.diff.lines, i, extend), diff: f.file.diff };
+}
+
+export const heldPick = (held: HeldPick, scope: string): LinePick | null => (held.scope === scope ? held.pick : null);

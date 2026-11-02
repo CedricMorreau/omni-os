@@ -10,7 +10,8 @@ import { BrowserWatch, displayUrl, useChannelBrowser } from '../components/LiveB
 import { Markdown } from '../components/Markdown.tsx';
 import { modelOf } from '../components/ModelPicker.tsx';
 import { ChangesTab } from '../components/thread/panel/ChangesTab.tsx';
-import { usePRWatch, watchCopy } from '../components/thread/PRWatch.tsx';
+import { usePRWatch } from '../components/thread/PRWatch.tsx';
+import { watchCopy } from '@omni/shared/pr-watch.ts';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ThreadIdCtx, ToolOutput } from '../components/thread/ToolOutput.tsx';
 import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, STATUS_LABEL, StatusDot } from '../components/ui.tsx';
