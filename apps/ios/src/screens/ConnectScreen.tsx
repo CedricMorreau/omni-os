@@ -1,53 +1,97 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 
 import type { RootScreenProps } from '../navigation/types';
-import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
+import { describePairingError } from '../pairing/messages';
+import { usePairing } from '../pairing/PairingProvider';
+import { normalizePairingCode, normalizeServerOrigin } from '../pairing/pairingInput';
+import { fontSize, lineHeight, space, useOmniTheme } from '../theme';
+import { Button } from '../ui/Button';
+import { Callout } from '../ui/Callout';
+import { SegmentedControl } from '../ui/SegmentedControl';
+import { CodeForm } from './connect/CodeForm';
+import { ScanPanel } from './connect/ScanPanel';
 
-export function ConnectScreen(_props: RootScreenProps<'Connect'>) {
+const DEFAULT_DEVICE_NAME = 'iPhone';
+const MAX_DEVICE_NAME_LENGTH = 100;
+
+type Mode = 'scan' | 'code';
+
+const MODES = [
+  { value: 'scan', label: 'Scan QR' },
+  { value: 'code', label: 'Enter code' },
+] as const;
+
+export function ConnectScreen({ navigation }: RootScreenProps<'Connect' | 'AddServer'>) {
   const { colors } = useOmniTheme();
+  const { notice, clearNotice, pair, servers } = usePairing();
+  const [mode, setMode] = useState<Mode>('scan');
+  const [deviceName, setDeviceName] = useState(DEFAULT_DEVICE_NAME);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const hadServers = servers.length > 0;
+
+  async function submit(rawOrigin: string, rawCode: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await pair({
+        origin: normalizeServerOrigin(rawOrigin),
+        code: normalizePairingCode(rawCode),
+        name: deviceName.trim().slice(0, MAX_DEVICE_NAME_LENGTH) || DEFAULT_DEVICE_NAME,
+      });
+      // With no servers before, this is the Connect route, which the navigator drops for Home by itself.
+      if (hadServers) navigation.popToTop();
+    } catch (caught) {
+      setError(describePairingError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function changeMode(next: Mode) {
+    setError(null);
+    setMode(next);
+  }
 
   return (
     <ScrollView
       className="flex-1"
       style={{ backgroundColor: colors.bg }}
       contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.content}
     >
-      <View
-        accessible
-        accessibilityLabel="Placeholder. Not functional yet."
-        style={[styles.badge, { backgroundColor: colors.surface2, borderColor: colors.lineStrong }]}
-      >
-        <Text style={[styles.badgeLabel, { color: colors.fg2 }]}>Placeholder, not functional</Text>
-      </View>
+      {notice !== null && (
+        <Callout message={notice}>
+          <Button label="Dismiss" variant="secondary" onPress={clearNotice} />
+        </Callout>
+      )}
 
-      <Text accessibilityRole="header" style={[styles.title, { color: colors.fg }]}>
-        Connect to a server
-      </Text>
       <Text style={[styles.body, { color: colors.fg3 }]}>
-        Pairing with your Omni server is not built yet. This screen only shows where it will live.
-        Nothing here contacts a server.
+        Pair this phone with your Omni server. Make a pairing code in Omni on your computer.
       </Text>
 
-      <View
-        accessible
-        accessibilityLabel="Server address, not available yet"
-        accessibilityState={{ disabled: true }}
-        style={[styles.field, { backgroundColor: colors.surface, borderColor: colors.line }]}
-      >
-        <Text style={[styles.fieldLabel, { color: colors.fg3 }]}>Server address</Text>
-        <Text style={[styles.fieldValue, { color: colors.fg4 }]}>Available in a later milestone</Text>
-      </View>
+      <SegmentedControl options={MODES} value={mode} onChange={changeMode} />
 
-      <Pressable
-        disabled
-        accessibilityRole="button"
-        accessibilityLabel="Connect, not available yet"
-        accessibilityState={{ disabled: true }}
-        style={[styles.button, { backgroundColor: colors.surface2 }]}
-      >
-        <Text style={[styles.buttonLabel, { color: colors.fg3 }]}>Connect</Text>
-      </Pressable>
+      {mode === 'scan' ? (
+        <ScanPanel
+          deviceName={deviceName}
+          onDeviceNameChange={setDeviceName}
+          busy={busy}
+          onPair={(origin, code) => void submit(origin, code)}
+          onUseCode={() => changeMode('code')}
+        />
+      ) : (
+        <CodeForm
+          deviceName={deviceName}
+          onDeviceNameChange={setDeviceName}
+          busy={busy}
+          onPair={(origin, code) => void submit(origin, code)}
+        />
+      )}
+
+      {error !== null && <Callout message={error} />}
     </ScrollView>
   );
 }
@@ -59,51 +103,8 @@ const styles = StyleSheet.create({
     paddingBottom: space.s11,
     gap: space.s8,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: space.s6,
-    paddingVertical: space.s2,
-  },
-  badgeLabel: {
-    fontSize: fontSize.meta,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: fontSize.titleLg,
-    lineHeight: Math.round(fontSize.titleLg * lineHeight.tight * 1.1),
-    fontWeight: '700',
-  },
   body: {
     fontSize: fontSize.body,
     lineHeight: Math.round(fontSize.body * lineHeight.body),
-  },
-  field: {
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: space.s8,
-    paddingVertical: space.s6,
-    gap: space.s2,
-    marginTop: space.s4,
-  },
-  fieldLabel: {
-    fontSize: fontSize.meta,
-    fontWeight: '500',
-  },
-  fieldValue: {
-    fontSize: fontSize.input,
-  },
-  button: {
-    minHeight: minTarget,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.s9,
-    paddingVertical: space.s6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonLabel: {
-    fontSize: fontSize.input,
-    fontWeight: '600',
   },
 });
