@@ -4,9 +4,11 @@ import { StyleSheet, View } from 'react-native';
 import { HeaderButton } from '../components/HeaderButton';
 import { usePairing } from '../pairing/PairingProvider';
 import { ChannelScreen } from '../screens/ChannelScreen';
+import { ChangesScreen } from '../screens/ChangesScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
 import { NewThreadScreen } from '../screens/NewThreadScreen';
+import { PullRequestScreen } from '../screens/PullRequestScreen';
 import { ServersScreen } from '../screens/ServersScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
 import { useHasSession } from '../session/ActiveSession';
@@ -61,6 +63,8 @@ export function RootNavigator() {
           />
           <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
           <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="Changes" component={ChangesScreen} options={{ title: 'Changes', headerBackTitle: 'Thread' }} />
+          <Stack.Screen name="PullRequest" component={PullRequestScreen} options={{ title: 'Pull request', headerBackTitle: 'Thread', gestureEnabled: false }} />
           <Stack.Screen
             name="Servers"
             component={ServersScreen}

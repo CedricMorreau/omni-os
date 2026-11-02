@@ -65,7 +65,14 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
 
   return (
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={[styles.screen, { backgroundColor: colors.bg }]}>
-      <ThreadHeader view={view} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} flash={flash} />
+      <ThreadHeader
+        view={view}
+        harnesses={catalog.harnesses}
+        onOpenRun={() => setRunOpen(true)}
+        onOpenChanges={() => navigation.navigate('Changes', { id })}
+        onOpenPR={() => navigation.navigate('PullRequest', { id })}
+        flash={flash}
+      />
       <ThreadBody view={view} live={live} />
       {live && view.thread ? (
         <ThreadFooter>

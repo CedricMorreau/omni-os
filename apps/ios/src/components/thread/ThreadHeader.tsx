@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { HarnessInfo, ThreadStatus } from '@omni/client-core';
 
@@ -12,12 +12,14 @@ interface ThreadHeaderProps {
   /** From `/harnesses`; null until it loads. */
   harnesses: HarnessInfo[] | null;
   onOpenRun: () => void;
+  onOpenChanges: () => void;
+  onOpenPR: () => void;
   /** What the last menu action did, for a moment after the sheet closes. */
   flash: string | null;
 }
 
 /** Above the transcript: the connection, the thread's status and channel, its model, a failed refresh, and why a turn cannot start here. */
-export function ThreadHeader({ view, harnesses, onOpenRun, flash }: ThreadHeaderProps) {
+export function ThreadHeader({ view, harnesses, onOpenRun, onOpenChanges, onOpenPR, flash }: ThreadHeaderProps) {
   const { colors } = useOmniTheme();
   const { thread } = view;
   const statusLine = [threadStatusLabel(thread?.status), view.channel?.name, thread?.pinned_at ? 'Pinned' : null].filter(Boolean).join(' · ');
@@ -36,6 +38,8 @@ export function ThreadHeader({ view, harnesses, onOpenRun, flash }: ThreadHeader
       {thread ? (
         <View style={styles.chips}>
           <RunChip thread={thread} harnesses={harnesses} onPress={onOpenRun} />
+          <LinkChip label="Changes" hint="Opens the files this thread changed" onPress={onOpenChanges} />
+          <LinkChip label="Pull request" hint="Opens this branch's pull request" onPress={onOpenPR} />
         </View>
       ) : null}
       {view.blocked ? (
@@ -44,6 +48,22 @@ export function ThreadHeader({ view, harnesses, onOpenRun, flash }: ThreadHeader
         </View>
       ) : null}
     </>
+  );
+}
+
+function LinkChip({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) {
+  const { colors } = useOmniTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={hint}
+      onPress={onPress}
+      style={({ pressed }) => [styles.link, { backgroundColor: pressed ? colors.surface3 : colors.surface2 }]}
+    >
+      <Text style={[styles.linkLabel, { color: colors.fg }]}>{label}</Text>
+      <Text style={[styles.linkCaret, { color: colors.fg3 }]}>›</Text>
+    </Pressable>
   );
 }
 
@@ -81,6 +101,21 @@ const styles = StyleSheet.create({
     gap: space.s4,
     paddingHorizontal: space.s9,
     paddingBottom: space.s4,
+  },
+  link: {
+    height: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s2,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.s6,
+  },
+  linkLabel: {
+    fontSize: fontSize.body,
+    fontWeight: '500',
+  },
+  linkCaret: {
+    fontSize: fontSize.body,
   },
   blocked: {
     marginHorizontal: space.s9,

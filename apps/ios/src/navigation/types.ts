@@ -7,6 +7,8 @@ export type RootStackParamList = {
   Channels: undefined;
   Channel: { id: string };
   Thread: { id: string };
+  Changes: { id: string };
+  PullRequest: { id: string };
   /** Starts a thread. Opens on the channel it was asked from, else the Conductor. */
   NewThread: { channel?: string } | undefined;
   Servers: undefined;
