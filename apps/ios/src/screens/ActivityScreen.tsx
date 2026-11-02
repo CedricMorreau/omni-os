@@ -7,8 +7,9 @@ import { UsageMeters } from '../components/activity/UsageMeters';
 import { ListHeading } from '../components/ListHeading';
 import { StatusLine } from '../components/StatusLine';
 import { ThreadRowView } from '../components/ThreadRowView';
-import { activitySections, type ThreadGroup } from '../live/activity-model';
-import { useActivity, useChannels, useNeedsYou, usePullRefresh } from '../live/react';
+import { activitySections, type NeedsButton, type NeedsRow as NeedsRowModel, type ThreadGroup } from '../live/activity-model';
+import { runNeedsAction } from '../needs/actions';
+import { useActivity, useChannels, useLiveHub, useNeedsYou, usePullRefresh } from '../live/react';
 import type { RootScreenProps } from '../navigation/types';
 import { usePairing } from '../pairing/PairingProvider';
 import { fontSize, space, useOmniTheme } from '../theme';
@@ -21,6 +22,7 @@ type Filter = 'all' | 'needs' | 'running' | 'done';
 /** Home: what needs Ben first, then what runs, what he pinned, the latest threads and what finished today. */
 export function ActivityScreen({ navigation }: RootScreenProps<'Activity'>) {
   const { colors } = useOmniTheme();
+  const hub = useLiveHub();
   const pull = usePullRefresh();
   const activity = useActivity();
   const { channels } = useChannels();
@@ -37,6 +39,14 @@ export function ActivityScreen({ navigation }: RootScreenProps<'Activity'>) {
   );
   const show = (f: Filter) => filter === 'all' || filter === f;
   const open = (id: string) => navigation.navigate('Thread', { id });
+  const press = async (row: NeedsRowModel, b: NeedsButton) => {
+    const { run } = b;
+    if (run.kind === 'open') return open(row.id);
+    if (run.kind === 'read') return hub.markResultRead(run.uid);
+    if (run.kind === 'done') await hub.request((api) => api.setDone(row.id, true));
+    else await hub.request((api) => runNeedsAction(api, row.id, run.action));
+    await Promise.all([hub.refreshNeedsYou(), hub.refreshActivity()]);
+  };
   const groups = (list: ThreadGroup[]) => list.map((g) => <ThreadGroupView key={g.row.id} group={g} onOpen={(row) => open(row.id)} />);
 
   return (
@@ -73,7 +83,7 @@ export function ActivityScreen({ navigation }: RootScreenProps<'Activity'>) {
 
       {show('needs') && (
         <Section title="Needs you" count={a.needs.length}>
-          {a.needs.length ? a.needs.map((n) => <NeedsRow key={n.id} row={n} onPress={() => open(n.id)} />) : <Empty>{a.nothingNeeded}</Empty>}
+          {a.needs.length ? a.needs.map((n) => <NeedsRow key={n.id} row={n} onPress={() => open(n.id)} onButton={(b) => press(n, b)} />) : <Empty>{a.nothingNeeded}</Empty>}
         </Section>
       )}
       {(filter === 'running' || (filter === 'all' && a.running.length > 0)) && (

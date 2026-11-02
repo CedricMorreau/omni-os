@@ -13,11 +13,23 @@ import type {
   UsageWindow,
 } from '@omni/client-core';
 
+import { type NeedsAction } from '../needs/actions';
+import { harnessLabel, LIMIT_LABEL, limitView } from '../needs/limit';
+import { canMarkDone } from '../thread/target';
 import { shortAgo, threadRow, type ThreadRow } from './channel-model';
 
 /** `needs` waits on Ben, `done` is a finished result to read, `settled` a stopped one. */
 export type NeedsGlyph = 'needs' | 'done' | 'settled';
 export type NeedsKind = NeedsYouBlocker['kind'] | 'result';
+
+/** What a Needs you button does. `open` goes to the thread, the rest answer on the spot. */
+export type NeedsButtonRun = { kind: 'open' } | { kind: 'recover'; action: NeedsAction } | { kind: 'read'; uid: string } | { kind: 'done' };
+
+export interface NeedsButton {
+  key: string;
+  label: string;
+  run: NeedsButtonRun;
+}
 
 export interface NeedsRow {
   id: string;
@@ -31,6 +43,8 @@ export interface NeedsRow {
   /** "#Volero · builder · via Conductor". */
   meta: string;
   ago: string;
+  /** The first is the main one. At most two, as on phone web. */
+  buttons: NeedsButton[];
 }
 
 /** A thread row that also names its channel, as Activity lists threads from every channel. */
@@ -137,6 +151,7 @@ function needsRow(item: NeedsYouItem, channelName: string | undefined, now: numb
     ...reason,
     meta: [`#${channelName ?? t.channel_id}`, t.role, via].filter(Boolean).join(' · '),
     ago: shortAgo(item.at, now),
+    buttons: needsButtons(item, now),
   };
 }
 
@@ -302,3 +317,42 @@ function grouped(items: readonly ThreadStub[], groups: StubGroup[], allChildren:
 }
 
 const countRows = (groups: ThreadGroup[]) => groups.reduce((n, g) => n + 1 + g.children.length, 0);
+
+const OPEN: NeedsButton = { key: 'open', label: 'Open', run: { kind: 'open' } };
+
+/**
+ * The buttons on a Needs you row, as phone web's actionsOf gives them (apps/web/src/mobile/activity.ts). A blocker's
+ * second button dismisses it, since the row itself already opens the thread.
+ */
+function needsButtons(item: NeedsYouItem, now: number): NeedsButton[] {
+  const b = item.blockers[0];
+  const t = item.thread;
+  let out: NeedsButton[];
+  switch (b?.kind) {
+    case 'question':
+      out = [{ key: 'answer', label: 'Answer', run: { kind: 'open' } }];
+      break;
+    case 'setup':
+      out = [{ key: 'retry', label: 'Retry', run: { kind: 'recover', action: { kind: 'retry-setup' } } }];
+      break;
+    case 'limited':
+      out = (limitView(t, harnessLabel(t.harness), now)?.actions ?? []).map((a) => ({
+        key: `limit-${a}`,
+        label: LIMIT_LABEL[a],
+        run: { kind: 'recover', action: { kind: 'limit', action: a } },
+      }));
+      break;
+    case 'recovered':
+      out = [{ key: 'resume', label: b.count > 1 ? `Resume ${b.count}` : 'Resume', run: { kind: 'recover', action: { kind: 'resume' } } }];
+      break;
+    case 'uncertain':
+      // Sending again names each message, and only the thread lists them.
+      out = [{ key: 'review', label: 'Review', run: { kind: 'open' } }];
+      break;
+    default:
+      out = item.result ? [OPEN, { key: 'read', label: 'Mark read', run: { kind: 'read', uid: item.result.uid } }] : [OPEN];
+  }
+  if (out.length < 2 && b && canMarkDone(t.status)) out.push({ key: 'done', label: 'Mark done', run: { kind: 'done' } });
+  if (out.length < 2 && !out.some((a) => a.run.kind === 'open')) out.push(OPEN);
+  return out.slice(0, 2);
+}

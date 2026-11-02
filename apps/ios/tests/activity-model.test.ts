@@ -102,6 +102,23 @@ describe('Needs you', () => {
     });
     expect(s.needs.map((n) => n.meta)).toEqual(['#Volero · builder · via Conductor', '#gone']);
   });
+
+  it('gives each row the buttons phone web does, two at most', () => {
+    const blocked = (kind: NeedsYouItem['blockers'][number]['kind'], over: Partial<Thread> = {}, count = 1) =>
+      item(thread(kind, over), { blockers: [{ kind, detail: null, count }] });
+    const labels = (i: NeedsYouItem) => sections({ needsYou: inbox(i) }).needs[0]!.buttons.map((b) => b.label);
+    expect(labels(blocked('question'))).toEqual(['Answer', 'Mark done']);
+    expect(labels(blocked('setup'))).toEqual(['Retry', 'Mark done']);
+    expect(labels(blocked('recovered', {}, 3))).toEqual(['Resume 3', 'Mark done']);
+    expect(labels(blocked('uncertain'))).toEqual(['Review', 'Mark done']);
+    expect(labels(blocked('limited', { limit_state: 'limited', limit_resets_at: local(2026, 10, 2, 17, 30) } as Partial<Thread>))).toEqual(['Resume at reset', 'Resume now']);
+    expect(labels(item(thread('r'), { result: { uid: 'u1', status: 'done', event_uid: null, at: EARLIER_TODAY } }))).toEqual(['Open', 'Mark read']);
+  });
+
+  it('offers no Mark done on a thread that is still running', () => {
+    const running = item(thread('busy', { status: 'running' }), { blockers: [{ kind: 'question', detail: null, count: 1 }] });
+    expect(sections({ needsYou: inbox(running) }).needs[0]!.buttons.map((b) => b.label)).toEqual(['Answer']);
+  });
 });
 
 describe('Running and Done today', () => {
