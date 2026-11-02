@@ -1,9 +1,8 @@
-import { CommonActions } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, Linking } from 'react-native';
 
-import { navigationRef, sessionNavigatorReady, threadOnScreen } from '../navigation/ref';
+import { navigationRef, openOnChannelsTab, sessionNavigatorReady, threadOnScreen } from '../navigation/ref';
 import { usePairing } from '../pairing/PairingProvider';
 import { pairingVault } from '../pairing/runtime';
 import { alertOf } from './alert';
@@ -90,10 +89,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         activeServerId: () => latest.current.activeId,
         select: (id) => latest.current.select(id),
         threadOnScreen,
-        open: (routes) =>
-          navigationRef.dispatch(
-            CommonActions.reset({ index: routes.length - 1, routes: routes.map(({ name, params }) => ({ name, params })) }),
-          ),
+        open: openOnChannelsTab,
       }),
     [api],
   );
