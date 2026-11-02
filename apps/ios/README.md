@@ -25,7 +25,7 @@ Make a pairing code on your computer, then scan its QR code or type the server a
 
 The app accepts only an `https://` server origin. It checks the server's capabilities after pairing and whenever it returns to the foreground. The contract is in `packages/shared/app-pairing.ts`.
 
-With no server paired the app shows Connect. Once one is, Channels is the home screen, and Servers (in its header) switches or removes servers and reaches Add server. The channel list, the thread view and the connection line come from `src/live/`, which talks to the active server through `@omni/client-core` with the token from the Keychain. Pairing's own calls use the same client.
+With no server paired the app shows Connect. Once one is, the app opens on two native tabs, Activity and Channels, in phone web's order. Activity is home: it shows what needs you, what runs, your pins, the latest threads and what finished today, and its tab carries the needs-you count. Each tab keeps its own stack, so a thread opens inside the tab you tapped it in, and the tab bar hides on pushed screens. Servers (in each tab's header) switches or removes servers and reaches Add server. The channel list, Activity, the thread view and the connection line come from `src/live/`, which talks to the active server through `@omni/client-core` with the token from the Keychain. Pairing's own calls use the same client.
 
 A 401 anywhere, on a request or on a stream, makes the app ask the server whether it still accepts this phone. If it does not (the phone was revoked in Settings on the computer), the app forgets that server and shows Connect with a notice. Another paired server, if any, becomes active.
 
