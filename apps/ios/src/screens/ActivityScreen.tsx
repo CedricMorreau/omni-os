@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { NeedsRow } from '../components/activity/NeedsRow';
@@ -9,6 +9,7 @@ import { StatusLine } from '../components/StatusLine';
 import { ThreadRowView } from '../components/ThreadRowView';
 import { activitySections, type ThreadGroup } from '../live/activity-model';
 import { useActivity, useChannels, usePullRefresh } from '../live/react';
+import { useMinuteClock } from '../live/use-minute-clock';
 import type { RootScreenProps } from '../navigation/types';
 import { usePairing } from '../pairing/PairingProvider';
 import { fontSize, space, useOmniTheme } from '../theme';
@@ -103,16 +104,6 @@ export function ActivityScreen({ navigation }: RootScreenProps<'Activity'>) {
       )}
     </ScrollView>
   );
-}
-
-/** The time Activity's relative times and Done today count from, a minute fresh. */
-function useMinuteClock(): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(tick);
-  }, []);
-  return now;
 }
 
 function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {

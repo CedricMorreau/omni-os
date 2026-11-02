@@ -7,7 +7,7 @@ export interface SearchHit {
   channel_id: string;
   status: string;
   updated_at: string;
-  /** Matched words sit between `<mark>` and `</mark>`. A title-only hit carries its title. */
+  /** Matched words sit between `<mark>` and `</mark>`. Empty for a thread only its title matched. */
   snippet: string;
   /** The event a body hit matched. Null for a thread only its title matched. */
   event_id: number | null;

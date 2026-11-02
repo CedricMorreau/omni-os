@@ -1,6 +1,6 @@
 import type { ArtifactWithThread } from '@omni/client-core';
 import { ARTIFACT_FILTERS, matchesArtifactFilter, type ArtifactFilter } from '@omni/shared/artifacts.ts';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { useArtifactFile } from '../artifacts/use-artifact-file';
@@ -8,6 +8,7 @@ import { extensionOf, hasThumbnail } from '../artifacts/viewer-kind';
 import { StatusLine } from '../components/StatusLine';
 import { shortAgo } from '../live/channel-model';
 import { useChannels, useLibrary, usePullRefresh } from '../live/react';
+import { useMinuteClock } from '../live/use-minute-clock';
 import { openArtifact } from '../navigation/open-artifact';
 import type { RootScreenProps } from '../navigation/types';
 import { fontSize, radius, space, useOmniTheme } from '../theme';
@@ -131,15 +132,6 @@ function Label({ artifact }: { artifact: ArtifactWithThread }) {
 }
 
 /** The time the relative times count from, a minute fresh. */
-function useMinuteClock(): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(tick);
-  }, []);
-  return now;
-}
-
 const styles = StyleSheet.create({
   content: {
     paddingBottom: space.s11,
