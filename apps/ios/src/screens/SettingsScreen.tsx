@@ -7,7 +7,7 @@ import { useRemote } from '../live/use-remote';
 import type { RootScreenProps } from '../navigation/types';
 import { describePairingError } from '../pairing/messages';
 import { usePairing } from '../pairing/PairingProvider';
-import { automationsDetail, notificationsRoute, versionLabel } from '../settings/settings-model';
+import { automationsDetail, versionLabel } from '../settings/settings-model';
 import { fontSize, space, useOmniTheme } from '../theme';
 import { GroupedList, ListRow } from '../ui/GroupedList';
 
@@ -17,7 +17,6 @@ export function SettingsScreen({ navigation }: RootScreenProps<'Settings'>) {
   const { colors } = useOmniTheme();
   const { activeServer, remove } = usePairing();
   const automations = useRemote(loadAutomations);
-  const notifications = notificationsRoute(navigation.getState().routeNames);
 
   function confirmSignOut() {
     if (!activeServer) return;
@@ -43,14 +42,7 @@ export function SettingsScreen({ navigation }: RootScreenProps<'Settings'>) {
       <View style={styles.section}>
         <ListHeading>Preferences</ListHeading>
         <GroupedList>
-          <ListRow
-            first
-            title="Notifications"
-            value={notifications ? undefined : 'Not available yet'}
-            chevron={notifications !== null}
-            disabled={notifications === null}
-            onPress={notifications ? () => (navigation as unknown as { navigate(route: string): void }).navigate(notifications) : undefined}
-          />
+          <ListRow first title="Notifications" detail="Which alerts this phone gets" chevron onPress={() => navigation.navigate('NotificationSettings')} />
         </GroupedList>
       </View>
 

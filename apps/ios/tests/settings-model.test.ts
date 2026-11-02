@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { automationsDetail, notificationsRoute, versionLabel } from '../src/settings/settings-model';
-
-describe('notificationsRoute', () => {
-  it('finds the preferences route once a stack registers it, and not before', () => {
-    expect(notificationsRoute(['Activity', 'Settings', 'NotificationSettings'])).toBe('NotificationSettings');
-    expect(notificationsRoute(['Activity', 'Settings'])).toBeNull();
-  });
-});
+import { automationsDetail, versionLabel } from '../src/settings/settings-model';
 
 describe('automationsDetail', () => {
   it('counts the automations on the server', () => {
