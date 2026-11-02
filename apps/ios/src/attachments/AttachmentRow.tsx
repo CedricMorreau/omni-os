@@ -40,10 +40,10 @@ export function AttachmentRow({ threadId, items }: { threadId: string; items: re
   );
 }
 
-/** The address and token for a thread's file, once the session has them. */
-function useFileSource(threadId: string, name: string): FileSource | null {
+/** The address and token for a thread's file. Undefined while the session is looked up, null when it has no server. */
+function useFileSource(threadId: string, name: string): FileSource | null | undefined {
   const hub = useLiveHub();
-  const [source, setSource] = useState<FileSource | null>(null);
+  const [source, setSource] = useState<FileSource | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
     void hub.fileSource(threadId, name).then((s) => live && setSource(s));
@@ -58,10 +58,13 @@ function RemoteImage({ threadId, name, style, resizeMode }: { threadId: string; 
   const { colors } = useOmniTheme();
   const source = useFileSource(threadId, name);
   const [failed, setFailed] = useState(false);
+  // A new address or token (the phone was paired again) deserves another try.
+  const retryKey = source ? `${source.uri}|${JSON.stringify(source.headers)}` : '';
+  useEffect(() => setFailed(false), [retryKey]);
   if (failed || !source) {
     return (
       <View style={[style, styles.placeholder, { backgroundColor: colors.surface3 }]}>
-        {failed ? <Text style={[styles.placeholderText, { color: colors.fg3 }]}>Can’t load image</Text> : <ActivityIndicator color={colors.fg3} />}
+        {failed || source === null ? <Text style={[styles.placeholderText, { color: colors.fg3 }]}>Can’t load image</Text> : <ActivityIndicator color={colors.fg3} />}
       </View>
     );
   }

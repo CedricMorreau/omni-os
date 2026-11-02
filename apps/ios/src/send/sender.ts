@@ -92,8 +92,11 @@ export function createSender(deps: SenderDeps): ThreadSender {
       outbox((o) => failSend(o, item.requestId, classifyFailure(e)));
       return null;
     } finally {
-      if (uploading === controller) uploading = null;
-      patch({ progress: null });
+      // A newer send may own the slot by now, so only the one that is still current resets the bar.
+      if (uploading === controller) {
+        uploading = null;
+        patch({ progress: null });
+      }
     }
   }
 
