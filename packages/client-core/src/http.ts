@@ -15,6 +15,8 @@ export interface FetchResponse {
   status: number;
   headers: { get(name: string): string | null };
   text(): Promise<string>;
+  /** Present where the platform can hand over a body as bytes, which `requestBytes` needs. */
+  arrayBuffer?(): Promise<ArrayBuffer>;
   /** Where the answer came from after any redirects. Empty or missing when the platform does not say. */
   url?: string;
   /** `opaqueredirect` is what a browser's fetch gives for a redirect it was told not to follow. */
@@ -49,6 +51,19 @@ export interface RequestOptions<T> {
   signal?: AbortSignal;
   /** Turns the decoded JSON into `T`, throwing when it does not fit. Without it the JSON is trusted to be `T`. */
   parse?: (json: unknown) => T;
+}
+
+/** A file the server sent as it is. */
+export interface RawResponse {
+  bytes: Uint8Array;
+  contentType: string | null;
+}
+
+export interface RawRequestOptions {
+  query?: Query;
+  signal?: AbortSignal;
+  /** Refuses a longer body, by its Content-Length before it is read and by its size after. Fails as `decoding`. */
+  maxBytes: number;
 }
 
 export type HttpFailure =
@@ -150,6 +165,8 @@ export interface HttpClient {
   url(path: ApiPath, query?: Query): string;
   /** Sends one request and resolves with its JSON body. Every failure rejects with an `OmniHttpError`. */
   request<T = unknown>(method: HttpMethod, path: ApiPath, options?: RequestOptions<T>): Promise<T>;
+  /** GETs a file, not JSON, with the same token, redirect refusal, timeout and errors as `request`. */
+  requestBytes(path: ApiPath, options: RawRequestOptions): Promise<RawResponse>;
 }
 
 /**
@@ -172,9 +189,26 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     return `${config.baseUrl}/api${path}${q ? `?${q}` : ''}`;
   };
 
-  async function request<T>(method: HttpMethod, path: ApiPath, options: RequestOptions<T> = {}): Promise<T> {
-    const { body, signal, parse } = options;
-    const headers: Record<string, string> = { accept: 'application/json' };
+  interface Exchange<B> {
+    status: number;
+    contentType: string | null;
+    retryAfter: string | null;
+    body: B;
+  }
+
+  /**
+   * One round trip: the headers, the redirect refusal, the timeout over the body read, and the translation of a
+   * failed send into an `OmniHttpError`. `read` turns the response into the body the caller wants.
+   */
+  async function exchange<B>(
+    method: HttpMethod,
+    path: ApiPath,
+    options: { query?: Query; body?: unknown; signal?: AbortSignal },
+    accept: string,
+    read: (res: FetchResponse) => Promise<B>,
+  ): Promise<Exchange<B>> {
+    const { body, signal } = options;
+    const headers: Record<string, string> = { accept };
     const token = typeof config.token === 'function' ? await config.token() : config.token;
     if (token?.trim()) headers.authorization = `Bearer ${token.trim()}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
@@ -192,10 +226,6 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     if (signal?.aborted) onAbort();
     else signal?.addEventListener('abort', onAbort);
 
-    let status: number;
-    let contentType: string | null;
-    let retryAfter: string | null;
-    let text: string;
     try {
       const res = await send(url(path, options.query), {
         method,
@@ -205,10 +235,12 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
         redirect: 'manual',
       });
       if (redirected(res, serverOrigin)) throw new OmniHttpError({ kind: 'redirect' });
-      status = res.status;
-      contentType = res.headers.get('content-type');
-      retryAfter = res.headers.get('retry-after');
-      text = await res.text();
+      return {
+        status: res.status,
+        contentType: res.headers.get('content-type'),
+        retryAfter: res.headers.get('retry-after'),
+        body: await read(res),
+      };
     } catch (err) {
       if (err instanceof OmniHttpError) throw err;
       if (timedOut) throw new OmniHttpError({ kind: 'unreachable', detail: 'timed out' });
@@ -218,11 +250,18 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
     }
+  }
 
-    if (status < 200 || status > 299) {
-      const data = text ? parseJson(text) : null;
-      throw new OmniHttpError({ kind: 'http', status, message: errorMessage(data, contentType, status), body: data, retryAfter });
-    }
+  const isOk = (status: number) => status >= 200 && status <= 299;
+
+  function httpError(status: number, text: string, contentType: string | null, retryAfter: string | null): OmniHttpError {
+    const data = text ? parseJson(text) : null;
+    return new OmniHttpError({ kind: 'http', status, message: errorMessage(data, contentType, status), body: data, retryAfter });
+  }
+
+  async function request<T>(method: HttpMethod, path: ApiPath, options: RequestOptions<T> = {}): Promise<T> {
+    const { status, contentType, retryAfter, body: text } = await exchange(method, path, options, 'application/json', (res) => res.text());
+    if (!isOk(status)) throw httpError(status, text, contentType, retryAfter);
     if (!isJson(contentType)) throw new OmniHttpError({ kind: 'not-json', status, contentType });
     let json: unknown;
     try {
@@ -230,13 +269,28 @@ export function createHttpClient(config: HttpClientConfig): HttpClient {
     } catch (err) {
       throw new OmniHttpError({ kind: 'decoding', detail: describe(err) });
     }
-    if (!parse) return json as T;
+    if (!options.parse) return json as T;
     try {
-      return parse(json);
+      return options.parse(json);
     } catch (err) {
       throw new OmniHttpError({ kind: 'decoding', detail: describe(err) });
     }
   }
 
-  return { baseUrl: config.baseUrl, url, request };
+  async function requestBytes(path: ApiPath, options: RawRequestOptions): Promise<RawResponse> {
+    const tooLarge = () => new OmniHttpError({ kind: 'decoding', detail: `the file is larger than ${options.maxBytes} bytes` });
+    const { status, contentType, retryAfter, body } = await exchange('GET', path, options, '*/*', async (res) => {
+      if (!isOk(res.status)) return res.text();
+      const length = Number(res.headers.get('content-length'));
+      if (Number.isFinite(length) && length > options.maxBytes) throw tooLarge();
+      if (!res.arrayBuffer) throw new OmniHttpError({ kind: 'decoding', detail: 'this platform cannot read a file body' });
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > options.maxBytes) throw tooLarge();
+      return new Uint8Array(buffer);
+    });
+    if (typeof body === 'string') throw httpError(status, body, contentType, retryAfter);
+    return { bytes: body, contentType };
+  }
+
+  return { baseUrl: config.baseUrl, url, request, requestBytes };
 }

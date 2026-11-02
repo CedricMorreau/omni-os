@@ -293,3 +293,85 @@ describe('urls', () => {
     expect(http.url(apiPath`/feed`)).toBe('http://127.0.0.1:4757/api/feed');
   });
 });
+
+describe('requestBytes', () => {
+  const authed = (fetch: Fetch) => createHttpClient({ baseUrl: base, token: 'secret', fetch });
+  const bytesFetch = (reply: { status?: number; type?: string; bytes?: number[]; text?: string; headers?: Record<string, string>; url?: string; noBuffer?: boolean }) => {
+    const sent: Sent[] = [];
+    let readBody = false;
+    const fetch: Fetch = async (url, init) => {
+      sent.push({ url, method: init.method, headers: init.headers, body: init.body, redirect: init.redirect, signal: init.signal });
+      const all: Record<string, string> = { 'content-type': reply.type ?? 'image/png', ...(reply.headers ?? {}) };
+      return {
+        status: reply.status ?? 200,
+        headers: { get: (n: string) => all[n.toLowerCase()] ?? null },
+        text: async () => reply.text ?? '',
+        url: reply.url,
+        ...(reply.noBuffer
+          ? {}
+          : {
+              arrayBuffer: async () => {
+                readBody = true;
+                return new Uint8Array(reply.bytes ?? [1, 2, 3]).buffer;
+              },
+            }),
+      };
+    };
+    return { fetch, sent, bodyRead: () => readBody };
+  };
+  const get = (fetch: Fetch, maxBytes = 100) => authed(fetch).requestBytes(apiPath`/artifacts/${7}/raw`, { query: { v: 'x' }, maxBytes });
+
+  it('sends the token to the server and returns the bytes with their type', async () => {
+    const { fetch, sent } = bytesFetch({ bytes: [137, 80, 78, 71] });
+    const res = await get(fetch);
+    expect([...res.bytes]).toEqual([137, 80, 78, 71]);
+    expect(res.contentType).toBe('image/png');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ url: 'http://127.0.0.1:4757/api/artifacts/7/raw?v=x', method: 'GET', redirect: 'manual' });
+    expect(sent[0].headers.authorization).toBe('Bearer secret');
+  });
+
+  it('turns a non-2xx answer into the server error, reading it as text', async () => {
+    const { fetch, bodyRead } = bytesFetch({ status: 404, type: 'text/plain', text: 'not found' });
+    const err = await rejected(get(fetch));
+    expect(err.failure).toMatchObject({ kind: 'http', status: 404, message: 'not found' });
+    expect(bodyRead()).toBe(false);
+  });
+
+  it('refuses a redirect without reading the body', async () => {
+    const { fetch, bodyRead } = bytesFetch({ status: 302, headers: { location: 'https://evil.example.net/x' } });
+    expect(await failure(get(fetch))).toEqual({ kind: 'redirect' });
+    expect(bodyRead()).toBe(false);
+  });
+
+  it('refuses an answer from another origin', async () => {
+    const { fetch, bodyRead } = bytesFetch({ url: 'https://evil.example.net/api/artifacts/7/raw' });
+    expect(await failure(get(fetch))).toEqual({ kind: 'redirect' });
+    expect(bodyRead()).toBe(false);
+  });
+
+  it('refuses a file over the limit by its Content-Length, before reading it', async () => {
+    const { fetch, bodyRead } = bytesFetch({ headers: { 'content-length': '101' } });
+    expect(await failure(get(fetch))).toMatchObject({ kind: 'decoding' });
+    expect(bodyRead()).toBe(false);
+  });
+
+  it('refuses a file over the limit that sent no Content-Length', async () => {
+    const { fetch } = bytesFetch({ bytes: Array.from({ length: 101 }, () => 0) });
+    expect(await failure(get(fetch))).toMatchObject({ kind: 'decoding' });
+  });
+
+  it('fails as decoding where the platform cannot give bytes', async () => {
+    expect(await failure(get(bytesFetch({ noBuffer: true }).fetch))).toMatchObject({ kind: 'decoding' });
+  });
+
+  it('reports a cancelled request', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetch: Fetch = async (_url, init) => {
+      if (init.signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      return { status: 200, headers: { get: () => null }, text: async () => '' };
+    };
+    expect(await failure(authed(fetch).requestBytes(apiPath`/artifacts/${7}/raw`, { signal: controller.signal, maxBytes: 10 }))).toEqual({ kind: 'cancelled' });
+  });
+});

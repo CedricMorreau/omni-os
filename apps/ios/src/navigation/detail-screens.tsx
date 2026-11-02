@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { createNativeStackNavigator, type NativeStackNavigationOptions, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { HeaderButton } from '../components/HeaderButton';
+import { ArtifactScreen } from '../screens/ArtifactScreen';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
 import { NewThreadScreen } from '../screens/NewThreadScreen';
@@ -56,6 +57,7 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
       />
       <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
       <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+      <Stack.Screen name="Artifact" component={ArtifactScreen} options={{ title: 'Artifact', headerBackTitle: 'Back' }} />
       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers', headerBackTitle: backTitle }} />
       <Stack.Screen name="AddServer" component={ConnectScreen} options={{ title: 'Add server', headerBackTitle: 'Back' }} />
       <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ title: 'Notifications', headerBackTitle: 'Back' }} />

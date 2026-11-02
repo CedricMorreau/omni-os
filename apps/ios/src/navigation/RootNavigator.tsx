@@ -3,6 +3,7 @@ import { usePairing } from '../pairing/PairingProvider';
 import { ActivityScreen } from '../screens/ActivityScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
+import { LibraryScreen } from '../screens/LibraryScreen';
 import { useHasSession } from '../session/ActiveSession';
 import { useOmniTheme } from '../theme';
 import { detailScreens, rootActions, serversButton, Stack, stackOptions } from './detail-screens';
@@ -43,6 +44,7 @@ export function RootNavigator() {
         }}
       />
       <Tab.Screen name="ChannelsTab" component={ChannelsStack} options={{ title: 'Channels', icon: 'number' }} />
+      <Tab.Screen name="LibraryTab" component={LibraryStack} options={{ title: 'Library', icon: 'square.stack.3d.up', selectedIcon: 'square.stack.3d.up.fill' }} />
     </Tab.Navigator>
   );
 }
@@ -57,6 +59,20 @@ function ActivityStack() {
         options={({ navigation }) => ({ title: 'Activity', headerRight: serversButton(navigation) })}
       />
       {detailScreens({ backTitle: 'Activity' })}
+    </Stack.Navigator>
+  );
+}
+
+function LibraryStack() {
+  const { colors } = useOmniTheme();
+  return (
+    <Stack.Navigator screenOptions={stackOptions(colors)}>
+      <Stack.Screen
+        name="Library"
+        component={LibraryScreen}
+        options={({ navigation }) => ({ title: 'Library', headerRight: serversButton(navigation) })}
+      />
+      {detailScreens({ backTitle: 'Library' })}
     </Stack.Navigator>
   );
 }

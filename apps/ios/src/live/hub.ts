@@ -19,6 +19,7 @@ import {
   type OmniApi,
   type PendingMsg,
   type Recovered,
+  type RawResponse,
   type SSEClient,
   type SSEState,
   type SSETransport,
@@ -35,6 +36,7 @@ import { withoutResult } from '../needs/inbox';
 import { coalesced } from './coalesce';
 import { createActivityLive, type ActivityState } from './activity';
 import { linkOf, type Link } from './connection';
+import { createLibraryLive, type LibraryState } from './library';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
 
@@ -107,6 +109,7 @@ export interface LiveHub {
   readonly link: Store<Link>;
   readonly needsYou: Store<NeedsYouState>;
   readonly activity: Store<ActivityState>;
+  readonly library: Store<LibraryState>;
   refreshChannels(): Promise<void>;
   /** Runs one API call with the session's credentials, retried once after a 401. Rejects with 'Not paired' without a server. */
   request<T>(call: (api: OmniApi) => Promise<T>): Promise<T>;
@@ -116,6 +119,9 @@ export interface LiveHub {
   refreshActivity(): Promise<void>;
   /** Ben saw this result. The inbox drops it now and the server confirms. */
   markResultRead(uid: string): Promise<void>;
+  refreshLibrary(): Promise<void>;
+  /** The file's bytes, fetched with the token here and handed on as content. Nothing downstream holds the token. */
+  fetchArtifactFile(artifact: Pick<Artifact, 'id' | 'updated_at'>, signal?: AbortSignal): Promise<RawResponse>;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -163,6 +169,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   }
 
   const activity = createActivityLive({ api, withAuth, now });
+  const library = createLibraryLive({ api, withAuth, now });
 
   function requireApi(): OmniApi {
     if (!api) throw new Error('Not paired');
@@ -241,12 +248,14 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         if (isListChange(message)) scheduleRefresh();
         if (isNeedsYouChange(message)) void refreshNeedsYou();
         activity.applyFeed(message);
+        library.applyFeed(message);
       },
       // The feed keeps no replay, so every reconnect refetches the list. The open thread catches up through its own stream.
       onReconnect: () => {
         void refreshChannels();
         void refreshNeedsYou();
         void activity.refresh();
+        void library.refresh();
       },
       onState: (state) => {
         feedState = state;
@@ -476,6 +485,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     void refreshChannels();
     void refreshNeedsYou();
     void activity.refresh();
+    void library.refresh();
   }
   recomputeLink();
 
@@ -484,6 +494,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     link,
     needsYou,
     activity: activity.state,
+    library: library.state,
     refreshChannels,
     request: (call) => withAuth(() => call(requireApi())),
     applyThread(thread) {
@@ -493,6 +504,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     refreshNeedsYou,
     markResultRead,
     refreshActivity: activity.refresh,
+    refreshLibrary: library.refresh,
+    fetchArtifactFile: (artifact, signal) => withAuth(() => requireApi().artifactFile(artifact, signal)),
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -512,6 +525,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         void refreshChannels();
         void refreshNeedsYou();
         void activity.refresh();
+        void library.refresh();
       }
       recomputeLink();
     },
@@ -523,6 +537,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     close() {
       if (refreshTimer !== null) clearTimeout(refreshTimer);
       refreshTimer = null;
+      library.close();
       feed?.close();
       feed = null;
       for (const t of [...openThreads]) t.close();
