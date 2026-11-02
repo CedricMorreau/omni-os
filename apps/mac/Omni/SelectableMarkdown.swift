@@ -96,17 +96,22 @@ final class FlowTextView: NSTextView {
     return NSSize(width: NSView.noIntrinsicMetric, height: ceil(layout.usedRect(for: container).height))
   }
 
-  /// The text's height at `width`, measured without moving the container off the view's own width. SwiftUI probes
-  /// several widths before it settles, and a probe left in the container made the text wrap at that width inside
-  /// a frame sized for another, spilling out of its card.
+  // NSTextView clamps its own container to the view's frame width, so a measure at another width needs a second container.
+  private lazy var measurer: (layout: NSLayoutManager, container: NSTextContainer)? = {
+    guard let storage = textStorage else { return nil }
+    let layout = NSLayoutManager()
+    let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+    container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 0
+    layout.addTextContainer(container)
+    storage.addLayoutManager(layout)
+    return (layout, container)
+  }()
+
   func height(forWidth width: CGFloat) -> CGFloat {
-    guard let container = textContainer, let layout = layoutManager else { return 0 }
-    let current = container.size
-    container.size = NSSize(width: width, height: .greatestFiniteMagnitude)
-    layout.ensureLayout(for: container)
-    let height = ceil(layout.usedRect(for: container).height)
-    container.size = current
-    return height
+    guard let m = measurer else { return 0 }
+    m.container.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+    m.layout.ensureLayout(for: m.container)
+    return ceil(m.layout.usedRect(for: m.container).height)
   }
 
   /// The text wraps at the width SwiftUI gave the view.
