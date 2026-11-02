@@ -1,8 +1,8 @@
 // The push token an app registers for its own session. One per session, and it dies with the session: google-auth.ts
-// deletes it whenever it ends sessions. The server has no APNs sender yet; this is the registry one reads.
+// deletes it whenever it ends sessions. push-sender.ts reads the registry through push-preferences.ts (pushTargets),
+// which joins it to each device's alert choices and to live sessions.
 import { z } from 'zod';
 import { db, tx } from './db.ts';
-import { sessionIsLive } from './google-auth.ts';
 
 export const PushTokenBody = z.object({
   token: z
@@ -53,14 +53,8 @@ export function pushRegistration(sessionId: string): PushRegistration | null {
 /** Drop the session's token. False when it had none. */
 export const deletePushToken = (sessionId: string) => db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(sessionId).changes > 0;
 
-/** For the sender to come: every token whose session is live now, not revoked and not idle past its expiry. */
-export function livePushTokens(at = Date.now()): { sessionId: string; token: string; platform: string; environment: string; bundleId: string | null }[] {
-  const rows = db.prepare('SELECT session_id, token, platform, environment, bundle_id FROM push_tokens').all() as {
-    session_id: string;
-    token: string;
-    platform: string;
-    environment: string;
-    bundle_id: string | null;
-  }[];
-  return rows.filter((r) => sessionIsLive(r.session_id, at)).map((r) => ({ sessionId: r.session_id, token: r.token, platform: r.platform, environment: r.environment, bundleId: r.bundle_id }));
-}
+/**
+ * Drop a token Apple said is dead (410, or BadDeviceToken). Whichever session holds it loses the registration, so a
+ * reinstalled app that registers again gets a fresh row.
+ */
+export const forgetPushToken = (token: string) => db.prepare('DELETE FROM push_tokens WHERE token = ?').run(token).changes;

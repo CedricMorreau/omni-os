@@ -23,6 +23,7 @@ import {
   type FlowOutcome,
   type PollResult,
 } from './google-auth.ts';
+import { PushPreferencesBody, readPushPreferences, updatePushPreferences } from './push-preferences.ts';
 import { deletePushToken, pushRegistration, PushTokenBody, setPushToken } from './push-tokens.ts';
 import { clientKey, desktopPairAllowed, viaConnect } from './request-guard.ts';
 
@@ -263,4 +264,24 @@ authApi.delete('/push-token', (c) => {
   if (who.refused) return who.refused;
   deletePushToken(who.session);
   return c.json({ ok: true });
+});
+
+// ---------- push preferences ----------
+
+/** Which alerts this device gets. Every kind is on until the device turns one off. */
+authApi.get('/push-preferences', (c) => {
+  const who = appSession(c);
+  if (who.refused) return who.refused;
+  return c.json(readPushPreferences(who.session));
+});
+
+/** Turn kinds on or off. Sends only the kinds that change; the response is the full set. */
+authApi.put('/push-preferences', async (c) => {
+  const who = appSession(c);
+  if (who.refused) return who.refused;
+  const body = PushPreferencesBody.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return c.json({ error: firstIssue(body.error) }, 400);
+  const next = updatePushPreferences(who.session, body.data);
+  if (!next) return c.json({ error: 'Unauthorized: this session has ended' }, 401);
+  return c.json(next);
 });
