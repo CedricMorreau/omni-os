@@ -75,7 +75,7 @@ export function ServersScreen({ navigation }: RootScreenProps<'Servers'>) {
         );
       })}
 
-      <Button label="Add server" variant="secondary" onPress={() => navigation.navigate('Connect')} />
+      <Button label="Add server" variant="secondary" onPress={() => navigation.navigate('AddServer')} />
     </ScrollView>
   );
 }

@@ -22,7 +22,7 @@ const MODES = [
   { value: 'code', label: 'Enter code' },
 ] as const;
 
-export function ConnectScreen({ navigation }: RootScreenProps<'Connect'>) {
+export function ConnectScreen({ navigation }: RootScreenProps<'Connect' | 'AddServer'>) {
   const { colors } = useOmniTheme();
   const { notice, clearNotice, pair, servers } = usePairing();
   const [mode, setMode] = useState<Mode>('scan');
@@ -40,7 +40,7 @@ export function ConnectScreen({ navigation }: RootScreenProps<'Connect'>) {
         code: normalizePairingCode(rawCode),
         name: deviceName.trim().slice(0, MAX_DEVICE_NAME_LENGTH) || DEFAULT_DEVICE_NAME,
       });
-      // With no servers before, the navigator swaps this screen for Home by itself.
+      // With no servers before, this is the Connect route, which the navigator drops for Home by itself.
       if (hadServers) navigation.popToTop();
     } catch (caught) {
       setError(describePairingError(caught));

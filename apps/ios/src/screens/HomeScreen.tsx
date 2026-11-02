@@ -60,7 +60,7 @@ export function HomeScreen({ navigation }: RootScreenProps<'Home'>) {
       )}
 
       <Button label="Servers" onPress={() => navigation.navigate('Servers')} />
-      <Button label="Add server" variant="secondary" onPress={() => navigation.navigate('Connect')} />
+      <Button label="Add server" variant="secondary" onPress={() => navigation.navigate('AddServer')} />
     </ScrollView>
   );
 }

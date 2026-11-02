@@ -34,7 +34,7 @@ export function RootNavigator() {
             options={{ title: 'Servers', headerBackTitle: 'Home' }}
           />
           <Stack.Screen
-            name="Connect"
+            name="AddServer"
             component={ConnectScreen}
             options={{ title: 'Add server', headerBackTitle: 'Back' }}
           />
