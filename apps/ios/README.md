@@ -1,6 +1,6 @@
 # Omni OS for iOS
 
-This development client contains a home screen and a connect screen stub. It does not connect to a server or save a server address yet. Expo Go is not supported.
+This development client reads channels and threads from an Omni server and follows them live. It is read only: sending messages comes in a later milestone. Pairing is not built yet, so a development build gets its server from build-time variables (see below). Expo Go is not supported.
 
 ## Run on the iOS simulator
 
@@ -21,7 +21,11 @@ Open the installed Omni OS development client and select the Metro server. If th
 
 ## Connect to a server
 
-The Connect screen is a placeholder. Server selection, pairing, and HTTP and SSE access are not implemented in this milestone. Do not enter credentials into the placeholder.
+The Connect screen is still a placeholder, and pairing is not implemented. Do not enter credentials into it.
+
+For development, set `EXPO_PUBLIC_OMNI_DEV_URL` (for example `http://127.0.0.1:4757`) and `EXPO_PUBLIC_OMNI_DEV_TOKEN` in the environment that starts Metro. The app reads them only in a development build. A release build has no server and shows "Not paired". The token ends up in the JavaScript bundle, so use a throwaway server's token, never a live one, and do not commit it.
+
+The channel list, the thread view, and the connection line in the header come from `src/live/`. The data layer runs on `@omni/client-core`, and its tests run with `npm test --workspace @omni/ios`.
 
 ## EAS builds
 

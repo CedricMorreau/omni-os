@@ -2,6 +2,8 @@ import { DarkTheme, DefaultTheme, NavigationContainer, type Theme } from '@react
 import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { appSession } from './live/app-session';
+import { LiveProvider } from './live/react';
 import { RootNavigator } from './navigation/RootNavigator';
 import { useOmniTheme } from './theme';
 
@@ -24,7 +26,9 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
       <NavigationContainer theme={navTheme}>
-        <RootNavigator />
+        <LiveProvider session={appSession}>
+          <RootNavigator />
+        </LiveProvider>
       </NavigationContainer>
     </SafeAreaProvider>
   );

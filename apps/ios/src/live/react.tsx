@@ -1,0 +1,91 @@
+import { eventSourceTransport } from '@omni/client-core';
+import { addNetworkStateListener } from 'expo-network';
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { AppState } from 'react-native';
+import EventSource from 'react-native-sse';
+
+import { createLiveHub, type LiveHub, type ThreadLive, type ThreadView } from './hub';
+import type { Link } from './connection';
+import type { OmniSession } from './session';
+import { createStore, type Store } from './store';
+
+const HubContext = createContext<LiveHub | null>(null);
+
+/**
+ * Owns the live hub for one session. A new session makes a new hub, so re-pairing starts clean. The hub lives in an
+ * effect rather than a memo, so a remount (or React's dev double-mount) closes it and opens a fresh one.
+ */
+export function LiveProvider({ session, children }: { session: OmniSession; children: ReactNode }) {
+  const [hub, setHub] = useState<LiveHub | null>(null);
+
+  useEffect(() => {
+    const next = createLiveHub({ session, transport: eventSourceTransport(EventSource) });
+    setHub(next);
+    const appState = AppState.addEventListener('change', (state) => next.setForeground(state === 'active'));
+    const network = addNetworkStateListener((state) => {
+      if (state.isInternetReachable) next.kick();
+    });
+    return () => {
+      appState.remove();
+      network.remove();
+      next.close();
+      setHub(null);
+    };
+  }, [session]);
+
+  return <HubContext.Provider value={hub}>{hub ? children : null}</HubContext.Provider>;
+}
+
+export function useLiveHub(): LiveHub {
+  const hub = useContext(HubContext);
+  if (!hub) throw new Error('useLiveHub needs a LiveProvider above it');
+  return hub;
+}
+
+export function useStore<T>(store: Store<T>): T {
+  return useSyncExternalStore(store.subscribe, store.get, store.get);
+}
+
+export function useChannels() {
+  return useStore(useLiveHub().channels);
+}
+
+/** A pull-to-refresh that shows its spinner only for a pull. A refresh the app starts itself, as on returning to the front, stays quiet. */
+export function usePullRefresh() {
+  const hub = useLiveHub();
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = () => {
+    setRefreshing(true);
+    void hub.refreshChannels().finally(() => setRefreshing(false));
+  };
+  return { refreshing, onRefresh };
+}
+
+export function useLink(): Link {
+  return useStore(useLiveHub().link);
+}
+
+/** Opens a thread for as long as the calling screen is mounted. */
+export function useThreadLive(threadId: string): ThreadLive | null {
+  const hub = useLiveHub();
+  const [live, setLive] = useState<ThreadLive | null>(null);
+  useEffect(() => {
+    const thread = hub.openThread(threadId);
+    setLive(thread);
+    return () => {
+      thread.close();
+      setLive(null);
+    };
+  }, [hub, threadId]);
+  return live;
+}
+
+const idle = createStore<null>(null);
+
+/** The thread's view, or null until its screen has opened it. */
+export function useThreadView(live: ThreadLive | null): ThreadView | null {
+  return useSyncExternalStore(
+    (listener) => (live ? live.view.subscribe(listener) : idle.subscribe(listener)),
+    () => (live ? live.view.get() : null),
+  );
+}

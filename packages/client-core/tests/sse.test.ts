@@ -356,6 +356,36 @@ describe('eventSourceTransport', () => {
     expect(t.source().init).toEqual({ headers: { Authorization: 'Bearer tok' }, pollingInterval: 0, timeoutBeforeConnection: 0 });
   });
 
+  it('still lets react-native-sse make its first connection', async () => {
+    const instances: ScheduledEventSource[] = [];
+    // Mirrors react-native-sse 1.2.1: the constructor asks _pollAgain(timeoutBeforeConnection, true) to schedule open().
+    class ScheduledEventSource extends FakeEventSource {
+      CLOSED = 2;
+      status = 0;
+      opens = 0;
+      constructor(url: string, init: FakeEventSource['init']) {
+        super(url, init);
+        instances.push(this);
+        this._pollAgain(init.timeoutBeforeConnection, true);
+      }
+      _pollAgain(time: number, allowZero?: boolean) {
+        if (time > 0 || allowZero) setTimeout(() => (this.opens += 1), time);
+      }
+      dispatch(type: string, data: EventSourceEvent) {
+        this.emit(type, data);
+      }
+    }
+    openSSE({
+      transport: eventSourceTransport(ScheduledEventSource),
+      request: () => ({ url: '/s', headers: {} }),
+      decode: decodeJSON,
+      onMessage: () => {},
+    });
+    await flush();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instances[0].opens).toBe(1);
+  });
+
   it('reconnects when react-native-sse ends a stream quietly, without waiting for the watchdog', async () => {
     const instances: PollingEventSource[] = [];
     // Mirrors react-native-sse 1.2.1: a finished request calls _pollAgain(interval, false), which does nothing at 0.

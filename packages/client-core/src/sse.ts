@@ -260,16 +260,18 @@ interface PollingSource {
 /**
  * `react-native-sse` 1.2.1 ends quietly when the server closes a stream and `pollingInterval` is 0: it neither
  * reconnects nor emits an error, so the client would wait for its 50s watchdog. Its `_pollAgain(time, false)` runs
- * exactly when a request finishes, so a subclass reports that as an error. Another implementation has no such hook
+ * exactly when a request finishes, so a subclass reports that as an error. The constructor calls the same method with
+ * `allowZero` to schedule the first connection, and that call goes through. Another implementation has no such hook
  * and is used as given.
  */
 function endsLoudly(Impl: EventSourceConstructor): EventSourceConstructor {
   const proto = Impl.prototype as PollingSource;
   if (typeof proto._pollAgain !== 'function' || typeof proto.dispatch !== 'function') return Impl;
   return class extends (Impl as new (...args: never[]) => object) {
-    _pollAgain(_time: number, allowZero?: boolean) {
+    _pollAgain(time: number, allowZero?: boolean) {
       const self = this as unknown as PollingSource;
-      if (!allowZero && self.status !== self.CLOSED) self.dispatch?.('error', { type: 'error', message: 'stream ended' });
+      if (allowZero) proto._pollAgain?.call(self, time, allowZero);
+      else if (self.status !== self.CLOSED) self.dispatch?.('error', { type: 'error', message: 'stream ended' });
     }
   } as unknown as EventSourceConstructor;
 }
