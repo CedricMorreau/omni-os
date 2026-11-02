@@ -199,6 +199,16 @@ import OmniKit
     #expect(without.designSystemSize == 0)
   }
 
+  @Test func readsTheExtraRepos() throws {
+    let base = #"{"id":"a","name":"A","kind":"client","use_worktree":1,"browser_headless":1,"archived":0,"created_at":"2026-01-05T09:00:00.000Z""#
+    let with = try decode(Channel.self, base + #","extra_repos":[{"path":"/tmp/x/acme-back","github":"acme/acme-back"},{"path":"/tmp/x/acme-docs","github":null}]}"#)
+    #expect(with.extraRepos == [ChannelRepo(path: "/tmp/x/acme-back", github: "acme/acme-back"), ChannelRepo(path: "/tmp/x/acme-docs")])
+    #expect(try decode(Channel.self, base + "}").extraRepos.isEmpty)
+    #expect(try decode(Channel.self, base + #","extra_repos":[]}"#).extraRepos.isEmpty)
+    #expect(try decode(Channel.self, base + #","extra_repos":"nope"}"#).extraRepos.isEmpty)
+    #expect(try decode(Channel.self, base + #","extra_repos":[{"github":"acme/x"}]}"#).extraRepos.isEmpty)
+  }
+
   @Test func readsAndSavesTheQuickLinks() async throws {
     let base = #"{"id":"a","name":"A","kind":"client","use_worktree":1,"browser_headless":1,"archived":0,"created_at":"2026-01-05T09:00:00.000Z""#
     let with = try decode(Channel.self, base + #","links":[{"label":"Productive","url":"https://app.productive.io/p/1"}]}"#)

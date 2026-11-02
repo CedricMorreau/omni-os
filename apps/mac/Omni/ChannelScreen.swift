@@ -110,36 +110,53 @@ private struct ChannelView: View {
     let repo = channel.githubRepo.flatMap { $0.isEmpty ? nil : $0 }
     let path = channel.repoPath.flatMap { $0.isEmpty ? nil : $0 }
     let note = conductor ? channel.notes.flatMap { $0.isEmpty ? nil : $0 } : nil
-    if domain != nil || repo != nil || path != nil || note != nil {
+    let extras = channel.extraRepos.filter { !$0.path.isEmpty }
+    if !extras.isEmpty {
+      FlowLayout(spacing: z(6)) {
+        linkPills(domain: domain, repo: repo, path: path, note: nil)
+        ForEach(Array(extras.enumerated()), id: \.offset) { _, extra in
+          linkPills(domain: nil, repo: extra.github.flatMap { $0.isEmpty ? nil : $0 }, path: extra.path, note: nil)
+        }
+        if let note { noteText(note) }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.top, z(16))
+    } else if domain != nil || repo != nil || path != nil || note != nil {
       HStack(spacing: z(6)) {
-        if let domain, let url = URL(string: "https://\(domain)/admin") {
-          LinkPill(icon: "globe", text: domain, url: url)
-        }
-        if let repo, let url = URL(string: "https://github.com/\(repo)") {
-          LinkPill(icon: "branch", text: repo, url: url)
-        }
-        if let path {
-          Text(path)
-            .font(.omni(size: 11, design: .monospaced))
-            .foregroundStyle(Tok.fg4)
-            .lineLimit(1)
-            .truncationMode(.head)
-            .padding(.horizontal, z(10))
-            .frame(height: z(28))
-            .overlay(Capsule().strokeBorder(Tok.line))
-            .help(path)
-        }
-        if let note {
-          Text(note)
-            .font(.omni(size: 12.5))
-            .foregroundStyle(Tok.fg3)
-            .lineLimit(1)
-            .padding(.horizontal, z(4))
-        }
+        linkPills(domain: domain, repo: repo, path: path, note: note)
         Spacer(minLength: 0)
       }
       .padding(.top, z(16))
     }
+  }
+
+  @ViewBuilder private func linkPills(domain: String?, repo: String?, path: String?, note: String?) -> some View {
+    if let domain, let url = URL(string: "https://\(domain)/admin") {
+      LinkPill(icon: "globe", text: domain, url: url)
+    }
+    if let repo, let url = URL(string: "https://github.com/\(repo)") {
+      LinkPill(icon: "branch", text: repo, url: url)
+    }
+    if let path {
+      Text(path)
+        .font(.omni(size: 11, design: .monospaced))
+        .foregroundStyle(Tok.fg4)
+        .lineLimit(1)
+        .truncationMode(.head)
+        .padding(.horizontal, z(10))
+        .frame(height: z(28))
+        .overlay(Capsule().strokeBorder(Tok.line))
+        .help(path)
+    }
+    if let note { noteText(note) }
+  }
+
+  private func noteText(_ note: String) -> some View {
+    Text(note)
+      .font(.omni(size: 12.5))
+      .foregroundStyle(Tok.fg3)
+      .lineLimit(1)
+      .padding(.horizontal, z(4))
   }
 
   private var tabs: some View {

@@ -20,6 +20,16 @@ public struct ChannelLink: Codable, Hashable, Sendable {
   }
 }
 
+public struct ChannelRepo: Codable, Hashable, Sendable {
+  public var path: String
+  public var github: String?
+
+  public init(path: String, github: String? = nil) {
+    self.path = path
+    self.github = github
+  }
+}
+
 /// A channel row. Field names follow `Channel` in apps/server/db.ts.
 public struct Channel: Decodable, Hashable, Sendable, Identifiable {
   public let id: String
@@ -45,6 +55,7 @@ public struct Channel: Decodable, Hashable, Sendable, Identifiable {
   public let defaultModel: String?
   public let defaultEffort: String?
   public let links: [ChannelLink]
+  public let extraRepos: [ChannelRepo]
 
   enum CodingKeys: String, CodingKey {
     case id, name, kind, notes, icon, archived, links
@@ -61,6 +72,7 @@ public struct Channel: Decodable, Hashable, Sendable, Identifiable {
     case defaultHarness = "default_harness"
     case defaultModel = "default_model"
     case defaultEffort = "default_effort"
+    case extraRepos = "extra_repos"
   }
 
   public init(from decoder: any Decoder) throws {
@@ -85,6 +97,7 @@ public struct Channel: Decodable, Hashable, Sendable, Identifiable {
     defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel).flatMap { $0.isEmpty ? nil : $0 }
     defaultEffort = try c.decodeEffort(.defaultEffort)
     links = try c.decodeIfPresent([ChannelLink].self, forKey: .links) ?? []
+    extraRepos = (try? c.decodeIfPresent([ChannelRepo].self, forKey: .extraRepos)) ?? []
   }
 
   public var runDefaults: RunDefaults { RunDefaults(harness: defaultHarness, model: defaultModel, effort: defaultEffort) }
