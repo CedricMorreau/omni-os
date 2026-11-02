@@ -182,6 +182,8 @@ final class QARunner {
           guard let issue = QAIosPairingProbe.issue else { throw QAScriptError("no Omni for iOS card on screen") }
           await issue()
           try? await Task.sleep(for: .milliseconds(600))
+          Self.scrollSettings(toShow: QAIosPairingProbe.frame)
+          try? await Task.sleep(for: .milliseconds(300))
         case .scroll(let scroll):
           result.note = try await self.scroll(scroll)
         case .expand:
