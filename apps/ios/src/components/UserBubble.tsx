@@ -15,14 +15,15 @@ export function UserBubble({
   caption: string;
   /** Shows a spinner beside the caption, for a message still on its way. */
   busy?: boolean;
+  /** Fades the message text, for one that did not go out. The caption and buttons stay readable. */
   dimmed?: boolean;
   children?: ReactNode;
 }) {
   const { colors } = useOmniTheme();
   return (
     <View style={styles.wrap}>
-      <View style={[styles.bubble, { backgroundColor: colors.surface2 }, dimmed && styles.dimmed]}>
-        <Text selectable style={[styles.text, { color: colors.fg }]}>
+      <View style={[styles.bubble, { backgroundColor: colors.surface2 }]}>
+        <Text selectable style={[styles.text, { color: colors.fg }, dimmed && styles.dimmed]}>
           {text}
         </Text>
         {busy ? (
