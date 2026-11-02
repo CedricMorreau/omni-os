@@ -2,6 +2,9 @@ import type { DraftRun } from '@omni/shared/draft-run.ts';
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { AttachControl, AttachNotice } from '../attachments/AttachControl';
+import { AttachmentChips } from '../attachments/AttachmentChips';
+import { clearStaged, removeStagedFile, useStaged } from '../attachments/staged';
 import { HeaderButton } from '../components/HeaderButton';
 import { RunOptions } from '../components/thread/RunOptions';
 import { useChannels } from '../live/react';
@@ -24,6 +27,9 @@ import { Button } from '../ui/Button';
 import { Callout } from '../ui/Callout';
 import { Sheet } from '../ui/Sheet';
 
+/** The staged-files scope of the one New screen. A thread id never looks like this. */
+const NEW_SCOPE = 'new-thread';
+
 /** The phone web's New sheet (apps/web/src/mobile/NewSheet.tsx) for iOS. */
 export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThread'>) {
   const { colors } = useOmniTheme();
@@ -36,8 +42,16 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
   const strip = useRef<ComponentRef<typeof ScrollView>>(null);
   const centered = useRef(false);
   const catalog = useHarnessCatalog(target, true);
-  const { state, start, dismiss } = useStartThread();
+  const { state, start, dismiss, progress, cancel } = useStartThread();
   const starting = state.status === 'starting';
+  const files = useStaged(NEW_SCOPE);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
+
+  // Files chosen for an earlier New screen are not this one's, and these are not the next one's.
+  useEffect(() => {
+    clearStaged(NEW_SCOPE);
+    return () => clearStaged(NEW_SCOPE);
+  }, []);
 
   const inputs: DraftInputs = {
     target,
@@ -54,7 +68,7 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
 
   const submit = async () => {
     if (!request || crew === null) return;
-    const thread = await start(request);
+    const thread = await start(request, files);
     if (thread) navigation.replace('Thread', { id: thread.id });
   };
   const submitRef = useRef(submit);
@@ -122,7 +136,15 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
           style={[styles.input, { color: colors.fg, backgroundColor: colors.surface }]}
           textAlignVertical="top"
         />
+        {files.length > 0 ? (
+          <View style={styles.notice}>
+            <AttachmentChips files={files} onRemove={starting ? undefined : (id) => removeStagedFile(NEW_SCOPE, id)} />
+          </View>
+        ) : null}
+        {attachNotice ? <AttachNotice text={attachNotice} /> : null}
+        {starting && files.length > 0 ? <UploadLine progress={progress} onCancel={cancel} /> : null}
         <View style={styles.runRow}>
+          <AttachControl scope={NEW_SCOPE} disabled={starting} onNotice={setAttachNotice} />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={chip ? `Model: ${chip}` : 'Model'}
@@ -144,7 +166,7 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
         {state.status === 'failed' ? (
           <View style={styles.notice}>
             <Callout message={state.failure.message}>
-              {state.failure.kind === 'offline' || state.failure.kind === 'server' ? <Button label="Try again" onPress={() => void submit()} /> : null}
+              {state.failure.kind === 'offline' || state.failure.kind === 'server' || state.failure.kind === 'cancelled' ? <Button label="Try again" onPress={() => void submit()} /> : null}
             </Callout>
           </View>
         ) : null}
@@ -170,6 +192,20 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
         </ScrollView>
       </Sheet>
     </>
+  );
+}
+
+function UploadLine({ progress, onCancel }: { progress: number | null; onCancel: () => void }) {
+  const { colors } = useOmniTheme();
+  return (
+    <View style={styles.upload}>
+      <Text accessibilityRole="progressbar" style={[styles.uploadLabel, { color: colors.fg3 }]}>
+        {progress === null ? 'Uploading…' : `Uploading ${Math.round(progress * 100)}%`}
+      </Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Cancel upload" hitSlop={8} onPress={onCancel}>
+        <Text style={[styles.uploadLabel, styles.uploadCancel, { color: colors.fg }]}>Cancel</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -223,7 +259,20 @@ const styles = StyleSheet.create({
   },
   runRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s4,
     paddingHorizontal: space.s8,
+  },
+  upload: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.s8,
+  },
+  uploadLabel: {
+    fontSize: fontSize.body,
+  },
+  uploadCancel: {
+    fontWeight: '600',
   },
   chip: {
     height: 36,

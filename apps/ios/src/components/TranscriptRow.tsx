@@ -1,12 +1,13 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AttachmentRow } from '../attachments/AttachmentRow';
 import type { TranscriptItem } from '../live/transcript';
 import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
 import { UserBubble } from './UserBubble';
 
 /** One folded transcript item, as the desktop draws it. */
-export function TranscriptRow({ item, onLoadWhole }: { item: TranscriptItem; onLoadWhole: (eventId: number) => void }) {
+export function TranscriptRow({ item, threadId, onLoadWhole }: { item: TranscriptItem; threadId: string; onLoadWhole: (eventId: number) => void }) {
   const { colors } = useOmniTheme();
 
   switch (item.kind) {
@@ -16,6 +17,7 @@ export function TranscriptRow({ item, onLoadWhole }: { item: TranscriptItem; onL
           text={item.text}
           caption={[item.mode ? MODE_LABEL[item.mode] : null, item.dropped ? 'Not delivered' : null].filter(Boolean).join(' · ') || 'You'}
         >
+          <AttachmentRow threadId={threadId} items={item.attachments} />
           {item.clipped ? <LoadWhole onPress={() => onLoadWhole(item.key)} /> : null}
         </UserBubble>
       );

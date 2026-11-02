@@ -22,7 +22,7 @@ export function ThreadBody({ view, live }: { view: ThreadView; live: ThreadLive 
       inverted
       data={data}
       keyExtractor={(item) => String(item.key)}
-      renderItem={({ item }) => <TranscriptRow item={item} onLoadWhole={(eventId) => void live?.loadFullRow(eventId)} />}
+      renderItem={({ item }) => <TranscriptRow item={item} threadId={view.threadId} onLoadWhole={(eventId) => void live?.loadFullRow(eventId)} />}
       contentContainerStyle={styles.content}
       onScroll={(e) => live?.setFollowing(e.nativeEvent.contentOffset.y < FOLLOW_SLACK)}
       scrollEventThrottle={100}
