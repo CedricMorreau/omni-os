@@ -2,7 +2,7 @@
 // Split into two apps so app.ts can keep mounting threadsApi and terminalApi between them.
 // Hono keeps the first registered match, so that order is the one the handlers already won with.
 import { Hono, type Context } from 'hono';
-import { streamSSE } from 'hono/streaming';
+import { sessionSSE } from './sse.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -482,7 +482,7 @@ threadActionsApi.post('/:id/interrupt', interrupt);
 threadActionsApi.get('/:id/stream', (c) => {
   const id = c.req.param('id');
   const after = parseAfter(c.req.query('after') ?? c.req.header('Last-Event-ID') ?? '0');
-  return streamSSE(c, async (stream) => {
+  return sessionSSE(c, async (stream) => {
     const queue: unknown[] = [];
     // Rows the opening messages carried, so the bus's copies are not sent twice (apps/server/stream-catch-up.ts).
     const sent = new Set<number>();
