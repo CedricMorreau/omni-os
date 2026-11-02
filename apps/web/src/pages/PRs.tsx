@@ -162,22 +162,24 @@ export function PRDetail({ channel, n }: { channel: Channel; n: number }) {
               <span className="text-fg-2">+{p.additions}</span> <span className="text-fg-3">-{p.deletions}</span>
             </span>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {p.thread?.parent && (
-            <LinkButton href={href.thread(p.thread.parent.id)} icon="arrowUpRight">
-              <span className="max-w-[220px] truncate" title={`The thread that delegated this work: ${p.thread.parent.title}`}>
-                {p.thread.parent.title || 'Parent thread'}
-              </span>
-            </LinkButton>
-          )}
           {p.thread && (
-            <LinkButton href={href.thread(p.thread.id)} icon="message">
-              <span className="max-w-[220px] truncate" title={`The thread that opened this PR: ${p.thread.title}`}>
-                {p.thread.parent ? 'Delegated thread' : p.thread.title || 'Open thread'}
-              </span>
-            </LinkButton>
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {p.thread.parent && (
+                <LinkButton size="sm" href={href.thread(p.thread.parent.id)} icon="arrowUpRight">
+                  <span className="max-w-[320px] truncate" title={`The thread that delegated this work: ${p.thread.parent.title}`}>
+                    {p.thread.parent.title || 'Parent thread'}
+                  </span>
+                </LinkButton>
+              )}
+              <LinkButton size="sm" href={href.thread(p.thread.id)} icon="message">
+                <span className="max-w-[320px] truncate" title={`The thread that opened this PR: ${p.thread.title}`}>
+                  {p.thread.parent ? 'Delegated thread' : p.thread.title || 'Open thread'}
+                </span>
+              </LinkButton>
+            </div>
           )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
           <IconLink href={p.url} icon="external" label="Open on GitHub" newTab />
           <Button icon="layers" onClick={askReview} busy={reviewBusy}>
             Ask builder to review

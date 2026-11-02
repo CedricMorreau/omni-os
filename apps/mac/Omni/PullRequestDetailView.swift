@@ -118,12 +118,6 @@ struct PullRequestDetailView: View {
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
         HStack(spacing: z(8)) {
-          if let thread = pr.thread {
-            if let parent = thread.parent {
-              threadButton(parent.id, icon: "arrowUpRight", title: parent.title.isEmpty ? "Parent thread" : parent.title, help: "The thread that delegated this work: \(parent.title)")
-            }
-            threadButton(thread.id, icon: "message", title: thread.parent != nil ? "Delegated thread" : thread.title.isEmpty ? "Open thread" : thread.title, help: "The thread that opened this PR: \(thread.title)")
-          }
           if let url = URL(string: pr.url) {
             Link(destination: url) {
               Label { Text("Open on GitHub") } icon: { OmniIcon(name: "external", size: 15) }
@@ -153,6 +147,8 @@ struct PullRequestDetailView: View {
           .buttonStyle(.pill(.secondary, height: 34))
           .disabled(reviewBusy)
         }
+        // The actions keep their width; the title wraps instead.
+        .fixedSize()
       }
       HStack(spacing: z(12)) {
         if let state = pr.state {
@@ -170,6 +166,15 @@ struct PullRequestDetailView: View {
       }
       .font(.omni(size: 12.5))
       .foregroundStyle(Tok.fg3)
+      if let thread = pr.thread {
+        HStack(spacing: z(6)) {
+          if let parent = thread.parent {
+            threadButton(parent.id, icon: "arrowUpRight", title: parent.title.isEmpty ? "Parent thread" : parent.title, help: "The thread that delegated this work: \(parent.title)")
+          }
+          threadButton(thread.id, icon: "message", title: thread.parent != nil ? "Delegated thread" : thread.title.isEmpty ? "Open thread" : thread.title, help: "The thread that opened this PR: \(thread.title)")
+        }
+        .padding(.top, z(2))
+      }
     }
   }
 
@@ -178,13 +183,13 @@ struct PullRequestDetailView: View {
     Button {
       model.route = .thread(id: id)
     } label: {
-      HStack(spacing: z(8)) {
-        OmniIcon(name: icon, size: 15)
+      HStack(spacing: z(6)) {
+        OmniIcon(name: icon, size: 14)
         // Capped and fixed, so a long title truncates and a short one keeps its own width.
-        Text(title).lineLimit(1).truncationMode(.tail).frame(maxWidth: z(200)).fixedSize()
+        Text(title).lineLimit(1).truncationMode(.tail).frame(maxWidth: z(320)).fixedSize()
       }
     }
-    .buttonStyle(.pill(.secondary, height: 34))
+    .buttonStyle(.pill(.secondary, height: 28))
     .help(help)
   }
 
