@@ -76,6 +76,7 @@ export function ServersScreen({ navigation }: RootScreenProps<'Servers'>) {
       })}
 
       <Button label="Add server" variant="secondary" onPress={() => navigation.navigate('AddServer')} />
+      <Button label="Notifications" variant="secondary" onPress={() => navigation.navigate('NotificationSettings')} />
     </ScrollView>
   );
 }

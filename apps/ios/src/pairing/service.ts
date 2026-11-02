@@ -59,7 +59,11 @@ export function createPairingService(deps: PairingServiceDeps): PairingService {
 
   async function signOutBestEffort(origin: string, token: string): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const attempt = (async () => api.signOut({ origin, token }))().catch(() => undefined);
+    // The push token goes first: it needs the session that signing out ends. One cap covers both calls.
+    const attempt = (async () => {
+      await api.deletePushToken({ origin, token }).catch(() => undefined);
+      await api.signOut({ origin, token });
+    })().catch(() => undefined);
     const cap = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, signOutCapMs);
     });

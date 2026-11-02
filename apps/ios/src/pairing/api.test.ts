@@ -153,6 +153,22 @@ describe('signOut', () => {
   });
 });
 
+describe('deletePushToken', () => {
+  it('sends a delete to the push token route with the bearer token', async () => {
+    const { api, calls } = apiWith(() => respond(200, { ok: true }));
+    await api.deletePushToken({ origin: ORIGIN, token: 'tok' });
+    expect(calls[0]?.url).toBe(`${ORIGIN}/api/auth/push-token`);
+    expect(calls[0]?.init.method).toBe('DELETE');
+    expect(calls[0]?.init.headers.authorization).toBe('Bearer tok');
+  });
+
+  it('reports a rejected session as unauthorized', async () => {
+    const { api } = apiWith(() => respond(401));
+    const error = await failureOf(api.deletePushToken({ origin: ORIGIN, token: 'tok' }));
+    expect(error.kind).toBe('unauthorized');
+  });
+});
+
 describe('unreachable servers', () => {
   it('maps a network failure to unreachable and names the origin', async () => {
     const { api } = apiWith(() => {

@@ -45,6 +45,7 @@ async function pairedApp() {
       return capabilities;
     },
     signOut: async () => {},
+    deletePushToken: async () => {},
   };
   const service = createPairingService({ api, vault, now: () => new Date(), newId: () => 'srv1' });
   const { server: paired } = await service.pairServer({ origin: ORIGIN, code: 'abc', name: 'iPhone' });

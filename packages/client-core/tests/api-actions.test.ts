@@ -162,3 +162,28 @@ describe('canSteer', () => {
     expect(canSteer('codex', [row('codex', false)])).toBe(false);
   });
 });
+
+describe('push registration', () => {
+  it('registers, reads and deletes the device token on the auth routes', async () => {
+    const { sent, api: a } = api();
+    const body = { token: 'ab'.repeat(32), platform: 'ios', environment: 'sandbox', bundleId: 'app.omni-os.ios' } as const;
+    await a.registerPushToken(body);
+    await a.pushTokenStatus();
+    await a.deletePushToken();
+    expect(sent).toEqual([
+      { method: 'PUT', url: at('/auth/push-token'), body },
+      { method: 'GET', url: at('/auth/push-token') },
+      { method: 'DELETE', url: at('/auth/push-token') },
+    ]);
+  });
+
+  it('reads the alert choices and sends only the keys that change', async () => {
+    const { sent, api: a } = api();
+    await a.pushPreferences();
+    await a.setPushPreferences({ finished: false });
+    expect(sent).toEqual([
+      { method: 'GET', url: at('/auth/push-preferences') },
+      { method: 'PUT', url: at('/auth/push-preferences'), body: { finished: false } },
+    ]);
+  });
+});

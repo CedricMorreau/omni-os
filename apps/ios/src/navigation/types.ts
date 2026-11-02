@@ -12,6 +12,10 @@ export type RootStackParamList = {
   Servers: undefined;
   /** Pairing another server. A separate route, so pairing the first server swaps Connect out for Channels. */
   AddServer: undefined;
+  /** Which alerts each paired server may send this phone, and whether iOS allows them at all. */
+  NotificationSettings: undefined;
+  /** Shown once, as a sheet, after the first server is paired. Explains the alerts before iOS asks. */
+  NotificationsIntro: undefined;
 };
 
 export type RootScreenProps<Name extends keyof RootStackParamList> = NativeStackScreenProps<

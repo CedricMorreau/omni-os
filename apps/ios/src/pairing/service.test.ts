@@ -38,20 +38,28 @@ function memoryVault(initial: ServerIndex = emptyIndex) {
 
 interface FakeApi extends PairingApi {
   signedOut: { origin: string; token: string }[];
+  /** Every call that ended the session or its push token, in order. */
+  calls: string[];
 }
 
 function fakeApi(overrides: Partial<PairingApi> = {}): FakeApi {
   const signedOut: { origin: string; token: string }[] = [];
+  const calls: string[] = [];
   let issued = 0;
   return {
     signedOut,
+    calls,
     redeemPairingCode: async () => {
       issued += 1;
       return { token: `token-${issued}`, sessionId: `session-${issued}` };
     },
     fetchCapabilities: async () => capabilities,
     signOut: async (input) => {
+      calls.push('signOut');
       signedOut.push(input);
+    },
+    deletePushToken: async () => {
+      calls.push('deletePushToken');
     },
     ...overrides,
   };
@@ -245,6 +253,28 @@ describe('removeServer', () => {
     expect(api.signedOut).toEqual([{ origin: ORIGIN, token: 'token-1' }]);
     expect(store.tokens.size).toBe(0);
     expect(index).toEqual(emptyIndex);
+  });
+
+  it('takes the push token off the server before the session ends', async () => {
+    const { service, api } = setup();
+    const { server } = await service.pairServer(pairInput);
+
+    await service.removeServer(server.id);
+
+    expect(api.calls).toEqual(['deletePushToken', 'signOut']);
+  });
+
+  it('signs out even when the push token cannot be deleted', async () => {
+    const { service, api } = setup({
+      deletePushToken: async () => {
+        throw new PairingApiError('unreachable', { origin: ORIGIN });
+      },
+    });
+    const { server } = await service.pairServer(pairInput);
+
+    await service.removeServer(server.id);
+
+    expect(api.signedOut).toEqual([{ origin: ORIGIN, token: 'token-1' }]);
   });
 
   it('still deletes locally when signing out fails', async () => {

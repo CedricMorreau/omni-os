@@ -7,6 +7,7 @@ import { detailApi } from './detail.ts';
 import { harnessesApi } from './harnesses.ts';
 import { messagesApi } from './messages.ts';
 import { needsYouApi } from './needs-you.ts';
+import { pushApi } from './push.ts';
 import { recoveryApi } from './recovery.ts';
 import { threadsApi } from './threads.ts';
 
@@ -17,6 +18,7 @@ export * from './events.ts';
 export * from './harnesses.ts';
 export * from './messages.ts';
 export * from './needs-you.ts';
+export * from './push.ts';
 export * from './recovery.ts';
 export * from './threads.ts';
 
@@ -32,5 +34,6 @@ export function createOmniApi(http: HttpClient) {
     ...recoveryApi(http),
     ...needsYouApi(http),
     ...harnessesApi(http),
+    ...pushApi(http),
   };
 }

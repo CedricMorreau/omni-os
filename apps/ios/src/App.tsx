@@ -4,7 +4,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { navigationRef } from './navigation/ref';
 import { RootNavigator } from './navigation/RootNavigator';
+import { NotificationsProvider } from './notifications/NotificationsProvider';
 import { PairingProvider } from './pairing/PairingProvider';
 import { ActiveSessionProvider } from './session/ActiveSession';
 import { useOmniTheme } from './theme';
@@ -30,11 +32,13 @@ export default function App() {
         <KeyboardProvider>
           <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
           <PairingProvider>
-            <NavigationContainer theme={navTheme}>
-              <ActiveSessionProvider>
-                <RootNavigator />
-              </ActiveSessionProvider>
-            </NavigationContainer>
+            <NotificationsProvider>
+              <NavigationContainer ref={navigationRef} theme={navTheme}>
+                <ActiveSessionProvider>
+                  <RootNavigator />
+                </ActiveSessionProvider>
+              </NavigationContainer>
+            </NotificationsProvider>
           </PairingProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
