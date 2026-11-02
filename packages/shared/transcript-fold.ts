@@ -1,12 +1,13 @@
-import type { HandoverP, SwitchP } from '@omni/shared/run-switch.ts';
-import { isQuestionTool, QUESTION_EVENT, questionsIn, type ThreadQuestion } from '@omni/shared/question.ts';
-import type { PRWakeItem } from '@omni/shared/pr-watch.ts';
-import type { SlashRecord } from '@omni/shared/slash.ts';
-import { spanIndex, type Clipped, type Span } from '@omni/shared/history.ts';
-import type { OutputMeta } from '@omni/shared/tool-output.ts';
-import { parsePayload, shortPath } from '../format.ts';
+import type { HandoverP, SwitchP } from './run-switch.ts';
+import { isQuestionTool, QUESTION_EVENT, questionsIn, type ThreadQuestion } from './question.ts';
+import type { PRWakeItem } from './pr-watch.ts';
+import type { SlashRecord } from './slash.ts';
+import { spanIndex, type Clipped, type Span } from './history.ts';
+import { shortPath } from './short-path.ts';
+import type { OutputMeta } from './tool-output.ts';
 
-// The transcript fold. Pure: events in, rows out. Transcript.tsx renders the rows.
+// The transcript fold. Pure: events in, rows out. The Web UI's Transcript.tsx and the phone's thread-view.ts render
+// the rows, and the iOS app folds with it too, so it imports no DOM, no React and no Node API.
 // Swift cannot import this; packages/test-fixtures/transcript is the shared artifact.
 
 export interface TranscriptEvent {
@@ -180,6 +181,15 @@ export interface Todo {
 export interface FoldPlan {
   todos: Todo[];
   after: number;
+}
+
+/** An event's JSON payload; a payload that does not parse reads as empty. */
+export function parsePayload<T = Record<string, unknown>>(e: { payload: string }): T {
+  try {
+    return JSON.parse(e.payload) as T;
+  } catch {
+    return {} as T;
+  }
 }
 
 /**

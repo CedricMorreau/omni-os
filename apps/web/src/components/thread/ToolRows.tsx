@@ -5,7 +5,7 @@ import { BranchFace, RailItem, ROW_CARD } from '../Delegation.tsx';
 import { ClippedNote } from './HistoryEdgeRow.tsx';
 import { ToolOutput } from './ToolOutput.tsx';
 import { CheckItem, Icon, Loader, StatusDot } from '../ui.tsx';
-import { str, toolLabel, toolSummary, type TaskView, type Todo, type ToolCall } from '../../transcript/fold.ts';
+import { str, toolLabel, toolSummary, type TaskView, type Todo, type ToolCall } from '@omni/shared/transcript-fold.ts';
 import { agentStatus, TASK_END } from '../../transcript/delegation.ts';
 import { exitCodeOf, outputMeta } from '@omni/shared/tool-output.ts';
 

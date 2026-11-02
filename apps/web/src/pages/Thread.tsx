@@ -24,7 +24,7 @@ import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
 import { runningSubagents } from '../subagents.ts';
-import { isAsking } from '../transcript/fold.ts';
+import { isAsking } from '@omni/shared/transcript-fold.ts';
 import { useApp } from '../store.tsx';
 import { useThreadActions } from './useThreadActions.ts';
 import { useThreadInterruptKey } from './useThreadInterruptKey.ts';

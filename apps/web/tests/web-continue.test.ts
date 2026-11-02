@@ -5,8 +5,8 @@ import type { Carryover, CarryoverAttachment, ContinueLink, ContinuePreview } fr
 import { ApiError, type HarnessWithRunning, type Thread } from '../src/api.ts';
 import { ContinueCrumbs, MoContinueLinks } from '../src/components/ContinueLinks.tsx';
 import { BlockNote } from '../src/components/ContinueSheet.tsx';
-import { threadView } from '../src/mobile/thread-view.ts';
-import { buildItems, type TranscriptEvent } from '../src/transcript/fold.ts';
+import { threadView } from '@omni/shared/thread-view.ts';
+import { buildItems, type TranscriptEvent } from '@omni/shared/transcript-fold.ts';
 import {
   NO_LINKS,
   attachmentRows,
