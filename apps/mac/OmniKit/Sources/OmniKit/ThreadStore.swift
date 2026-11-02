@@ -580,6 +580,10 @@ public final class ThreadStore {
     }
   }
 
+  public func say(_ text: String) {
+    show(ModToast(threadID: id, plugin: "", text: text))
+  }
+
   public func dismissToast(_ id: Int) {
     toasts.removeAll { $0.id == id }
   }

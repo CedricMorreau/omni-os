@@ -644,6 +644,7 @@ private struct TranscriptRow: View {
     case .text(let id, _, let text):
       CopyableMessage(text: text) {
         MarkdownView(document: markdown.document(for: id, text: text))
+          .environment(\.artifactDownloads, artifacts)
       }
     case .tools(let group):
       let cards = Delegation.of(group.calls).map { d in

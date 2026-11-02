@@ -121,6 +121,13 @@ public struct ModToast: Decodable, Hashable, Sendable {
     case timeoutMs = "timeout_ms"
   }
 
+  public init(threadID: String? = nil, plugin: String, text: String, timeoutMs: Double? = nil) {
+    self.threadID = threadID
+    self.plugin = plugin
+    self.text = text
+    self.timeoutMs = timeoutMs
+  }
+
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     threadID = try c.decodeIfPresent(String.self, forKey: .threadID)

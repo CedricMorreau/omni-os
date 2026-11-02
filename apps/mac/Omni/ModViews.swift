@@ -91,9 +91,11 @@ struct ModToastStack: View {
                 .font(.omni(size: 13, weight: .medium))
                 .foregroundStyle(Tok.fg)
                 .lineLimit(3)
-              Text(shown.toast.plugin)
-                .font(.omni(size: 11, design: .monospaced))
-                .foregroundStyle(Tok.fg4)
+              if !shown.toast.plugin.isEmpty {
+                Text(shown.toast.plugin)
+                  .font(.omni(size: 11, design: .monospaced))
+                  .foregroundStyle(Tok.fg4)
+              }
             }
           }
           .padding(.horizontal, z(14))
@@ -106,7 +108,7 @@ struct ModToastStack: View {
         }
         .buttonStyle(.plain)
         .help("Dismiss")
-        .accessibilityLabel("\(shown.toast.plugin): \(shown.toast.text)")
+        .accessibilityLabel(shown.toast.plugin.isEmpty ? shown.toast.text : "\(shown.toast.plugin): \(shown.toast.text)")
         .transition(.move(edge: .top).combined(with: .opacity))
       }
     }

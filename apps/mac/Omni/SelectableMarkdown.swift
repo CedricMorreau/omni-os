@@ -27,6 +27,9 @@ struct SelectableMarkdown: NSViewRepresentable {
   /// Previews for the links in these blocks; a change redraws them as chips.
   var chips = LinkChips.none
   @Environment(\.openURL) private var openURL
+  @Environment(\.artifactDownloads) private var downloads
+  @Environment(\.omniClient) private var client
+  @Environment(\.threadStore) private var store
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -57,10 +60,18 @@ struct SelectableMarkdown: NSViewRepresentable {
 
   func updateNSView(_ view: FlowTextView, context: Context) {
     context.coordinator.openURL = openURL
-    let key = Key(blocks: blocks, size: size, scale: scale, chips: chips)
+    let downloads = downloads
+    let client = client
+    let store = store
+    context.coordinator.download = { url in
+      guard let a = ArtifactDownloads.artifact(for: url, in: downloads) else { return false }
+      ArtifactDownloads.save(a, client: client, store: store)
+      return true
+    }
+    let key = Key(blocks: blocks, size: size, scale: scale, chips: chips, downloads: downloads)
     guard context.coordinator.key != key else { return }
     context.coordinator.key = key
-    view.textStorage?.setAttributedString(MarkdownFlow(size: size * scale, scale: scale, chips: chips).build(blocks))
+    view.textStorage?.setAttributedString(MarkdownFlow(size: size * scale, scale: scale, chips: chips, downloads: downloads).build(blocks))
     view.invalidateIntrinsicContentSize()
   }
 
@@ -74,14 +85,18 @@ struct SelectableMarkdown: NSViewRepresentable {
     let size: CGFloat
     let scale: CGFloat
     let chips: LinkChips
+    let downloads: [Artifact]
   }
 
   final class Coordinator: NSObject, NSTextViewDelegate {
     var key: Key?
     var openURL: OpenURLAction?
+    var download: (@MainActor (URL) -> Bool)?
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-      guard let url = link as? URL ?? (link as? String).flatMap(URL.init(string:)), let openURL else { return false }
+      guard let url = link as? URL ?? (link as? String).flatMap(URL.init(string:)) else { return false }
+      if url.scheme == ArtifactDownloads.scheme { return MainActor.assumeIsolated { download?(url) ?? false } }
+      guard let openURL else { return false }
       openURL(url)
       return true
     }
@@ -171,6 +186,7 @@ struct MarkdownFlow {
   /// The zoom, for the fixed gaps, indents and code size. `size` is already at it.
   var scale: CGFloat = 1
   var chips = LinkChips.none
+  var downloads: [Artifact] = []
 
   private var fg: NSColor { NSColor(Tok.fg) }
   private var quoteInk: NSColor { NSColor(Tok.fg2) }
@@ -236,11 +252,19 @@ struct MarkdownFlow {
         let code = NSMutableAttributedString(string: run.text, attributes: attrs)
         code.addAttribute(.kern, value: pad, range: NSRange(location: code.length - 1, length: 1))
         out.append(code)
+        appendDownload(run, font: font, to: out)
         continue
       }
       out.append(NSAttributedString(string: run.text, attributes: attrs))
+      appendDownload(run, font: font, to: out)
     }
     return out
+  }
+
+  private func appendDownload(_ run: MarkdownRun, font: NSFont, to out: NSMutableAttributedString) {
+    guard run.link == nil, let a = ArtifactMentions.match(run.text, in: downloads),
+          let marker = ArtifactDownloads.marker(for: a, font: font) else { return }
+    out.append(marker)
   }
 
   private static func font(_ base: NSFont, _ style: MarkdownRun.Style) -> NSFont {

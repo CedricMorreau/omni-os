@@ -360,14 +360,7 @@ final class NativeTab: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadD
     ask.addButton(withTitle: "Download")
     ask.addButton(withTitle: "Cancel")
     guard ask.runModal() == .alertFirstButtonReturn else { return nil }
-    var target = dir.appendingPathComponent(base.isEmpty ? "download" : base)
-    var n = 1
-    while FileManager.default.fileExists(atPath: target.path) {
-      let ext = (base as NSString).pathExtension
-      let stem = (base as NSString).deletingPathExtension
-      target = dir.appendingPathComponent("\(stem) \(n)" + (ext.isEmpty ? "" : ".\(ext)"))
-      n += 1
-    }
+    let target = dir.appendingPathComponent(DownloadName.free(base) { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) })
     // WebKit quarantines the finished file, so Gatekeeper still checks it on first open.
     owner?.say("Downloading \(target.lastPathComponent) to Downloads")
     return target
