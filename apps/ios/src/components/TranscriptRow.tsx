@@ -3,13 +3,17 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { TranscriptItem } from '../live/transcript';
 import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
+import { QuestionCard, type SendAnswers } from './thread/QuestionCard';
 import { UserBubble } from './UserBubble';
 
-/** One folded transcript item, as the desktop draws it. */
-export function TranscriptRow({ item, onLoadWhole }: { item: TranscriptItem; onLoadWhole: (eventId: number) => void }) {
+/** One folded transcript item, as the desktop draws it. A question the agent asked can be answered in place. */
+export function TranscriptRow({ item, onLoadWhole, onAnswer }: { item: TranscriptItem; onLoadWhole: (eventId: number) => void; onAnswer: SendAnswers }) {
   const { colors } = useOmniTheme();
 
   switch (item.kind) {
+    case 'question':
+      return <QuestionCard q={item.q} send={onAnswer} />;
+
     case 'user':
       return (
         <UserBubble
