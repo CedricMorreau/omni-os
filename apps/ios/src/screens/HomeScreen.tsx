@@ -1,12 +1,18 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { RootScreenProps } from '../navigation/types';
-import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
+import { usePairing } from '../pairing/PairingProvider';
+import { STATUS_LABEL } from '../pairing/status';
+import { fontSize, lineHeight, radius, space, useOmniTheme } from '../theme';
+import { Button } from '../ui/Button';
 
 export function HomeScreen({ navigation }: RootScreenProps<'Home'>) {
   const { colors } = useOmniTheme();
   const insets = useSafeAreaInsets();
+  const { activeServer, statusById, refreshActive } = usePairing();
+  const status = activeServer ? statusById[activeServer.id] : undefined;
+  const statusLabel = status ? STATUS_LABEL[status] : STATUS_LABEL.checking;
 
   return (
     <ScrollView
@@ -21,34 +27,40 @@ export function HomeScreen({ navigation }: RootScreenProps<'Home'>) {
         Omni
       </Text>
       <Text style={[styles.body, { color: colors.fg3 }]}>
-        This is a placeholder home screen. Threads and channels will show up here once the app can
-        connect to your Omni server.
+        Threads and channels will appear here once the app can load them from your server.
       </Text>
 
-      <View
-        accessible
-        accessibilityLabel="Connection status: not connected. No server paired yet."
-        style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}
-      >
-        <View style={styles.statusRow}>
-          <View style={[styles.dot, { backgroundColor: colors.fg4 }]} />
-          <Text style={[styles.statusLabel, { color: colors.fg }]}>Not connected</Text>
+      {activeServer && (
+        <View
+          accessible
+          accessibilityLabel={`${activeServer.name}, ${activeServer.origin}. ${statusLabel}.`}
+          style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}
+        >
+          <Text style={[styles.serverName, { color: colors.fg }]}>{activeServer.name}</Text>
+          <Text style={[styles.body, { color: colors.fg3 }]}>{activeServer.origin}</Text>
+          <View style={styles.statusRow}>
+            <View
+              style={[
+                styles.dot,
+                { backgroundColor: status === 'ready' ? colors.fg : colors.fg4 },
+              ]}
+            />
+            <Text style={[styles.statusLabel, { color: colors.fg }]}>{statusLabel}</Text>
+          </View>
         </View>
-        <Text style={[styles.cardBody, { color: colors.fg3 }]}>No server paired yet.</Text>
-      </View>
+      )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Connect to a server"
-        accessibilityHint="Opens the connect screen. It is a placeholder and does not connect yet."
-        onPress={() => navigation.navigate('Connect')}
-        style={({ pressed }) => [
-          styles.button,
-          { backgroundColor: colors.fg, opacity: pressed ? 0.85 : 1 },
-        ]}
-      >
-        <Text style={[styles.buttonLabel, { color: colors.onInk }]}>Connect to a server</Text>
-      </Pressable>
+      {status === 'unreachable' && (
+        <Button label="Retry" variant="secondary" onPress={() => void refreshActive()} />
+      )}
+      {status === 'incompatible' && (
+        <Text style={[styles.body, { color: colors.fg3 }]}>
+          This server speaks an API this app doesn&apos;t support. Update the app or the server.
+        </Text>
+      )}
+
+      <Button label="Servers" onPress={() => navigation.navigate('Servers')} />
+      <Button label="Add server" variant="secondary" onPress={() => navigation.navigate('Connect')} />
     </ScrollView>
   );
 }
@@ -74,10 +86,15 @@ const styles = StyleSheet.create({
     gap: space.s4,
     marginTop: space.s4,
   },
+  serverName: {
+    fontSize: fontSize.heading,
+    fontWeight: '600',
+  },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.s6,
+    marginTop: space.s4,
   },
   dot: {
     width: 8,
@@ -85,24 +102,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   statusLabel: {
-    fontSize: fontSize.heading,
-    fontWeight: '600',
-  },
-  cardBody: {
     fontSize: fontSize.body,
-    lineHeight: Math.round(fontSize.body * lineHeight.body),
-  },
-  button: {
-    minHeight: minTarget,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.s9,
-    paddingVertical: space.s6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: space.s4,
-  },
-  buttonLabel: {
-    fontSize: fontSize.input,
     fontWeight: '600',
   },
 });

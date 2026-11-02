@@ -1,6 +1,6 @@
 # Omni OS for iOS
 
-This development client contains a home screen and a connect screen stub. It does not connect to a server or save a server address yet. Expo Go is not supported.
+This development client pairs with an Omni server and lists the servers it is paired with. It does not load threads yet. Expo Go is not supported.
 
 ## Run on the iOS simulator
 
@@ -21,7 +21,11 @@ Open the installed Omni OS development client and select the Metro server. If th
 
 ## Connect to a server
 
-The Connect screen is a placeholder. Server selection, pairing, and HTTP and SSE access are not implemented in this milestone. Do not enter credentials into the placeholder.
+Make a pairing code on your computer, then scan its QR code or type the server address and code. The app trades the code for a session token and keeps the token in the Keychain, one entry per server. Pair several servers and switch between them from the Servers screen.
+
+The app accepts only an `https://` server origin. It checks the server's capabilities after pairing and whenever it returns to the foreground. If the server answers 401, the session was revoked: the app forgets that server and asks you to pair again. The contract is in `packages/shared/app-pairing.ts`.
+
+The Simulator has no camera, so use Enter code there.
 
 ## EAS builds
 
