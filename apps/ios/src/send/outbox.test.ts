@@ -1,7 +1,7 @@
 import { OmniHttpError } from '@omni/client-core';
 import { describe, expect, it } from 'vitest';
 
-import { beginSend, classifyFailure, EMPTY_OUTBOX, failSend, retrySend, settleSend, takeFailed, type Outbox, type SendFailure } from './outbox';
+import { beginSend, classifyFailure, EMPTY_OUTBOX, failSend, retrySend, sendKey, settleSend, takeFailed, type Outbox, type SendFailure } from './outbox';
 
 const offline: SendFailure = { kind: 'offline', message: 'offline', ambiguous: true };
 const refused: SendFailure = { kind: 'refused', message: 'No', ambiguous: false };
@@ -18,7 +18,7 @@ function started(text = 'hello', mode?: 'steer' | 'queue'): Outbox {
 describe('beginSend', () => {
   it('puts the trimmed message in the slot under a new id', () => {
     const o = beginSend(EMPTY_OUTBOX, '  hello \n', 'queue', () => 'a');
-    expect(o?.item).toEqual({ phase: 'sending', requestId: 'a', key: JSON.stringify(['hello', 'queue']), text: 'hello', mode: 'queue' });
+    expect(o?.item).toEqual({ phase: 'sending', requestId: 'a', key: JSON.stringify(['hello', 'queue']), text: 'hello', mode: 'queue', context: [] });
   });
 
   it('sends nothing for blank text', () => {
@@ -125,5 +125,26 @@ describe('classifyFailure', () => {
 
   it('tells Ben the message is kept when the server cannot be reached', () => {
     expect(classifyFailure(new OmniHttpError({ kind: 'unreachable', detail: 'x' })).message).toMatch(/kept here/);
+  });
+});
+
+describe('a message with context', () => {
+  const ctx = (id: string) => ({ id, kind: 'diff_selection', v: 1, label: 'a.ts', note: '', body: {} });
+
+  it('goes out with no text when it carries context', () => {
+    const o = beginSend(EMPTY_OUTBOX, '  ', undefined, newId, [ctx('c1')]);
+    expect(o?.item).toMatchObject({ phase: 'sending', text: '', context: [ctx('c1')] });
+  });
+
+  it('is a different message from the same words without it, and from other context', () => {
+    expect(sendKey('fix', undefined, [ctx('c1')])).not.toBe(sendKey('fix', undefined));
+    expect(sendKey('fix', undefined, [ctx('c1')])).not.toBe(sendKey('fix', undefined, [ctx('c2')]));
+    expect(sendKey('fix', 'queue')).toBe(JSON.stringify(['fix', 'queue']));
+  });
+
+  it('keeps its context across a retry under the same id', () => {
+    const first = beginSend(EMPTY_OUTBOX, 'fix', undefined, () => 'a', [ctx('c1')])!;
+    const failed = failSend(first, 'a', offline);
+    expect(retrySend(failed)?.item).toMatchObject({ phase: 'sending', requestId: 'a', context: [ctx('c1')] });
   });
 });

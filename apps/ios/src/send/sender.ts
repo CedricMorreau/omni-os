@@ -1,5 +1,7 @@
 import type { HarnessInfo, OmniApi, PendingMsg, Recovered, Thread } from '@omni/client-core';
 
+import type { MessageContext } from '@omni/shared/message-context.ts';
+
 import { createStore, type Store } from '../live/store';
 import { beginSend, classifyFailure, EMPTY_OUTBOX, failSend, retrySend, settleSend, takeFailed, type Outbox, type OutboxItem } from './outbox';
 import { sendModeFor } from './rules';
@@ -26,6 +28,8 @@ export interface SenderDeps {
   /** The harness catalog as far as it has loaded. Null falls back to the harness's name. */
   catalog(): readonly HarnessInfo[] | null;
   newId(): string;
+  /** A message left the slot because the server has it. */
+  landed?(threadId: string, item: OutboxItem): void;
 }
 
 /** What the stream has shown of the thread, as far as it says whether a send landed. */
@@ -38,8 +42,8 @@ export interface FeedSight {
 /** What a thread's composer does, as one store the screen reads and a handful of calls the screen makes. */
 export interface ThreadSender {
   readonly state: Store<SendState>;
-  /** Sends `text` to `thread`, in the mode its status and harness call for. Resolves with the thread the server answered with, or null when nothing was sent or it failed (the outbox says which). */
-  submit(thread: Thread, text: string): Promise<Thread | null>;
+  /** Sends `text` and `context` to `thread`, in the mode its status and harness call for. Resolves with the thread the server answered with, or null when nothing was sent or it failed (the outbox says which). */
+  submit(thread: Thread, text: string, context?: readonly MessageContext[]): Promise<Thread | null>;
   /** Sends the failed message again under its own request id. */
   retry(): Promise<Thread | null>;
   /** Takes the failed message out of the outbox and returns its text. */
@@ -60,11 +64,16 @@ export function createSender(deps: SenderDeps): ThreadSender {
   const state = createStore<SendState>(IDLE_SEND);
   const patch = (next: Partial<SendState>) => state.set((s) => ({ ...s, ...next }));
   const outbox = (fn: (o: Outbox) => Outbox) => state.set((s) => ({ ...s, outbox: fn(s.outbox) }));
+  const settle = (item: OutboxItem) => {
+    const before = state.get().outbox.item;
+    outbox((o) => settleSend(o, item.requestId));
+    if (before?.requestId === item.requestId) deps.landed?.(deps.threadId, item);
+  };
 
   async function transmit(item: OutboxItem): Promise<Thread | null> {
     try {
-      const posted = await deps.run(() => deps.api().sendMessage(deps.threadId, { prompt: item.text, mode: item.mode, request_id: item.requestId }));
-      outbox((o) => settleSend(o, item.requestId));
+      const posted = await deps.run(() => deps.api().sendMessage(deps.threadId, { prompt: item.text, mode: item.mode, request_id: item.requestId, context: item.context.length ? item.context : undefined }));
+      settle(item);
       return posted;
     } catch (e) {
       outbox((o) => failSend(o, item.requestId, classifyFailure(e)));
@@ -93,7 +102,7 @@ export function createSender(deps: SenderDeps): ThreadSender {
     const item = state.get().outbox.item;
     // A refused send never reached the server, so nothing on the stream can be it.
     if (!item || (item.phase === 'failed' && !item.failure.ambiguous)) return;
-    const landed = () => outbox((o) => settleSend(o, item.requestId));
+    const landed = () => settle(item);
     if (sight.pending.some((m) => m.request_id === item.requestId)) return landed();
     if (sight.userRowId === null || checking) return;
     if (checked?.requestId === item.requestId && checked.rowId === sight.userRowId) return;
@@ -117,8 +126,8 @@ export function createSender(deps: SenderDeps): ThreadSender {
       latest = sight;
       void settleIfLanded(sight);
     },
-    async submit(thread, text) {
-      const next = beginSend(state.get().outbox, text, sendModeFor(thread, deps.catalog()), deps.newId);
+    async submit(thread, text, context = []) {
+      const next = beginSend(state.get().outbox, text, sendModeFor(thread, deps.catalog()), deps.newId, context);
       if (!next?.item) return null;
       patch({ outbox: next, notice: null });
       return transmit(next.item);

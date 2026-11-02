@@ -1,8 +1,9 @@
 import { useRef, type ComponentRef, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { HarnessInfo, Thread } from '@omni/client-core';
 
+import { removeDraftContext, useDraftContext } from '../../context/draft';
 import type { ThreadLive } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canStop, composerPlaceholder, sendLabel } from '../../send/rules';
@@ -37,11 +38,12 @@ export function ThreadComposer({
   const catalog = useStore(live.catalog);
   const { outbox, stopping, notice } = useStore(live.send.state);
   const draft = useDraft(thread.id);
+  const context = useDraftContext(thread.id);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   useFocusRequests(thread.id, input);
 
   const placeholder = composerPlaceholder(thread, catalog);
-  const empty = draft.trim() === '';
+  const empty = draft.trim() === '' && context.length === 0;
   const slotTaken = outbox.item !== null;
   const showStop = empty && !slotTaken && canStop(thread);
 
@@ -49,7 +51,7 @@ export function ThreadComposer({
     if (empty || slotTaken) return;
     const text = draft;
     setDraft(thread.id, '');
-    const sent = await live.send.submit(thread, text);
+    const sent = await live.send.submit(thread, text, context);
     // A failed send keeps its text in the outbox. Nothing in the slot and nothing sent means it never started.
     if (!sent && live.send.state.get().outbox.item === null) restoreDraft(thread.id, text);
   };
@@ -63,6 +65,20 @@ export function ThreadComposer({
         <Text accessibilityRole="alert" style={[styles.notice, { color: colors.fg2 }]}>
           {notice}
         </Text>
+      ) : null}
+      {context.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.chips} accessibilityLabel="Added to this message">
+          {context.map((c) => (
+            <View key={c.id} style={[styles.contextChip, { backgroundColor: colors.surface2 }]}>
+              <Text numberOfLines={1} ellipsizeMode="middle" style={[styles.contextLabel, { color: colors.fg2 }]}>
+                {c.label}
+              </Text>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${c.label}`} hitSlop={space.s6} onPress={() => removeDraftContext(thread.id, c.id)}>
+                <Text style={[styles.contextRemove, { color: colors.fg3 }]}>✕</Text>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
       ) : null}
       <View style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}>
         <TextInput
@@ -125,6 +141,27 @@ const styles = StyleSheet.create({
   },
   nextTurn: {
     flexDirection: 'row',
+  },
+  chips: {
+    gap: space.s2,
+    paddingHorizontal: space.s2,
+  },
+  contextChip: {
+    maxWidth: 260,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s2,
+    borderRadius: radius.pill,
+    paddingVertical: space.s2,
+    paddingHorizontal: space.s4,
+  },
+  contextLabel: {
+    flexShrink: 1,
+    fontSize: fontSize.meta + 1,
+    fontWeight: '600',
+  },
+  contextRemove: {
+    fontSize: fontSize.meta + 1,
   },
   notice: {
     fontSize: fontSize.meta,

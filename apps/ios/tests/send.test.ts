@@ -1,6 +1,9 @@
 import type { Fetch, SSEConnection, SSESink, SSETransport } from '@omni/client-core';
+import { newContext } from '@omni/shared/message-context.ts';
+import { diffSelection } from '@omni/shared/message-context-diff.ts';
 import { describe, expect, it, vi } from 'vitest';
 
+import { addDraftContext, draftContext } from '../src/context/draft';
 import { createLiveHub } from '../src/live/hub';
 import type { OmniSession } from '../src/live/session';
 import { composerPlaceholder, sendLabel, sendModeFor } from '../src/send/rules';
@@ -99,6 +102,22 @@ async function opened(replies: (req: Sent) => Reply | undefined | Promise<Reply 
   return { ...o, live };
 }
 
+const pickRecord = (id: string) =>
+  newContext(
+    diffSelection,
+    {
+      path: 'a.ts',
+      old_path: null,
+      side: 'new',
+      start: 1,
+      end: 1,
+      rows: [{ kind: 'add', text: 'x', old: null, new: 1 }],
+      source: { group: 'unstaged', from: 'a1', to: 'b2', turn: null, blob_old: null, blob_new: null },
+    },
+    '',
+    { id: () => id },
+  );
+
 describe('sending to an idle thread', () => {
   it('posts the trimmed text with a request id and no mode, and shows the thread it answers with', async () => {
     const { live, posts, hub } = await opened(() => ({ body: accepted('whatever') }));
@@ -108,6 +127,24 @@ describe('sending to an idle thread', () => {
     expect(posts()[0].body).toEqual({ prompt: 'run the tests', request_id: expect.any(String) });
     expect(live.send.state.get().outbox.item).toBeNull();
     expect(live.view.get().thread?.status).toBe('running');
+    hub.close();
+  });
+
+  it('sends picked context with no text, and drops it from the draft once the server has it', async () => {
+    const { live, posts, hub } = await opened(() => ({ body: accepted('whatever') }));
+    addDraftContext('t1', pickRecord('ctx1'));
+    await live.send.submit(live.view.get().thread!, '  ', draftContext('t1'));
+    expect(posts()[0].body).toMatchObject({ prompt: '', context: [{ id: 'ctx1', kind: 'diff_selection' }] });
+    expect(draftContext('t1')).toEqual([]);
+    hub.close();
+  });
+
+  it('keeps picked context in the draft when the send fails, so Edit and Retry still have it', async () => {
+    const { live, hub } = await opened(() => 'drop');
+    addDraftContext('t1', pickRecord('ctx2'));
+    await live.send.submit(live.view.get().thread!, 'look', draftContext('t1'));
+    expect(live.send.state.get().outbox.item).toMatchObject({ phase: 'failed', context: [{ id: 'ctx2' }] });
+    expect(draftContext('t1').map((r) => r.id)).toEqual(['ctx2']);
     hub.close();
   });
 

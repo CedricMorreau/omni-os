@@ -15,16 +15,17 @@ import { editInComposer } from './drafts';
 export function OutboxRow({ live, threadId }: { live: ThreadLive; threadId: string }) {
   const item = useStore(live.send.state).outbox.item;
   if (!item) return null;
+  const text = [item.text, ...item.context.map((c) => `Attached ${c.label}`)].filter(Boolean).join('\n');
 
-  if (item.phase === 'sending') return <UserBubble text={item.text} caption="Sending…" busy />;
+  if (item.phase === 'sending') return <UserBubble text={text} caption="Sending…" busy />;
 
   const edit = () => {
-    const text = live.send.edit();
-    if (text !== null) editInComposer(threadId, text);
+    const taken = live.send.edit();
+    if (taken !== null) editInComposer(threadId, taken);
   };
 
   return (
-    <UserBubble text={item.text} caption={item.failure.message} dimmed>
+    <UserBubble text={text} caption={item.failure.message} dimmed>
       <View style={styles.actions}>
         {item.failure.kind === 'signed-out' ? null : (
           <View style={styles.action}>

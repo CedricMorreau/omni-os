@@ -25,6 +25,7 @@ import {
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
+import { settleDraftContext } from '../context/draft';
 import { latestUserRowId } from '../send/rules';
 import { createCatalog, createSenders, newRequestId, type ThreadSender } from '../send/sender';
 import { linkOf, type Link } from './connection';
@@ -142,7 +143,13 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   }
 
   const catalog = createCatalog(() => withAuth(() => requireApi().harnesses()));
-  const senders = createSenders({ api: requireApi, run: withAuth, catalog: catalog.store.get, newId: newRequestId });
+  const senders = createSenders({
+    api: requireApi,
+    run: withAuth,
+    catalog: catalog.store.get,
+    newId: newRequestId,
+    landed: (threadId, item) => settleDraftContext(threadId, item.context.map((c) => c.id)),
+  });
 
   function requireHttp(): HttpClient {
     if (!http) throw new Error('Not paired');
@@ -256,7 +263,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       };
       return {
         state: sender.state,
-        submit: async (t, text) => thread(await sender.submit(t, text)),
+        submit: async (t, text, context) => thread(await sender.submit(t, text, context)),
         retry: async () => thread(await sender.retry()),
         edit: () => sender.edit(),
         observe: (sight) => sender.observe(sight),

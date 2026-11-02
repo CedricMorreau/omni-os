@@ -1,4 +1,5 @@
 import { OmniHttpError, type SendMode } from '@omni/client-core';
+import { contextKey, type MessageContext } from '@omni/shared/message-context.ts';
 
 /**
  * Why a send did not go through. `ambiguous` failures may have reached the server (the answer was lost, or the server
@@ -36,8 +37,8 @@ export function classifyFailure(error: unknown): SendFailure {
 
 /** The one message on its way, or the one that failed. */
 export type OutboxItem =
-  | { phase: 'sending'; requestId: string; key: string; text: string; mode: SendMode | undefined }
-  | { phase: 'failed'; requestId: string; key: string; text: string; mode: SendMode | undefined; failure: SendFailure };
+  | { phase: 'sending'; requestId: string; key: string; text: string; mode: SendMode | undefined; context: readonly MessageContext[] }
+  | { phase: 'failed'; requestId: string; key: string; text: string; mode: SendMode | undefined; context: readonly MessageContext[]; failure: SendFailure };
 
 /**
  * A thread's send slot. At most one message is out at a time, so the order Ben wrote them in is the order the server
@@ -51,17 +52,17 @@ export interface Outbox {
 
 export const EMPTY_OUTBOX: Outbox = { item: null, reuse: {} };
 
-/** What makes two sends the same message: its text and mode. A retry after the thread went idle keeps its mode. */
-export function sendKey(text: string, mode: SendMode | undefined): string {
-  return JSON.stringify([text, mode ?? '']);
+/** What makes two sends the same message: its text, mode and context. A retry after the thread went idle keeps its mode. */
+export function sendKey(text: string, mode: SendMode | undefined, context: readonly { id: string }[] = []): string {
+  return JSON.stringify(context.length ? [text, mode ?? '', contextKey(context)] : [text, mode ?? '']);
 }
 
-/** Puts a message in the slot. Null while the slot is taken, or when there is nothing to send. */
-export function beginSend(outbox: Outbox, text: string, mode: SendMode | undefined, newId: () => string): Outbox | null {
+/** Puts a message in the slot. Null while the slot is taken, or when there is neither text nor context to send. */
+export function beginSend(outbox: Outbox, text: string, mode: SendMode | undefined, newId: () => string, context: readonly MessageContext[] = []): Outbox | null {
   const trimmed = text.trim();
-  if (outbox.item || !trimmed) return null;
-  const key = sendKey(trimmed, mode);
-  return { ...outbox, item: { phase: 'sending', requestId: outbox.reuse[key] ?? newId(), key, text: trimmed, mode } };
+  if (outbox.item || (!trimmed && !context.length)) return null;
+  const key = sendKey(trimmed, mode, context);
+  return { ...outbox, item: { phase: 'sending', requestId: outbox.reuse[key] ?? newId(), key, text: trimmed, mode, context } };
 }
 
 /** The send is accepted: the slot empties and its id is spent. */
@@ -82,7 +83,7 @@ export function failSend(outbox: Outbox, requestId: string, failure: SendFailure
 export function retrySend(outbox: Outbox): Outbox | null {
   const item = outbox.item;
   if (item?.phase !== 'failed' || item.failure.kind === 'signed-out') return null;
-  return { ...outbox, item: { phase: 'sending', requestId: item.requestId, key: item.key, text: item.text, mode: item.mode } };
+  return { ...outbox, item: { phase: 'sending', requestId: item.requestId, key: item.key, text: item.text, mode: item.mode, context: item.context } };
 }
 
 /** Takes the failed message out of the slot, for Ben to edit. Its text comes back. */
