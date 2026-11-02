@@ -4,7 +4,8 @@ import type { PendingMsg } from '@omni/client-core';
 
 import type { ThreadLive, ThreadView } from '../../live/hub';
 import { useStore } from '../../live/react';
-import { isParked, pendingLabel } from '../../send/rules';
+import { canSendAgain, isParked, pendingLabel, recoveredCount } from '../../send/rules';
+import { RESUME_ALL } from '../../send/sender';
 import { fontSize, lineHeight, radius, space, useOmniTheme } from '../../theme';
 import { Button } from '../../ui/Button';
 import { OutboxRow } from './OutboxRow';
@@ -19,6 +20,7 @@ export function PendingRows({ view, live }: { view: ThreadView; live: ThreadLive
   const blocked = !!view.thread?.resume_blocked;
   return (
     <View style={styles.rows}>
+      <ResumeAll count={recoveredCount(view.pending)} live={live} />
       {view.pending.map((m) => (
         <PendingRow key={m.uuid} message={m} blocked={blocked} live={live} />
       ))}
@@ -36,21 +38,35 @@ function PendingRow({ message, blocked, live }: { message: PendingMsg; blocked: 
       <Text numberOfLines={3} style={[styles.text, { color: quiet ? colors.fg3 : colors.fg2 }]}>
         {message.text}
       </Text>
-      {isParked(message) ? <HeldActions uuid={message.uuid} live={live} /> : null}
+      {isParked(message) ? <HeldActions uuid={message.uuid} again={canSendAgain(message)} live={live} /> : null}
     </View>
   );
 }
 
-/** A message held after a restart waits on Ben: send it again, or let it go. One action runs at a time. */
-function HeldActions({ uuid, live }: { uuid: string; live: ThreadLive }) {
+/** Messages held after a restart that never reached the agent go together, in the order they arrived, as on the web. */
+function ResumeAll({ count, live }: { count: number; live: ThreadLive }) {
+  const running = useStore(live.send.state).heldBusy;
+  if (count === 0) return null;
+  return (
+    <Button label={count > 1 ? `Resume ${count}` : 'Resume'} busy={running === RESUME_ALL} disabled={running !== null && running !== RESUME_ALL} onPress={() => void live.send.resume()} />
+  );
+}
+
+/**
+ * A message held after a restart waits on Ben. An uncertain one may already have reached the agent, so it offers Send
+ * again; a recovered one is sent by Resume. Either can be let go. One action runs at a time.
+ */
+function HeldActions({ uuid, again: canAgain, live }: { uuid: string; again: boolean; live: ThreadLive }) {
   const running = useStore(live.send.state).heldBusy;
   const again = `again:${uuid}`;
   const discard = `discard:${uuid}`;
   return (
     <View style={styles.actions}>
-      <View style={styles.action}>
-        <Button label="Send again" busy={running === again} disabled={running !== null && running !== again} onPress={() => void live.send.resume(uuid)} />
-      </View>
+      {canAgain ? (
+        <View style={styles.action}>
+          <Button label="Send again" busy={running === again} disabled={running !== null && running !== again} onPress={() => void live.send.resume(uuid)} />
+        </View>
+      ) : null}
       <View style={styles.action}>
         <Button label="Discard" variant="secondary" busy={running === discard} disabled={running !== null && running !== discard} onPress={() => void live.send.discard(uuid)} />
       </View>

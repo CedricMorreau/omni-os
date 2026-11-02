@@ -39,6 +39,14 @@ export function sendLabel(thread: SteerFacts, catalog: readonly HarnessInfo[] | 
 /** Accepted before a restart and waiting on Ben: `recovered` never reached a harness, `uncertain` may have. */
 export const isParked = (m: PendingMsg) => m.delivery === 'recovered' || m.delivery === 'uncertain';
 
+/**
+ * A parked message Ben can send again by itself. An uncertain one may already have reached the agent, so only Ben
+ * decides to repeat it. A recovered one never did: Resume sends all of those, in the order they arrived.
+ */
+export const canSendAgain = (m: PendingMsg) => m.delivery === 'uncertain';
+
+export const recoveredCount = (pending: readonly PendingMsg[]) => pending.filter((m) => m.delivery === 'recovered').length;
+
 /** The line over a pending message. */
 export function pendingLabel(m: PendingMsg, blocked: boolean): string {
   if (m.kind === 'crew_report') {
@@ -52,4 +60,11 @@ export function pendingLabel(m: PendingMsg, blocked: boolean): string {
   if (m.state === 'waiting') return 'Waiting for a free slot';
   if (m.state === 'held') return 'Queued, runs after this turn';
   return m.mode === 'interrupt' ? 'Interrupting, runs next' : 'Sent, the agent reads it next';
+}
+
+/** The newest user row the stream has delivered. A row for this phone's own message is one of these. */
+export function latestUserRowId(rows: readonly { id: number; kind: string }[]): number | null {
+  let latest: number | null = null;
+  for (const r of rows) if (r.kind === 'user' && (latest === null || r.id > latest)) latest = r.id;
+  return latest;
 }

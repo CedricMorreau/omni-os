@@ -1,4 +1,4 @@
-import type { HarnessInfo, OmniApi, Recovered, Thread } from '@omni/client-core';
+import type { HarnessInfo, OmniApi, PendingMsg, Recovered, Thread } from '@omni/client-core';
 
 import { createStore, type Store } from '../live/store';
 import { beginSend, classifyFailure, EMPTY_OUTBOX, failSend, retrySend, settleSend, takeFailed, type Outbox, type OutboxItem } from './outbox';
@@ -7,11 +7,14 @@ import { sendModeFor } from './rules';
 export interface SendState {
   outbox: Outbox;
   stopping: boolean;
-  /** The held-message action under way, as `again:<uuid>` or `discard:<uuid>`. Null when none is. */
+  /** The held-message action under way, as `again:<uuid>`, `discard:<uuid>` or `resume`. Null when none is. */
   heldBusy: string | null;
   /** Why the last Stop or held-message action failed. The next action clears it. */
   notice: string | null;
 }
+
+/** The `heldBusy` key while Resume runs. */
+export const RESUME_ALL = 'resume';
 
 export const IDLE_SEND: SendState = { outbox: EMPTY_OUTBOX, stopping: false, heldBusy: null, notice: null };
 
@@ -25,6 +28,13 @@ export interface SenderDeps {
   newId(): string;
 }
 
+/** What the stream has shown of the thread, as far as it says whether a send landed. */
+export interface FeedSight {
+  pending: readonly PendingMsg[];
+  /** The newest user row on the stream. A new one means a message was just read, and it may be this phone's. */
+  userRowId: number | null;
+}
+
 /** What a thread's composer does, as one store the screen reads and a handful of calls the screen makes. */
 export interface ThreadSender {
   readonly state: Store<SendState>;
@@ -35,8 +45,14 @@ export interface ThreadSender {
   /** Takes the failed message out of the outbox and returns its text. */
   edit(): string | null;
   stop(): Promise<Thread | null>;
-  /** Sends held messages again. They are named, so an uncertain one goes too. */
-  resume(uuid: string): Promise<Recovered | null>;
+  /**
+   * Drops the message in the slot once the server turns out to have it, so it never shows twice: in the transcript and
+   * here. A pending row carries the request id. A user row does not, so each new one is checked against the server's
+   * list of accepted requests. Fed by the stream, and needs no reply.
+   */
+  observe(sight: FeedSight): void;
+  /** Sends held messages. Named, an uncertain one goes too. Without a name, every recovered one goes, in order. */
+  resume(uuid?: string): Promise<Recovered | null>;
   discard(uuid: string): Promise<Recovered | null>;
 }
 
@@ -69,8 +85,38 @@ export function createSender(deps: SenderDeps): ThreadSender {
     }
   }
 
+  let latest: FeedSight = { pending: [], userRowId: null };
+  let checking = false;
+  let checked: { requestId: string; rowId: number | null } | null = null;
+
+  async function settleIfLanded(sight: FeedSight): Promise<void> {
+    const item = state.get().outbox.item;
+    // A refused send never reached the server, so nothing on the stream can be it.
+    if (!item || (item.phase === 'failed' && !item.failure.ambiguous)) return;
+    const landed = () => outbox((o) => settleSend(o, item.requestId));
+    if (sight.pending.some((m) => m.request_id === item.requestId)) return landed();
+    if (sight.userRowId === null || checking) return;
+    if (checked?.requestId === item.requestId && checked.rowId === sight.userRowId) return;
+    checking = true;
+    try {
+      const accepted = await deps.run(() => deps.api().requests(deps.threadId));
+      checked = { requestId: item.requestId, rowId: sight.userRowId };
+      if (accepted.some((r) => r.request_id === item.requestId)) landed();
+    } catch {
+      // The next user row asks again.
+    } finally {
+      checking = false;
+    }
+    // A row that arrived during the check has not been asked about.
+    if (latest !== sight) void settleIfLanded(latest);
+  }
+
   return {
     state,
+    observe(sight) {
+      latest = sight;
+      void settleIfLanded(sight);
+    },
     async submit(thread, text) {
       const next = beginSend(state.get().outbox, text, sendModeFor(thread, deps.catalog()), deps.newId);
       if (!next?.item) return null;
@@ -101,7 +147,7 @@ export function createSender(deps: SenderDeps): ThreadSender {
         patch({ stopping: false });
       }
     },
-    resume: (uuid) => held(`again:${uuid}`, () => deps.run(() => deps.api().resumeRequests(deps.threadId, [uuid]))),
+    resume: (uuid) => held(uuid ? `again:${uuid}` : RESUME_ALL, () => deps.run(() => deps.api().resumeRequests(deps.threadId, uuid ? [uuid] : undefined))),
     discard: (uuid) => held(`discard:${uuid}`, () => deps.run(() => deps.api().discardRequests(deps.threadId, [uuid]))),
   };
 }

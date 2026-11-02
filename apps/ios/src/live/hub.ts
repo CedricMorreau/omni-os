@@ -25,6 +25,7 @@ import {
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
+import { latestUserRowId } from '../send/rules';
 import { createCatalog, createSenders, newRequestId, type ThreadSender } from '../send/sender';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
@@ -207,6 +208,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     private following = true;
     private opening: Promise<void> | null = null;
     private closed = false;
+    private readonly unwatch: () => void;
 
     constructor(private readonly threadId: string) {
       this.send = this.applying(senders.for(threadId));
@@ -226,6 +228,11 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         hasOlder: false,
         loadingOlder: false,
         link: null,
+      });
+      // What the stream shows decides whether a message this phone is still sending has already landed.
+      this.unwatch = this.view.subscribe(() => {
+        const { pending, rows } = this.view.get();
+        this.send.observe({ pending, userRowId: latestUserRowId(rows) });
       });
     }
 
@@ -248,6 +255,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         submit: async (t, text) => thread(await sender.submit(t, text)),
         retry: async () => thread(await sender.retry()),
         edit: () => sender.edit(),
+        observe: (sight) => sender.observe(sight),
         stop: async () => thread(await sender.stop()),
         resume: async (uuid) => recovered(await sender.resume(uuid)),
         discard: async (uuid) => recovered(await sender.discard(uuid)),
@@ -378,6 +386,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     close() {
       if (this.closed) return;
       this.closed = true;
+      this.unwatch();
       this.stream?.close();
       this.stream = null;
       openThreads.delete(this);

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type ComponentRef, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { Thread } from '@omni/client-core';
@@ -7,7 +7,7 @@ import type { ThreadLive } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canStop, composerPlaceholder, sendLabel } from '../../send/rules';
 import { fontSize, lineHeight, radius, space, useOmniTheme } from '../../theme';
-import { restoreDraft, setDraft, useDraft } from './drafts';
+import { restoreDraft, setDraft, useDraft, useFocusRequests } from './drafts';
 
 const INPUT_LINE_HEIGHT = Math.round(fontSize.input * lineHeight.body);
 const MAX_LINES = 6;
@@ -25,6 +25,8 @@ export function ThreadComposer({ live, thread }: { live: ThreadLive; thread: Thr
   const catalog = useStore(live.catalog);
   const { outbox, stopping, notice } = useStore(live.send.state);
   const draft = useDraft(thread.id);
+  const input = useRef<ComponentRef<typeof TextInput>>(null);
+  useFocusRequests(thread.id, input);
 
   const placeholder = composerPlaceholder(thread, catalog);
   const empty = draft.trim() === '';
@@ -49,6 +51,7 @@ export function ThreadComposer({ live, thread }: { live: ThreadLive; thread: Thr
       ) : null}
       <View style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}>
         <TextInput
+          ref={input}
           accessibilityLabel={placeholder}
           multiline
           value={draft}

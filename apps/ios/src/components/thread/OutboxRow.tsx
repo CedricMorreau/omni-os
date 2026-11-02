@@ -5,7 +5,7 @@ import { useStore } from '../../live/react';
 import { space } from '../../theme';
 import { Button } from '../../ui/Button';
 import { UserBubble } from '../UserBubble';
-import { restoreDraft } from './drafts';
+import { editInComposer } from './drafts';
 
 /**
  * The message on its way, drawn where it will land in the transcript. When it failed, the text stays here with a
@@ -20,7 +20,7 @@ export function OutboxRow({ live, threadId }: { live: ThreadLive; threadId: stri
 
   const edit = () => {
     const text = live.send.edit();
-    if (text !== null) restoreDraft(threadId, text);
+    if (text !== null) editInComposer(threadId, text);
   };
 
   return (
