@@ -31,7 +31,7 @@ export type ThreadRow =
   | { kind: 'artifact'; key: string; a: Artifact }
   | { kind: 'steps'; key: string; turn: number; steps: number; failed: number; live: boolean; open: boolean }
   | { kind: 'note'; key: string; text: string; clipped: number | null }
-  | { kind: 'call'; key: string; call: ToolCall; depth: number; open: boolean }
+  | { kind: 'call'; key: string; call: ToolCall; depth: number; open: boolean; running: boolean }
   | { kind: 'mod'; key: string; lines: ModLine[] }
   | { kind: 'switch'; key: string; it: SwitchItem; running: boolean }
   | { kind: 'now'; key: string; now: NowDoing; meta: string | null }
@@ -77,18 +77,18 @@ function caption(thread: Thread, p: Prompt, first: boolean, k: number, atStart: 
   return k > 0 ? 'Sent while it ran' : null;
 }
 
-function* callRows(calls: ToolCall[], depth: number, open: ReadonlySet<string>): Generator<ThreadRow> {
+function* callRows(calls: ToolCall[], depth: number, open: ReadonlySet<string>, running: boolean): Generator<ThreadRow> {
   for (const call of calls) {
-    yield { kind: 'call', key: `c${call.event}`, call, depth, open: open.has(call.id) };
-    yield* callRows(call.children, depth + 1, open);
+    yield { kind: 'call', key: `c${call.event}`, call, depth, open: open.has(call.id), running };
+    yield* callRows(call.children, depth + 1, open, running);
   }
 }
 
 /** The steps a turn shows once opened, in the order they ran. The turn's answer is the one text left out: it already reads above. */
-function* stepRows(t: IosTurn, open: ReadonlySet<string>): Generator<ThreadRow> {
+function* stepRows(t: IosTurn, open: ReadonlySet<string>, running: boolean): Generator<ThreadRow> {
   const answer = t.items.findLast((it) => it.type === 'text');
   for (const it of t.items) {
-    if (it.type === 'tools') yield* callRows(it.calls, 0, open);
+    if (it.type === 'tools') yield* callRows(it.calls, 0, open, running);
     else if (it.type === 'text' && it !== answer) yield { kind: 'note', key: `n${it.key}`, text: it.p.text, clipped: it.clipped ? it.key : null };
     else if (it.type === 'mod') yield { kind: 'mod', key: `m${it.key}`, lines: it.lines };
   }
@@ -126,7 +126,7 @@ function* turnRows(t: IosTurn, i: number, last: boolean, view: IosThreadView, in
     for (const a of t.artifacts) yield { kind: 'artifact', key: `f${t.key}.${a.id}`, a };
     if (t.steps > 0) yield steps();
   }
-  if (open) yield* stepRows(t, disclosure.calls);
+  if (open) yield* stepRows(t, disclosure.calls, thread.status === 'running');
   for (const it of t.switches) yield { kind: 'switch', key: `w${it.key}`, it, running: thread.status === 'running' };
 }
 
