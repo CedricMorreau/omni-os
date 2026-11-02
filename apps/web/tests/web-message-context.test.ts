@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { diffSelection, type DiffSelection } from '@omni/shared/message-context-diff.ts';
 import { CONTEXT_KINDS, readContexts } from '@omni/shared/message-context-kinds.ts';
 import { CONTEXT_MAX, newContext, type MessageContext } from '@omni/shared/message-context.ts';
+import { requestIdFor } from '@omni/shared/request-id.ts';
 import type { ThreadDetail } from '../src/api.ts';
 import { DiffFile } from '../src/components/DiffViewer.tsx';
 import { pressLine, type LinePick } from '../src/components/thread/panel/LineSelection.tsx';
@@ -16,7 +17,7 @@ import { cantShowText, ContextChips, ContextInspector, NEWER_LABEL } from '../sr
 import { rangeText, sourceText } from '../src/message-context/diff-selection.tsx';
 import { CONTEXT_VIEWS } from '../src/message-context/kinds.ts';
 import { addDraftContext, draftContext, removeDraftContext, settleDraftContext } from '../src/message-context/draft.ts';
-import { requestIdFor, sendKey } from '../src/requests.ts';
+import { sendKey } from '../src/requests.ts';
 import type { UserP } from '../src/transcript/fold.ts';
 
 // The Web UI's half of message context (apps/web/src/message-context/), on the corpus the shared and Swift tests read

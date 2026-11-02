@@ -18,8 +18,8 @@ import {
 } from '@omni/shared/continue.ts';
 import { sameRun, type Run } from '@omni/shared/run-switch.ts';
 import { bytes } from '@omni/shared/format.ts';
+import { requestIdFor, type PendingRequest } from '@omni/shared/request-id.ts';
 import { ApiError, errorText, type HarnessWithRunning, type Thread } from './api.ts';
-import { requestIdFor, type PendingRequest } from './requests.ts';
 
 /** The thread a sheet continues. */
 export type ContinueSource = Pick<Thread, 'id' | 'title' | 'harness' | 'channel_id'>;
