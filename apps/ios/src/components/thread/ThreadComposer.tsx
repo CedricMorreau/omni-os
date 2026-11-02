@@ -1,11 +1,12 @@
 import { useRef, useState, type ComponentRef, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { HarnessInfo, Thread } from '@omni/client-core';
 
 import { AttachControl, AttachNotice } from '../../attachments/AttachControl';
 import { AttachmentChips } from '../../attachments/AttachmentChips';
 import { clearStaged, getStaged, removeStagedFile, restoreStaged, useStaged } from '../../attachments/staged';
+import { removeDraftContext, useDraftContext } from '../../context/draft';
 import type { ThreadLive } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canStop, composerPlaceholder, sendLabel } from '../../send/rules';
@@ -41,13 +42,14 @@ export function ThreadComposer({
   const { outbox, stopping, notice } = useStore(live.send.state);
   const draft = useDraft(thread.id);
   const files = useStaged(thread.id);
+  const context = useDraftContext(thread.id);
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   useFocusRequests(thread.id, input);
 
+  const empty = draft.trim() === '' && context.length === 0;
   // The server takes files only with a message, so a file with no text says what is missing.
-  const placeholder = files.length > 0 && draft.trim() === '' ? 'Add a message to send with the files' : composerPlaceholder(thread, catalog);
-  const empty = draft.trim() === '';
+  const placeholder = files.length > 0 && empty ? 'Add a message to send with the files' : composerPlaceholder(thread, catalog);
   const slotTaken = outbox.item !== null;
   const showStop = empty && !slotTaken && canStop(thread);
 
@@ -58,8 +60,8 @@ export function ThreadComposer({
     setDraft(thread.id, '');
     clearStaged(thread.id);
     setAttachNotice(null);
-    const sent = await live.send.submit(thread, text, attached);
-    // A failed send keeps its text and files in the outbox. Nothing in the slot and nothing sent means it never started.
+    const sent = await live.send.submit(thread, text, attached, context);
+    // A failed send keeps its text and files in the outbox, and its context stays in the draft until a send lands. Nothing in the slot and nothing sent means it never started.
     if (!sent && live.send.state.get().outbox.item === null) {
       restoreDraft(thread.id, text);
       restoreStaged(thread.id, attached);
@@ -81,6 +83,20 @@ export function ThreadComposer({
         <View style={styles.chips}>
           <AttachmentChips files={files} onRemove={(id) => removeStagedFile(thread.id, id)} />
         </View>
+      ) : null}
+      {context.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.contextRow} accessibilityLabel="Added to this message">
+          {context.map((c) => (
+            <View key={c.id} style={[styles.contextChip, { backgroundColor: colors.surface2 }]}>
+              <Text numberOfLines={1} ellipsizeMode="middle" style={[styles.contextLabel, { color: colors.fg2 }]}>
+                {c.label}
+              </Text>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${c.label}`} hitSlop={space.s6} onPress={() => removeDraftContext(thread.id, c.id)}>
+                <Text style={[styles.contextRemove, { color: colors.fg3 }]}>✕</Text>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
       ) : null}
       <View style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}>
         <AttachControl scope={thread.id} disabled={slotTaken} onNotice={setAttachNotice} />
@@ -147,6 +163,27 @@ const styles = StyleSheet.create({
   },
   chips: {
     paddingHorizontal: space.s2,
+  },
+  contextRow: {
+    gap: space.s2,
+    paddingHorizontal: space.s2,
+  },
+  contextChip: {
+    maxWidth: 260,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s2,
+    borderRadius: radius.pill,
+    paddingVertical: space.s2,
+    paddingHorizontal: space.s4,
+  },
+  contextLabel: {
+    flexShrink: 1,
+    fontSize: fontSize.meta + 1,
+    fontWeight: '600',
+  },
+  contextRemove: {
+    fontSize: fontSize.meta + 1,
   },
   notice: {
     fontSize: fontSize.meta,

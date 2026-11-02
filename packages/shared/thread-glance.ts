@@ -1,7 +1,15 @@
 // What the top of the thread panel's Details tab reads: the branch's PR state and the one next step it calls for.
 // Ben's history says the panel is mostly used to steer a branch to a merged PR: open the PR, fix conflicts, fix
 // checks, then merge. The Mac app mirrors these rules in OmniKit's ThreadGlance.swift.
-import type { PRSummary } from './api.ts';
+
+/** The parts of a PR summary (GET /api/threads/:id/pr) these rules read. */
+export interface PRSummary {
+  state?: string;
+  isDraft: boolean;
+  mergeable: string;
+  reviewDecision: string | null;
+  checks: { passed: number; failed: number; pending: number };
+}
 
 export const OPEN_PR_PROMPT = 'Commit your work, push the branch and open a PR with gh. Reply with the PR URL.';
 export const FIX_CONFLICTS_PROMPT = 'Rebase this branch on its base branch, resolve the merge conflicts, run the tests and force-push with lease.';
@@ -49,4 +57,11 @@ export function prLine(pr: PRSummary): { text: string; tone: PRTone } {
   if (pr.reviewDecision === 'CHANGES_REQUESTED') return { text: 'Changes requested', tone: 'needs' };
   const checks = total ? `${total} checks passed` : 'No checks';
   return { text: pr.reviewDecision === 'APPROVED' ? `${checks} · approved` : checks, tone: pr.isDraft ? 'outline' : 'live' };
+}
+
+/** A check run's state as a glyph tone: done, needs (failed) or running. */
+export function checkTone(state: string): 'done' | 'needs' | 'running' {
+  if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(state)) return 'done';
+  if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(state)) return 'needs';
+  return 'running';
 }

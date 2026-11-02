@@ -1,4 +1,4 @@
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 
 const light = {
   bg: '#ffffff',
@@ -12,6 +12,13 @@ const light = {
   onInk: '#ffffff',
   line: 'rgba(23, 24, 26, 0.08)',
   lineStrong: 'rgba(23, 24, 26, 0.16)',
+  live: '#2b3bff',
+  needs: '#ff4420',
+  done: '#c6f52b',
+  ink: '#17181a',
+  mark: 'rgba(245, 158, 11, 0.28)',
+  diffAdd: 'rgba(198, 245, 43, 0.22)',
+  diffDel: 'rgba(255, 68, 32, 0.12)',
 } as const;
 
 export type ColorTokens = { [K in keyof typeof light]: string };
@@ -28,6 +35,13 @@ const dark: ColorTokens = {
   onInk: '#101114',
   line: 'rgba(236, 235, 231, 0.08)',
   lineStrong: 'rgba(236, 235, 231, 0.16)',
+  live: '#7280ff',
+  needs: '#ff4420',
+  done: '#c6f52b',
+  ink: '#17181a',
+  mark: 'rgba(245, 181, 68, 0.28)',
+  diffAdd: 'rgba(198, 245, 43, 0.22)',
+  diffDel: 'rgba(255, 68, 32, 0.12)',
 };
 
 export const space = {
@@ -40,6 +54,8 @@ export const space = {
   s11: 32,
   s12: 40,
 } as const;
+
+export const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
 export const radius = {
   md: 14,

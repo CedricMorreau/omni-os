@@ -33,6 +33,7 @@ import type { Answer } from '@omni/shared/question.ts';
 import type { OutputChunk } from '@omni/shared/tool-output.ts';
 
 import { DEFAULT_MAX_MB } from '../attachments/model';
+import { settleDraftContext } from '../context/draft';
 import { latestUserRowId } from '../send/rules';
 import { createCatalog, createSenders, newRequestId, type ThreadSender } from '../send/sender';
 import { runNeedsAction, type NeedsAction } from '../needs/actions';
@@ -208,7 +209,13 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   }
 
   const catalog = createCatalog(() => withAuth(() => requireApi().harnesses()));
-  const senders = createSenders({ api: requireApi, run: withAuth, catalog: catalog.store.get, newId: newRequestId });
+  const senders = createSenders({
+    api: requireApi,
+    run: withAuth,
+    catalog: catalog.store.get,
+    newId: newRequestId,
+    landed: (threadId, item) => settleDraftContext(threadId, item.context.map((c) => c.id)),
+  });
 
   let uploadLimit: Promise<number> | null = null;
   function uploadLimitMb(): Promise<number> {
@@ -375,7 +382,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       };
       return {
         state: sender.state,
-        submit: async (t, text, files) => thread(await sender.submit(t, text, files)),
+        submit: async (t, text, files, context) => thread(await sender.submit(t, text, files, context)),
         retry: async () => thread(await sender.retry()),
         edit: () => sender.edit(),
         cancelUpload: () => sender.cancelUpload(),

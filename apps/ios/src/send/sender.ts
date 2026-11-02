@@ -1,5 +1,7 @@
 import type { HarnessInfo, OmniApi, PendingMsg, Thread } from '@omni/client-core';
 
+import type { MessageContext } from '@omni/shared/message-context.ts';
+
 import { toUploadFiles, type Staged } from '../attachments/model';
 import { createStore, type Store } from '../live/store';
 import { beginSend, classifyFailure, EMPTY_OUTBOX, failSend, retrySend, settleSend, takeFailed, type Outbox, type OutboxItem } from './outbox';
@@ -24,6 +26,8 @@ export interface SenderDeps {
   /** The harness catalog as far as it has loaded. Null falls back to the harness's name. */
   catalog(): readonly HarnessInfo[] | null;
   newId(): string;
+  /** A message left the slot because the server has it. */
+  landed?(threadId: string, item: OutboxItem): void;
 }
 
 /** What the stream has shown of the thread, as far as it says whether a send landed. */
@@ -36,9 +40,9 @@ export interface FeedSight {
 /** What a thread's composer does, as one store the screen reads and a handful of calls the screen makes. */
 export interface ThreadSender {
   readonly state: Store<SendState>;
-  /** Sends `text` and `files` to `thread`, in the mode its status and harness call for. Resolves with the thread the server answered with, or null when nothing was sent or it failed (the outbox says which). */
-  submit(thread: Thread, text: string, files?: readonly Staged[]): Promise<Thread | null>;
-  /** Sends the failed message again under its own request id, with the same files. */
+  /** Sends `text`, `files` and `context` to `thread`, in the mode its status and harness call for. Resolves with the thread the server answered with, or null when nothing was sent or it failed (the outbox says which). */
+  submit(thread: Thread, text: string, files?: readonly Staged[], context?: readonly MessageContext[]): Promise<Thread | null>;
+  /** Sends the failed message again under its own request id, with the same files and context. */
   retry(): Promise<Thread | null>;
   /** Takes the failed message out of the outbox and returns its text and files. */
   edit(): { text: string; files: readonly Staged[] } | null;
@@ -57,11 +61,16 @@ export function createSender(deps: SenderDeps): ThreadSender {
   const state = createStore<SendState>(IDLE_SEND);
   const patch = (next: Partial<SendState>) => state.set((s) => ({ ...s, ...next }));
   const outbox = (fn: (o: Outbox) => Outbox) => state.set((s) => ({ ...s, outbox: fn(s.outbox) }));
+  const settle = (item: OutboxItem) => {
+    const before = state.get().outbox.item;
+    outbox((o) => settleSend(o, item.requestId));
+    if (before?.requestId === item.requestId) deps.landed?.(deps.threadId, item);
+  };
 
   let uploading: AbortController | null = null;
 
   async function transmit(item: OutboxItem): Promise<Thread | null> {
-    const body = { prompt: item.text, mode: item.mode, request_id: item.requestId };
+    const body = { prompt: item.text, mode: item.mode, request_id: item.requestId, context: item.context.length ? item.context : undefined };
     const controller = item.files.length ? new AbortController() : null;
     uploading = controller;
     let shown = -1;
@@ -78,7 +87,7 @@ export function createSender(deps: SenderDeps): ThreadSender {
     };
     try {
       const posted = await deps.run(() => deps.api().sendMessage(deps.threadId, body, withFiles ?? undefined));
-      outbox((o) => settleSend(o, item.requestId));
+      settle(item);
       return posted;
     } catch (e) {
       outbox((o) => failSend(o, item.requestId, classifyFailure(e)));
@@ -100,7 +109,7 @@ export function createSender(deps: SenderDeps): ThreadSender {
     const item = state.get().outbox.item;
     // A refused send never reached the server, so nothing on the stream can be it.
     if (!item || (item.phase === 'failed' && !item.failure.ambiguous)) return;
-    const landed = () => outbox((o) => settleSend(o, item.requestId));
+    const landed = () => settle(item);
     if (sight.pending.some((m) => m.request_id === item.requestId)) return landed();
     if (sight.userRowId === null || checking) return;
     if (checked?.requestId === item.requestId && checked.rowId === sight.userRowId) return;
@@ -124,8 +133,8 @@ export function createSender(deps: SenderDeps): ThreadSender {
       latest = sight;
       void settleIfLanded(sight);
     },
-    async submit(thread, text, files = []) {
-      const next = beginSend(state.get().outbox, text, sendModeFor(thread, deps.catalog()), deps.newId, files);
+    async submit(thread, text, files = [], context = []) {
+      const next = beginSend(state.get().outbox, text, sendModeFor(thread, deps.catalog()), deps.newId, files, context);
       if (!next?.item) return null;
       patch({ outbox: next, notice: null });
       return transmit(next.item);

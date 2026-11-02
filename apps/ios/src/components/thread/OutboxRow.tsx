@@ -18,11 +18,12 @@ export function OutboxRow({ live, threadId }: { live: ThreadLive; threadId: stri
   const { outbox, progress } = useStore(live.send.state);
   const item = outbox.item;
   if (!item) return null;
+  const text = [item.text, ...item.context.map((c) => `Attached ${c.label}`)].filter(Boolean).join('\n');
 
   if (item.phase === 'sending') {
     const uploading = item.files.length > 0;
     return (
-      <UserBubble text={item.text} caption={uploading ? uploadCaption(progress) : 'Sending…'} busy>
+      <UserBubble text={text} caption={uploading ? uploadCaption(progress) : 'Sending…'} busy>
         {uploading ? (
           <>
             <AttachmentChips files={item.files} />
@@ -41,7 +42,7 @@ export function OutboxRow({ live, threadId }: { live: ThreadLive; threadId: stri
   };
 
   return (
-    <UserBubble text={item.text} caption={item.failure.message} dimmed>
+    <UserBubble text={text} caption={item.failure.message} dimmed>
       <AttachmentChips files={item.files} dimmed />
       <View style={styles.actions}>
         {item.failure.kind === 'signed-out' ? null : (

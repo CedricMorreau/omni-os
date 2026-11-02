@@ -6,6 +6,7 @@ import { HeaderButton } from '../components/HeaderButton';
 import { ActionsScreen } from '../screens/ActionsScreen';
 import { ArtifactScreen } from '../screens/ArtifactScreen';
 import { AutomationsScreen } from '../screens/AutomationsScreen';
+import { ChangesScreen } from '../screens/ChangesScreen';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
 import { ContinueScreen } from '../screens/ContinueScreen';
@@ -13,6 +14,7 @@ import { NewThreadScreen } from '../screens/NewThreadScreen';
 import { NotificationSettingsScreen } from '../screens/NotificationSettingsScreen';
 import { NotificationsIntroScreen } from '../screens/NotificationsIntroScreen';
 import { DevicesScreen } from '../screens/DevicesScreen';
+import { PullRequestScreen } from '../screens/PullRequestScreen';
 import { SearchScreen } from '../screens/SearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ServersScreen } from '../screens/ServersScreen';
@@ -71,6 +73,8 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', headerBackTitle: backTitle }} />
       <Stack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Devices', headerBackTitle: 'Settings' }} />
       <Stack.Screen name="Automations" component={AutomationsScreen} options={{ title: 'Automations', headerBackTitle: 'Settings' }} />
+      <Stack.Screen name="Changes" component={ChangesScreen} options={{ title: 'Changes', headerBackTitle: 'Thread' }} />
+      <Stack.Screen name="PullRequest" component={PullRequestScreen} options={{ title: 'Pull request', headerBackTitle: 'Thread', gestureEnabled: false }} />
       <Stack.Screen name="Actions" component={ActionsScreen} options={{ title: 'Actions', headerBackTitle: 'Thread' }} />
       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers', headerBackTitle: 'Settings' }} />
       <Stack.Screen name="AddServer" component={ConnectScreen} options={{ title: 'Add server', headerBackTitle: 'Back' }} />

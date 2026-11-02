@@ -13,8 +13,8 @@ import {
   turnTitle,
   type ChangeFileView,
   type ChangeGroupView,
-} from '../../../changes.ts';
-import { startsOpen } from '../../../diff.ts';
+} from '@omni/shared/changes-view.ts';
+import { startsOpen } from '@omni/shared/diff.ts';
 import { plural } from '../../../format.ts';
 import { DiffFile, type LineSelect } from '../../DiffViewer.tsx';
 import { Empty, ErrorNote, IconButton, Loading, Picker, Segmented } from '../../ui.tsx';

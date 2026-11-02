@@ -24,6 +24,10 @@ Fork thread in the thread menu opens Continue, a modal over the thread. It picks
 
 Not built: a machine picker in the composer of an open thread (the menu row is the only entry), the default machine in Settings, and a slide to confirm for Take over (the phone web slides, here it is a button).
 
+A thread with a branch has Changes and Pull request links under its header. Changes lists the files in the thread's worktree as a collapsible unified diff, since the base or for the last turn. Long files show their first lines with a Show more row, and the list is virtualized. Tap a line to pick it and tap another in the same hunk to extend the pick. The bar that appears takes a note and Add to message, which puts the selection in the composer as a chip. Send carries the chips as the message's context, the same as the phone web, and removing a chip drops it. A message that only has chips shows them as Attached lines while it sends. The chips are kept in memory, so they do not survive closing the app.
+
+Pull request shows the branch's PR with its status line, a Watch toggle, review comments, checks and files. Fix checks and Fix conflicts ask the agent, and GitHub opens the PR in the browser. Merging is a slide to squash and merge, which deletes the branch, and it warns first when a check fails or is still running. A refusal from GitHub (conflicts, blocked, draft, closed) shows its reason and leaves the slider ready. A lost reply reloads the PR and says to check it before trying again. The screen turns off swipe-back so the slide cannot be mistaken for it. A thread with no branch, a branch with no PR, a channel with no GitHub repo, a failed load and a revoked phone each get their own message.
+
 ## Run on the iOS simulator
 
 Install Xcode, an iOS simulator runtime, Node 24.3 or later in the 24.x line or Node 26 or later, npm 11.19.0, and CocoaPods. From the repository root:

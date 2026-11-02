@@ -1,4 +1,5 @@
 import { OmniHttpError, type SendMode } from '@omni/client-core';
+import { contextKey, type MessageContext } from '@omni/shared/message-context.ts';
 
 import { filesKey, type Staged } from '../attachments/model';
 
@@ -45,8 +46,8 @@ export function classifyFailure(error: unknown): SendFailure {
 
 /** The one message on its way, or the one that failed. */
 export type OutboxItem =
-  | { phase: 'sending'; requestId: string; key: string; text: string; files: readonly Staged[]; mode: SendMode | undefined }
-  | { phase: 'failed'; requestId: string; key: string; text: string; files: readonly Staged[]; mode: SendMode | undefined; failure: SendFailure };
+  | { phase: 'sending'; requestId: string; key: string; text: string; files: readonly Staged[]; context: readonly MessageContext[]; mode: SendMode | undefined }
+  | { phase: 'failed'; requestId: string; key: string; text: string; files: readonly Staged[]; context: readonly MessageContext[]; mode: SendMode | undefined; failure: SendFailure };
 
 /**
  * A thread's send slot. At most one message is out at a time, so the order Ben wrote them in is the order the server
@@ -60,17 +61,24 @@ export interface Outbox {
 
 export const EMPTY_OUTBOX: Outbox = { item: null, reuse: {} };
 
-/** What makes two sends the same message: its text, mode and files. A retry after the thread went idle keeps its mode. */
-export function sendKey(text: string, mode: SendMode | undefined, files: readonly Staged[] = []): string {
-  return JSON.stringify([text, mode ?? '', filesKey(files)]);
+/** What makes two sends the same message: its text, mode, files and context. A retry after the thread went idle keeps its mode. */
+export function sendKey(text: string, mode: SendMode | undefined, files: readonly Staged[] = [], context: readonly { id: string }[] = []): string {
+  return JSON.stringify([text, mode ?? '', filesKey(files), contextKey(context)]);
 }
 
-/** Puts a message in the slot. Null while the slot is taken, or when there is nothing to send. */
-export function beginSend(outbox: Outbox, text: string, mode: SendMode | undefined, newId: () => string, files: readonly Staged[] = []): Outbox | null {
+/** Puts a message in the slot. Null while the slot is taken, or when there is neither text nor context to send. */
+export function beginSend(
+  outbox: Outbox,
+  text: string,
+  mode: SendMode | undefined,
+  newId: () => string,
+  files: readonly Staged[] = [],
+  context: readonly MessageContext[] = [],
+): Outbox | null {
   const trimmed = text.trim();
-  if (outbox.item || !trimmed) return null;
-  const key = sendKey(trimmed, mode, files);
-  return { ...outbox, item: { phase: 'sending', requestId: outbox.reuse[key] ?? newId(), key, text: trimmed, files, mode } };
+  if (outbox.item || (!trimmed && !context.length)) return null;
+  const key = sendKey(trimmed, mode, files, context);
+  return { ...outbox, item: { phase: 'sending', requestId: outbox.reuse[key] ?? newId(), key, text: trimmed, files, context, mode } };
 }
 
 /** The send is accepted: the slot empties and its id is spent. */
@@ -91,10 +99,10 @@ export function failSend(outbox: Outbox, requestId: string, failure: SendFailure
 export function retrySend(outbox: Outbox): Outbox | null {
   const item = outbox.item;
   if (item?.phase !== 'failed' || item.failure.kind === 'signed-out') return null;
-  return { ...outbox, item: { phase: 'sending', requestId: item.requestId, key: item.key, text: item.text, files: item.files, mode: item.mode } };
+  return { ...outbox, item: { phase: 'sending', requestId: item.requestId, key: item.key, text: item.text, files: item.files, context: item.context, mode: item.mode } };
 }
 
-/** Takes the failed message out of the slot, for Ben to edit. Its text and files come back. */
+/** Takes the failed message out of the slot, for Ben to edit. Its text and files come back. Its context stays in the thread's draft until a send lands. */
 export function takeFailed(outbox: Outbox): { outbox: Outbox; text: string; files: readonly Staged[] } | null {
   const item = outbox.item;
   if (item?.phase !== 'failed') return null;

@@ -15,8 +15,6 @@ function NoRepo({ channel }: { channel: Channel }) {
   );
 }
 
-export { checkTone } from './PRDetailTabs.tsx';
-
 export function ChecksSummary({ c }: { c: Checks }) {
   if (!c.passed && !c.failed && !c.pending) return <span className="text-[12px] text-fg-4">no checks</span>;
   return (
