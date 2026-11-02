@@ -1,7 +1,7 @@
 import type { Device } from '@omni/shared/handoff.ts';
 import { relTime } from '@omni/shared/format.ts';
+import { runOnRows } from '@omni/shared/thread-machine.ts';
 import { runOnOptions } from '../components/RunOnPicker.tsx';
-import { runOnRows } from '../run-on.ts';
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, errorText, useApi, type Automation, type Thread, type SyncStatus } from '../api.ts';
 import { DeliveryHistory } from '../components/DeliveryHistory.tsx';

@@ -19,7 +19,6 @@ import { ThreadHeader } from '../components/thread/ThreadHeader.tsx';
 import { ThreadPanel } from '../components/thread/ThreadPanel.tsx';
 import { Empty, ErrorNote, Icon, LinkButton, Loading } from '../components/ui.tsx';
 import { href } from '../router.ts';
-import { blockedNote } from '../handoff.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
@@ -34,6 +33,7 @@ import { useThreadSession } from './useThreadSession.ts';
 import { useTranscriptScroll } from './useTranscriptScroll.ts';
 import { useReveal } from './useReveal.ts';
 import { tailId } from '@omni/shared/history.ts';
+import { blockedNote } from '@omni/shared/thread-machine.ts';
 
 export function ThreadPage({ id, artifact: artifactParam, at }: { id: string; artifact?: number; at?: number }) {
   const { mods, tasks } = useApp();

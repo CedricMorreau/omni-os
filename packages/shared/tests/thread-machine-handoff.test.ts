@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { Device, HandoffPhase, HandoffView, Takeover } from '@omni/shared/handoff.ts';
-import { blockedNote, deviceRows, handoffBanner, handoffTargets, mayTakeOver, takeoverShown } from '../src/handoff.ts';
+import type { Device, HandoffPhase, HandoffView, Takeover } from '../handoff.ts';
+import { blockedNote, deviceRows, handoffBanner, handoffTargets, mayTakeOver, takeoverShown } from '../thread-machine.ts';
 
-// What the Web UI shows for handing a thread to another synced Mac (apps/web/src/handoff.ts): when "Hand off to…" is
+// What a client shows for handing a thread to another synced Mac (packages/shared/thread-machine.ts): when "Hand off to…" is
 // offered, which Macs can be picked and how each reads, the banner per phase on the giving and the taking Mac, and when
 // Take over is on offer for a thread another Mac holds.
 
