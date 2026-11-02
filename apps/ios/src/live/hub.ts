@@ -23,8 +23,9 @@ import {
   type Thread,
   type ThreadOpen,
 } from '@omni/client-core';
-import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
+import { earlierCursor, type HistoryPage, type Span } from '@omni/shared/history.ts';
 import type { Answer } from '@omni/shared/question.ts';
+import type { OutputChunk } from '@omni/shared/tool-output.ts';
 
 import { runNeedsAction, type NeedsAction } from '../needs/actions';
 import { withoutResult } from '../needs/inbox';
@@ -62,6 +63,8 @@ export interface ThreadView {
   blocked: string | null;
   /** The loaded rows in order: the newest page, then any older pages Ben loaded. */
   rows: readonly HistoryEvent[];
+  /** The spans of the loaded history. A row outside them only informs the fold and never shows. */
+  spans: readonly Span[];
   hasOlder: boolean;
   loadingOlder: boolean;
   /** The thread's stream state. Null before it opens. */
@@ -87,6 +90,8 @@ export interface ThreadLive {
   loadOlder(): Promise<void>;
   /** Replaces a clipped row with its whole payload. */
   loadFullRow(eventId: number): Promise<void>;
+  /** One chunk of a compact tool result's saved output, from `offset`. Throws when the call fails. */
+  loadOutput(eventId: number, offset: number): Promise<OutputChunk>;
   /** False while Ben reads older rows, so a new row does not trim what is on screen. */
   setFollowing(following: boolean): void;
   close(): void;
@@ -255,6 +260,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         live: false,
         blocked: null,
         rows: [],
+        spans: [],
         hasOlder: false,
         loadingOlder: false,
         link: null,
@@ -354,7 +360,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     private publishRows() {
       if (!this.history) return;
       const h = this.history.history;
-      this.patch({ rows: h.rows, hasOlder: earlierCursor(h) !== null });
+      this.patch({ rows: h.rows, spans: h.spans, hasOlder: earlierCursor(h) !== null });
     }
 
     async loadOlder(): Promise<void> {
@@ -380,6 +386,11 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       const id = this.threadId;
       await this.history.fullRow(eventId, (rowId) => withAuth(() => requireApi().event(id, rowId)));
       this.publishRows();
+    }
+
+    loadOutput(eventId: number, offset: number): Promise<OutputChunk> {
+      const id = this.threadId;
+      return withAuth(() => requireHttp().request<OutputChunk>('GET', apiPath`/threads/${id}/events/${eventId}/output`, { query: { offset } }));
     }
 
     setFollowing(following: boolean) {
