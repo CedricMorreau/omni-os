@@ -7,7 +7,7 @@ import { href } from '../../../router.ts';
 import { cloudAgentUrl } from '../../../cloud-agent.ts';
 import type { ThreadLinks } from '../../../continue.ts';
 import type { PanelTab } from '../../../pages/useThreadSession.ts';
-import type { PRNext } from '../../../thread-glance.ts';
+import type { PRNext } from '@omni/shared/thread-glance.ts';
 import { AgentsSection } from './AgentsSection.tsx';
 import { GlanceCard, type BranchChanges } from './GlanceCard.tsx';
 import type { ThreadPRs } from './PRsTab.tsx';

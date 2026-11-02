@@ -20,7 +20,7 @@ import { linkName } from '../components/ContinueLinks.tsx';
 import { fullDate, plural, relTime } from '../format.ts';
 import { runningSubagents, subagentKind } from '../subagents.ts';
 import { href, type Route } from '../router.ts';
-import { checkTone } from '../pages/PRs.tsx';
+import { checkTone } from '@omni/shared/thread-glance.ts';
 import { useApp } from '../store.tsx';
 import { toolLabel, toolSummary, type Item, type ToolCall } from '../transcript/fold.ts';
 import { MoDiff, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoSection } from './parts.tsx';

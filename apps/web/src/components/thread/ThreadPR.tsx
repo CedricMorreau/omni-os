@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type PRSummary, type Thread } from '../../api.ts';
 
-export { OPEN_PR_PROMPT } from '../../thread-glance.ts';
+export { OPEN_PR_PROMPT } from '@omni/shared/thread-glance.ts';
 
 /**
  * A thread branch's PR and every PR from it, from GET /threads/:id/pr: again when a turn ends (it may have opened the
