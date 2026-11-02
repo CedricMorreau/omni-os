@@ -1,3 +1,6 @@
+import OmniKit
+import SwiftUI
+
 /// `#/prs`: every channel's PRs, searched, sorted, filtered and grouped by `PRQuery`. A row opens the PR on GitHub.
 /// After AllPRs.tsx.
 struct AllPullRequestsScreen: View {
