@@ -8,6 +8,8 @@ import SwiftUI
 @MainActor
 enum QAIosPairingProbe {
   static var issue: (() async -> Void)?
+  /// "Use Address" with a typed address. Returns the problem text, or nil when the card took it.
+  static var useAddress: ((String) -> String?)?
   /// The card's frame in global coordinates, so the harness can scroll it into view.
   static var frame: CGRect?
 }
@@ -62,8 +64,15 @@ struct IosPairingCard: View {
       }
     }
     #if DEBUG
-    .onAppear { QAIosPairingProbe.issue = { await pairing.issue() } }
-    .onDisappear { QAIosPairingProbe.issue = nil; QAIosPairingProbe.frame = nil }
+    .onAppear {
+      QAIosPairingProbe.issue = { await pairing.issue() }
+      QAIosPairingProbe.useAddress = { pairing.useAddress($0) }
+    }
+    .onDisappear {
+      QAIosPairingProbe.issue = nil
+      QAIosPairingProbe.useAddress = nil
+      QAIosPairingProbe.frame = nil
+    }
     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { QAIosPairingProbe.frame = $0 }
     #endif
   }
