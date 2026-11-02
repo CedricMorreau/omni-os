@@ -19,7 +19,7 @@ function styleFor(c: ColorTokens): MarkdownStyle {
     h4: heading(15),
     h5: heading(15),
     h6: heading(15),
-    blockquote: { ...block, color: c.fg2, borderColor: c.lineStrong, borderWidth: 3, gapWidth: 10, marginTop: 0, marginBottom: 8 },
+    blockquote: { ...block, color: c.fg2, backgroundColor: 'transparent', borderColor: c.lineStrong, borderWidth: 3, gapWidth: 10, marginTop: 0, marginBottom: 8 },
     list: { ...block, bulletColor: c.fg3, markerColor: c.fg3, gapWidth: 8, marginLeft: 4, itemSpacing: 4, marginTop: 0, marginBottom: 8 },
     codeBlock: {
       color: c.fg,
@@ -45,6 +45,8 @@ function styleFor(c: ColorTokens): MarkdownStyle {
       color: c.fg,
       headerBackgroundColor: c.surface2,
       headerTextColor: c.fg,
+      rowEvenBackgroundColor: c.bg,
+      rowOddBackgroundColor: c.surface,
       borderColor: c.line,
       borderRadius: 10,
       cellPaddingHorizontal: 10,
