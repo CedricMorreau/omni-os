@@ -11,6 +11,7 @@
 //     --token-file PATH the API token (default <dir>/data/api-token); the token is read, never printed
 //     --channel ID      the channel the threads go in (default ios-qa, created when missing)
 //     --out PATH        write the table of title, id and event count as JSON
+//     --only TEXT       seed only the threads whose title contains TEXT (repeatable); a channel lists its five newest
 //
 // The channel goes through the API. Threads and events are written into <dir>/data/omni.db with node:sqlite while the
 // server runs (WAL, so it reads them at once): POST /threads would start a fake-claude turn and add events of its own.
@@ -37,6 +38,7 @@ const { values: opts } = parseArgs({
     channel: { type: 'string', default: 'ios-qa' },
     out: { type: 'string' },
     'no-long': { type: 'boolean', default: false },
+    only: { type: 'string', multiple: true },
   },
 });
 
@@ -88,6 +90,13 @@ if (!opts['no-long']) {
   // long-thread.ts has no imports, so Node 24.3+ and 26 load it as is.
   const { longThread } = await import(pathToFileURL(join(ROOT, 'packages/test-fixtures/long-thread.ts')).href);
   plan.push({ title: 'Long thread', events: longThread() });
+}
+
+// A channel shows its five newest threads, so a run with --only "Corpus: run-switch" reseeds just those and they land on top.
+if (opts.only?.length) {
+  const keep = plan.filter((t) => opts.only.some((o) => t.title.includes(o)));
+  if (!keep.length) die(`--only matched no thread title: ${opts.only.join(', ')}`);
+  plan.splice(0, plan.length, ...keep);
 }
 
 // ---------- write ----------

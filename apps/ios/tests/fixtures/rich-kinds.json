@@ -118,7 +118,7 @@
   },
   {
    "kind": "assistant_text",
-   "payload": "{\"text\":\"## Checkout funnel\\n\\nThe drop-off is at **shipping to payment**: it fell `26` points after the new rate table shipped.\\n\\n1. Revert the rate lookup in `snippets/shipping-rates.liquid`\\n2. Add a regression test\\n3. Re-measure for a week\\n\\n- Unordered item with a [link](https://example.com/report)\\n- Another item with *emphasis* and ~~strike~~\\n\\n```ts\\nexport function rate(weight: number): number {\\n  return weight < 1 ? 4.5 : 4.5 + (weight - 1) * 1.2;\\n}\\n```\\n\\n> Rates below one kilo are flat.\\n\\n| Region | Before | After |\\n| --- | --- | --- |\\n| US | 41% | 15% |\\n| EU | 38% | 22% |\\n\\nDelegated work lives in 3f9a1c2e-7b64-4d0f-9a31-2c5d8e4b7a10 if you want to follow it.\"}",
+   "payload": "{\"text\":\"\\n\\n## Checkout funnel\\n\\nThe drop-off is at **shipping to payment**: it fell `26` points after the new rate table shipped.\\n\\n1. Revert the rate lookup in `snippets/shipping-rates.liquid`\\n2. Add a regression test\\n3. Re-measure for a week\\n\\n- Unordered item with a [link](https://example.com/report)\\n- Another item with *emphasis* and ~~strike~~\\n\\n```ts\\nexport function rate(weight: number): number {\\n  return weight < 1 ? 4.5 : 4.5 + (weight - 1) * 1.2;\\n}\\n```\\n\\n> Rates below one kilo are flat.\\n\\n| Region | Before | After |\\n| --- | --- | --- |\\n| US | 41% | 15% |\\n| EU | 38% | 22% |\\n\\nDelegated work lives in 3f9a1c2e-7b64-4d0f-9a31-2c5d8e4b7a10 if you want to follow it.\"}",
    "created_at": "2026-11-02T09:00:24.000Z"
   },
   {
