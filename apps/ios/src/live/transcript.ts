@@ -1,4 +1,4 @@
-import type { HistoryEvent } from '@omni/client-core';
+import type { Attachment, HistoryEvent } from '@omni/client-core';
 
 /**
  * A thread's rows, folded into what the screen draws: Ben's messages, the agent's text, each tool call with its
@@ -6,7 +6,7 @@ import type { HistoryEvent } from '@omni/client-core';
  * lines, cloud agents) are skipped here, not guessed at.
  */
 export type TranscriptItem =
-  | { kind: 'user'; key: number; at: string; text: string; mode: 'steer' | 'queue' | 'interrupt' | null; dropped: boolean; clipped: boolean }
+  | { kind: 'user'; key: number; at: string; text: string; mode: 'steer' | 'queue' | 'interrupt' | null; attachments: Attachment[]; dropped: boolean; clipped: boolean }
   | { kind: 'text'; key: number; at: string; text: string; clipped: boolean }
   | { kind: 'tool'; key: number; at: string; name: string; summary: string; depth: 0 | 1; state: 'running' | 'ok' | 'error'; clipped: boolean }
   | { kind: 'error'; key: number; at: string; text: string }
@@ -40,6 +40,25 @@ function parsePayload(json: string): Record<string, unknown> | null {
   }
 }
 
+/** The files a message carried. A record the server wrote with a missing field is skipped, not guessed at. */
+export function attachmentsOf(value: unknown): Attachment[] {
+  if (!Array.isArray(value)) return [];
+  const out: Attachment[] = [];
+  for (const a of value) {
+    if (!a || typeof a !== 'object') continue;
+    const r = a as Record<string, unknown>;
+    if (typeof r.name !== 'string' || !r.name) continue;
+    out.push({
+      name: r.name,
+      path: typeof r.path === 'string' ? r.path : '',
+      size: typeof r.size === 'number' && Number.isFinite(r.size) ? r.size : 0,
+      mime: typeof r.mime === 'string' ? r.mime : 'application/octet-stream',
+      image: r.image === true,
+    });
+  }
+  return out;
+}
+
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -57,7 +76,7 @@ export function foldTranscript(events: readonly HistoryEvent[]): TranscriptItem[
         const text = str(p.text);
         if (text === null) break;
         const mode = p.mode === 'steer' || p.mode === 'queue' || p.mode === 'interrupt' ? p.mode : null;
-        items.push({ kind: 'user', key: e.id, at: e.created_at, text, mode, dropped: p.dropped === true, clipped });
+        items.push({ kind: 'user', key: e.id, at: e.created_at, text, mode, attachments: attachmentsOf(p.attachments), dropped: p.dropped === true, clipped });
         break;
       }
       case 'assistant_text': {

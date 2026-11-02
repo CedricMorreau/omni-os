@@ -1,4 +1,4 @@
-import { eventSourceTransport } from '@omni/client-core';
+import { eventSourceTransport, xhrUploadTransport } from '@omni/client-core';
 import { addNetworkStateListener } from 'expo-network';
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState } from 'react-native';
@@ -19,7 +19,7 @@ export function LiveProvider({ session, children }: { session: OmniSession; chil
   const [hub, setHub] = useState<LiveHub | null>(null);
 
   useEffect(() => {
-    const next = createLiveHub({ session, transport: eventSourceTransport(EventSource) });
+    const next = createLiveHub({ session, transport: eventSourceTransport(EventSource), upload: xhrUploadTransport() });
     setHub(next);
     const appState = AppState.addEventListener('change', (state) => next.setForeground(state === 'active'));
     const network = addNetworkStateListener((state) => {

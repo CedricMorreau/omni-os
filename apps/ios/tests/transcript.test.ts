@@ -1,7 +1,7 @@
 import type { HistoryEvent } from '@omni/client-core';
 import { describe, expect, it } from 'vitest';
 
-import { foldTranscript, toolSummary } from '../src/live/transcript';
+import { attachmentsOf, foldTranscript, toolSummary } from '../src/live/transcript';
 
 let nextId = 1;
 function ev(kind: string, payload: Record<string, unknown>, extra: Partial<HistoryEvent> = {}): HistoryEvent {
@@ -87,5 +87,24 @@ describe('toolSummary', () => {
   it('is empty when no field names what the call did', () => {
     expect(toolSummary({ count: 3 })).toBe('');
     expect(toolSummary(null)).toBe('');
+  });
+});
+
+describe('attachments on a user message', () => {
+  const photo = { name: 'a.png', path: '/data/threads/t/uploads/a.png', size: 1200, mime: 'image/png', image: true };
+
+  it('carries the files the server recorded with the message', () => {
+    const [item] = foldTranscript([ev('user', { text: 'see', attachments: [photo, { name: 'b.pdf', path: '/p/b.pdf', size: 5, mime: 'application/pdf', image: false }] })]);
+    expect(item).toMatchObject({ kind: 'user', attachments: [photo, { name: 'b.pdf', image: false, mime: 'application/pdf' }] });
+  });
+
+  it('has none for a message from before the server recorded any', () => {
+    const [item] = foldTranscript([ev('user', { text: 'plain' })]);
+    expect(item).toMatchObject({ kind: 'user', attachments: [] });
+  });
+
+  it('skips a record with no name and fills a missing field with a plain default', () => {
+    expect(attachmentsOf([{ size: 3 }, null, 'x', { name: 'n' }])).toEqual([{ name: 'n', path: '', size: 0, mime: 'application/octet-stream', image: false }]);
+    expect(attachmentsOf('nope')).toEqual([]);
   });
 });

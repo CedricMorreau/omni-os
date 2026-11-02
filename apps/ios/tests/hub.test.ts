@@ -310,3 +310,46 @@ describe('thread changes made in the app', () => {
     hub.close();
   });
 });
+
+describe('files', () => {
+  it('asks the server for its upload limit once and keeps the answer', async () => {
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/status' ? { body: { maxUploadMb: 40 } } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    expect(await hub.uploadLimitMb()).toBe(40);
+    expect(await hub.uploadLimitMb()).toBe(40);
+    expect(calls.filter((p) => p === '/api/status')).toHaveLength(1);
+    hub.close();
+  });
+
+  it('falls back to 25 MB when the server does not say, and asks again next time', async () => {
+    let ok = false;
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/status' ? (ok ? { body: { maxUploadMb: 50 } } : { status: 500, body: { error: 'down' } }) : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    expect(await hub.uploadLimitMb()).toBe(25);
+    ok = true;
+    expect(await hub.uploadLimitMb()).toBe(50);
+    expect(calls.filter((p) => p === '/api/status')).toHaveLength(2);
+    hub.close();
+  });
+
+  it('gives a file’s address with the bearer token, and the download form on request', async () => {
+    const { fetch } = fakeFetch(() => ({ body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    const view = await hub.fileSource('t1', 'my photo.png');
+    expect(view?.headers).toEqual({ Authorization: 'Bearer token' });
+    expect(view?.uri).toBe(`${BASE}/api/threads/t1/uploads/my%20photo.png`);
+    expect((await hub.fileSource('t1', 'a.pdf', { download: true }))?.uri).toBe(`${BASE}/api/threads/t1/uploads/a.pdf?download=1`);
+    hub.close();
+  });
+
+  it('gives no address without a token', async () => {
+    const { fetch } = fakeFetch(() => ({ body: [] }));
+    const hub = createLiveHub({ session: session({ token: async () => null }), transport: fakeTransport().transport, fetch });
+    await settle();
+    expect(await hub.fileSource('t1', 'a.png')).toBeNull();
+    hub.close();
+  });
+});

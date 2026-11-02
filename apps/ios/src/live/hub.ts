@@ -22,9 +22,11 @@ import {
   type SSETransport,
   type Thread,
   type ThreadOpen,
+  type UploadTransport,
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
+import { DEFAULT_MAX_MB } from '../attachments/model';
 import { latestUserRowId } from '../send/rules';
 import { createCatalog, createSenders, newRequestId, type ThreadSender } from '../send/sender';
 import { linkOf, type Link } from './connection';
@@ -90,6 +92,10 @@ export interface LiveHub {
   request<T>(call: (api: OmniApi) => Promise<T>): Promise<T>;
   /** Puts a thread row the server just returned into the open thread's view and refetches the channel lists. */
   applyThread(thread: Thread): void;
+  /** The most one file may weigh, in MB, as the server says. The default until it answers. Asked once. */
+  uploadLimitMb(): Promise<number>;
+  /** Where an uploaded file of a thread is read from, and the credentials that go with it. Null without a server. */
+  fileSource(threadId: string, name: string, options?: { download?: boolean }): Promise<FileSource | null>;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -98,10 +104,18 @@ export interface LiveHub {
   close(): void;
 }
 
+/** A request for a file: the address and the header that lets the server answer it. */
+export interface FileSource {
+  uri: string;
+  headers: { Authorization: string };
+}
+
 export interface LiveHubOptions {
   session: OmniSession;
   transport: SSETransport;
   fetch?: Fetch;
+  /** Sends multipart requests. Defaults to `fetch`, which cannot report progress. */
+  upload?: UploadTransport;
   now?: () => number;
 }
 
@@ -110,7 +124,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   const now = options.now ?? Date.now;
   const baseUrl = session.serverUrl ? parseBaseUrl(session.serverUrl) : null;
   const paired = baseUrl !== null;
-  const http: HttpClient | null = baseUrl ? createHttpClient({ baseUrl, token: () => session.token(), fetch: options.fetch }) : null;
+  const http: HttpClient | null = baseUrl ? createHttpClient({ baseUrl, token: () => session.token(), fetch: options.fetch, upload: options.upload }) : null;
   const api: OmniApi | null = http ? createOmniApi(http) : null;
 
   const channels = createStore<ChannelsState>({ channels: null, loading: false, error: null, loadedAt: null });
@@ -143,6 +157,28 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
 
   const catalog = createCatalog(() => withAuth(() => requireApi().harnesses()));
   const senders = createSenders({ api: requireApi, run: withAuth, catalog: catalog.store.get, newId: newRequestId });
+
+  let uploadLimit: Promise<number> | null = null;
+  function uploadLimitMb(): Promise<number> {
+    if (!api) return Promise.resolve(DEFAULT_MAX_MB);
+    uploadLimit ??= withAuth(() => requireApi().serverStatus()).then(
+      (status) => (typeof status.maxUploadMb === 'number' && status.maxUploadMb > 0 ? status.maxUploadMb : DEFAULT_MAX_MB),
+      () => {
+        // Not cached: the next ask tries again. The server checks the size either way.
+        uploadLimit = null;
+        return DEFAULT_MAX_MB;
+      },
+    );
+    return uploadLimit;
+  }
+
+  async function fileSource(threadId: string, name: string, opts?: { download?: boolean }): Promise<FileSource | null> {
+    if (!http) return null;
+    const token = await session.token();
+    if (!token) return null;
+    const uri = http.url(apiPath`/threads/${threadId}/uploads/${name}`, opts?.download ? { download: '1' } : undefined);
+    return { uri, headers: { Authorization: `Bearer ${token}` } };
+  }
 
   function requireHttp(): HttpClient {
     if (!http) throw new Error('Not paired');
@@ -256,9 +292,10 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       };
       return {
         state: sender.state,
-        submit: async (t, text) => thread(await sender.submit(t, text)),
+        submit: async (t, text, files) => thread(await sender.submit(t, text, files)),
         retry: async () => thread(await sender.retry()),
         edit: () => sender.edit(),
+        cancelUpload: () => sender.cancelUpload(),
         observe: (sight) => sender.observe(sight),
         stop: async () => thread(await sender.stop()),
         resume: async (uuid) => recovered(await sender.resume(uuid)),
@@ -416,6 +453,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     link,
     refreshChannels,
     request: (call) => withAuth(() => call(requireApi())),
+    uploadLimitMb,
+    fileSource,
     applyThread(thread) {
       for (const t of openThreads) t.applyThread(thread);
       void refreshChannels();
