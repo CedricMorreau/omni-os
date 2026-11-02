@@ -328,6 +328,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  'crew_prs',
+  {
+    description:
+      'The PRs opened from the branches of the threads you delegated to, and of the threads they delegated to in turn (a ' +
+      "team's members included): number, title, state (OPEN or MERGED; one closed without merging is left out), url, repo, " +
+      'and the thread and task id it came from. Read from GitHub on each call, so it is current. A crew report does not ' +
+      'say when a PR merges later; call this to check. thread_id defaults to your own thread.',
+    inputSchema: { thread_id: z.string().optional() },
+  },
+  async ({ thread_id }) => {
+    const id = thread_id ?? SELF;
+    if (!id) throw new Error('Pass a thread_id: this session is not a thread.');
+    return text((await call(`/threads/${encodeURIComponent(id)}/pr`)).crew ?? []);
+  },
+);
+
+server.registerTool(
   'continue_thread',
   {
     description:
@@ -397,6 +414,20 @@ server.registerTool(
     q.set('limit', String(limit ?? 20));
     const list = await call(`/threads?${q}`);
     return text(list.map((t: any) => ({ id: t.id, title: t.title, channel: t.channel_id, role: t.role, status: t.status, task_id: t.task_id, updated_at: t.updated_at })));
+  },
+);
+
+server.registerTool(
+  'list_pull_requests',
+  {
+    description:
+      "Pull requests across every channel's GitHub repo, open ones first, then newest first: title, repo, author, state and URL. " +
+      '`failed` names repos gh could not read.',
+  },
+  async () => {
+    const all = await call('/prs');
+    const state = (p: any) => (p.state === 'OPEN' && p.isDraft ? 'DRAFT' : p.state);
+    return text({ prs: all.prs.map((p: any) => ({ repo: p.repo, number: p.number, title: p.title, author: p.author?.login ?? null, state: state(p), url: p.url, updated_at: p.updatedAt })), failed: all.failed });
   },
 );
 

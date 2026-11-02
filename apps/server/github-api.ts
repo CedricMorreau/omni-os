@@ -1,8 +1,9 @@
-// /api/channels/:id/prs and /api/threads/:id/pr: pull requests for a channel or a thread's branch.
+// /api/prs, /api/channels/:id/prs and /api/threads/:id/pr: pull requests across channels, for a channel or a thread's branch.
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { crewPRs } from './crew-prs.ts';
 import { channels, threads } from './db.ts';
-import { branchPRs, getPR, listPRs, mergePR, threadPRMarks } from './github.ts';
+import { allPRs, branchPRs, getPR, listPRs, mergePR, threadPRMarks } from './github.ts';
 import { fetchPRImage, githubImage, proxyPRImages } from './github-images.ts';
 
 export const githubApi = new Hono();
@@ -13,6 +14,8 @@ const repoOf = (channelId: string) => {
   return ch.github_repo;
 };
 
+// Every PR across the channels with a repo set. Channels sharing a repo ask GitHub once.
+githubApi.get('/prs', async (c) => c.json(await allPRs([...new Set(channels.list().flatMap((ch) => (ch.github_repo ? [ch.github_repo] : [])))])));
 githubApi.get('/channels/:id/prs', async (c) => c.json(await listPRs(repoOf(c.req.param('id')), c.req.query('state') ?? 'open')));
 // Branch name to the open or merged PR from it, for marking threads in a list. {} with no repo or when gh fails.
 githubApi.get('/channels/:id/thread-prs', async (c) => {
@@ -48,13 +51,15 @@ githubApi.get('/channels/:id/prs/:n/image', async (c) => {
   });
 });
 // The PRs opened from a thread's branch, newest first, and `pr`, the one to show: the open one,
-// else the newest. null and [] when there is none or no repo to ask.
+// else the newest. null and [] when there is none or no repo to ask. `crew`: the PRs of the threads it delegated
+// to, at any depth, less any it lists itself (crew-prs.ts).
 githubApi.get('/threads/:id/pr', async (c) => {
   const t = threads.get(c.req.param('id'));
   if (!t) return c.json({ error: 'not found' }, 404);
   const repo = channels.get(t.channel_id)?.github_repo;
-  if (!t.branch || !repo) return c.json({ pr: null, prs: [] });
-  return c.json(await branchPRs(repo, t.branch));
+  const [own, crew] = await Promise.all([t.branch && repo ? branchPRs(repo, t.branch) : { pr: null, prs: [] }, crewPRs(t.id)]);
+  const mine = new Set(own.prs.map((p: { url: string }) => p.url));
+  return c.json({ ...own, crew: crew.filter((p) => !mine.has(p.url)) });
 });
 githubApi.post('/channels/:id/prs/:n/merge', async (c) => {
   const { method, delete_branch, confirm } = z

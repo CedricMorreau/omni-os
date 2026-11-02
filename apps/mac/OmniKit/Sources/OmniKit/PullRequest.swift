@@ -188,22 +188,105 @@ private struct MergeReply: Decodable {
   let output: String?
 }
 
-/// What GET /api/threads/:id/pr answers: every PR from the thread's branch, newest first, and the one to show.
+/// What GET /api/threads/:id/pr answers: every PR from the thread's branch, newest first, and the one to show, plus the
+/// PRs of the threads it delegated to.
 public struct ThreadPullRequests: Decodable, Hashable, Sendable {
   /// The open one, else the newest. nil when the branch has none.
   public let pr: PullRequestSummary?
   public let prs: [PullRequestSummary]
+  /// One PR per thread under this one in the delegation tree, at any depth, oldest delegation first. Never one of `prs`.
+  public let crew: [CrewPullRequest]
 
   /// No PR opened from the branch is still open, so another can be.
   public var canOpenAnother: Bool { !prs.contains { $0.isOpen } }
 
-  enum CodingKeys: String, CodingKey { case pr, prs }
+  enum CodingKeys: String, CodingKey { case pr, prs, crew }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     pr = try c.decodeIfPresent(PullRequestSummary.self, forKey: .pr)
-    // An older server answered only `pr`.
+    // An older server answered only `pr`, and without `crew`.
     prs = try c.decodeIfPresent([PullRequestSummary].self, forKey: .prs) ?? (pr.map { [$0] } ?? [])
+    crew = try c.decodeIfPresent([CrewPullRequest].self, forKey: .crew) ?? []
+  }
+}
+
+/// A PR a delegated thread's branch was opened as: `CrewPR` in apps/server/crew-prs.ts. Open or merged only.
+public struct CrewPullRequest: Decodable, Hashable, Sendable, Identifiable {
+  public let number: Int
+  public let title: String
+  /// `OPEN` or `MERGED`.
+  public let state: String
+  public let isDraft: Bool
+  public let url: String
+  public let repo: String
+  /// The delegated thread whose branch it came from.
+  public let threadID: String
+  public let threadTitle: String
+  public let channelID: String
+  public let taskID: String?
+
+  public var id: String { url }
+  public var isOpen: Bool { PullRequestState.isOpen(state) }
+  public var badge: String { state == "MERGED" ? "merged" : isDraft ? "draft" : "open" }
+  /// The task it was for, if any, and the thread it came from: "T-AB12 · Child work".
+  public var byline: String {
+    [taskID, threadTitle.isEmpty ? "Untitled" : threadTitle].compactMap { $0 }.joined(separator: " · ")
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case number, title, state, isDraft, url, repo
+    case threadID = "thread_id"
+    case threadTitle = "thread_title"
+    case channelID = "channel_id"
+    case taskID = "task_id"
+  }
+}
+
+/// GET /api/prs: the PRs of every channel with a repo set, open ones first, then newest first. `AllPRs` in
+/// apps/web/src/api.ts. `repos` is every repo asked, `failed` the ones gh could not read.
+public struct AllPullRequests: Decodable, Hashable, Sendable {
+  public let repos: [String]
+  public let prs: [Listed]
+  public let failed: [Failure]
+
+  /// A summary and the repo it is in. Reads the summary's fields directly, as in `pr.title`.
+  @dynamicMemberLookup
+  public struct Listed: Decodable, Hashable, Sendable, Identifiable {
+    public let summary: PullRequestSummary
+    public let repo: String
+
+    public var id: String { "\(repo)#\(summary.number)" }
+
+    public subscript<T>(dynamicMember path: KeyPath<PullRequestSummary, T>) -> T {
+      summary[keyPath: path]
+    }
+
+    enum CodingKeys: String, CodingKey { case repo }
+
+    public init(from decoder: any Decoder) throws {
+      summary = try PullRequestSummary(from: decoder)
+      repo = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .repo)
+    }
+  }
+
+  public struct Failure: Decodable, Hashable, Sendable {
+    public let repo: String
+    public let error: String
+  }
+
+  /// Why the list has no rows, as `allPRsEmpty` in apps/web/src/pages/AllPRs.tsx. nil when it has some.
+  public enum Empty: Sendable { case noRepos, allFailed, nothingYet }
+
+  public var empty: Empty? {
+    if !prs.isEmpty { return nil }
+    if repos.isEmpty { return .noRepos }
+    return failed.count == repos.count ? .allFailed : .nothingYet
+  }
+
+  /// The repos gh could not read, one line each.
+  public var failedText: String {
+    failed.map { "Could not read \($0.repo): \($0.error)" }.joined(separator: "\n")
   }
 }
 
@@ -226,9 +309,14 @@ extension OmniClient {
     try await send("GET", "/api/channels/\(uriComponent(channel))/thread-prs")
   }
 
-  /// The PRs opened from a thread's branch, open or not.
+  /// The PRs opened from a thread's branch, open or not, and its crew's. Answers for a thread without a branch too.
   public func pullRequests(forThread id: String) async throws(OmniAPIError) -> ThreadPullRequests {
     try await send("GET", "/api/threads/\(uriComponent(id))/pr")
+  }
+
+  /// Every channel's PRs, open first, newest first.
+  public func allPullRequests() async throws(OmniAPIError) -> AllPullRequests {
+    try await send("GET", "/api/prs")
   }
 
   public func pullRequests(in channel: String, state: PullRequestListState = .open) async throws(OmniAPIError) -> [PullRequestSummary] {

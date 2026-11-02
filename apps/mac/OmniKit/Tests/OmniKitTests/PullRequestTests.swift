@@ -111,6 +111,24 @@ import OmniKit
     #expect(t.requests[0].url?.absoluteString == "http://127.0.0.1:4799/api/channels/acme/prs?state=merged")
   }
 
+  @Test func everyChannelsPRsCarryTheirRepoAndTheReposThatFailed() async throws {
+    let t = StubTransport(body: try fixture("all-prs.json"))
+    let all = try await OmniClient(port: 4799, transport: t).allPullRequests()
+    #expect(t.requests[0].url?.path == "/api/prs")
+    #expect(all.prs.map(\.id) == ["acme/shop#7"])
+    #expect(all.prs[0].badge == "open")
+    #expect(all.failedText == "Could not read acme/gone: GraphQL: Could not resolve to a Repository with the name 'acme/gone'.")
+    #expect(all.empty == nil)
+  }
+
+  @Test func everyChannelsPRsSayWhyTheyAreEmpty() throws {
+    func empty(_ json: String) throws -> AllPullRequests.Empty? { try decode(AllPullRequests.self, json).empty }
+    #expect(try empty(#"{"repos":[],"prs":[],"failed":[]}"#) == .noRepos)
+    #expect(try empty(#"{"repos":["a/b"],"prs":[],"failed":[]}"#) == .nothingYet)
+    #expect(try empty(#"{"repos":["a/b"],"prs":[],"failed":[{"repo":"a/b","error":"HTTP 404"}]}"#) == .allFailed)
+    #expect(try empty(#"{"repos":["a/b","c/d"],"prs":[],"failed":[{"repo":"a/b","error":"HTTP 404"}]}"#) == .nothingYet)
+  }
+
   @Test func threadMarksMapABranchToItsPR() async throws {
     let t = StubTransport(body: #"{"omni/a":{"number":7,"state":"MERGED","isDraft":false,"url":"u"},"omni/b":{"number":8,"state":"OPEN","isDraft":true,"url":"v"}}"#)
     let marks = try await OmniClient(port: 4799, transport: t).threadPullRequests(in: "acme")
@@ -125,6 +143,8 @@ import OmniKit
     let r = try await OmniClient(port: 4799, transport: t).pullRequests(forThread: "t1")
     #expect(r.pr == nil)
     #expect(r.prs.isEmpty)
+    // A server from before crew PRs sends no `crew`.
+    #expect(r.crew.isEmpty)
     #expect(r.canOpenAnother)
     #expect(t.requests[0].url?.path == "/api/threads/t1/pr")
   }
@@ -140,6 +160,18 @@ import OmniKit
     #expect(old.prs.map(\.number) == [5])
     #expect(old.prs[0].badge == "merged")
     #expect(old.canOpenAnother)
+  }
+
+  @Test func threadPRsListTheCrewsPRsEvenWithoutABranch() async throws {
+    let t = StubTransport(body: try fixture("crew-prs.json"))
+    let r = try await OmniClient(port: 4799, transport: t).pullRequests(forThread: "conductor")
+    #expect(r.pr == nil && r.prs.isEmpty)
+    #expect(r.crew.map(\.number) == [4, 9])
+    #expect(r.crew.map(\.badge) == ["open", "merged"])
+    #expect(r.crew.map(\.isOpen) == [true, false])
+    #expect(r.crew[0].channelID == "shop")
+    #expect(r.crew[0].threadID == "c5d1e2f3-0000-4000-8000-000000000004")
+    #expect(r.crew.map(\.byline) == ["T-AB12 · Add the size guide", "Wire the drawer into the app"])
   }
 
   @Test func badgeSaysWhetherItMerged() throws {

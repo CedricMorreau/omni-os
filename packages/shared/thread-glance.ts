@@ -65,3 +65,10 @@ export function checkTone(state: string): 'done' | 'needs' | 'running' {
   if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(state)) return 'needs';
   return 'running';
 }
+
+/** What the PRs from a thread's delegated threads add up to, for a tab title or a row: "2 open, 1 merged". */
+export function crewLine(crew: { state?: string }[]): { text: string; tone: PRTone } {
+  const open = crew.filter((p) => p.state === 'OPEN').length;
+  const merged = crew.length - open;
+  return { text: [open && `${open} open`, merged && `${merged} merged`].filter(Boolean).join(', '), tone: open ? 'live' : 'done' };
+}
