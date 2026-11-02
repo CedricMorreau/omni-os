@@ -12,7 +12,7 @@ import type { Run } from '@omni/shared/run-switch.ts';
 
 import { failureOf, SIGNED_OUT_ERROR } from '../failure';
 import { newRequestId } from '../send/sender';
-import { runSheetModel, type RunSheetModel, type RunThread } from '../thread/run-model';
+import { runChipLabel, runSheetModel, type RunSheetModel, type RunThread } from '../thread/run-model';
 
 export type ContinueApi = Pick<OmniApi, 'thread' | 'continuePreview' | 'continueThread' | 'closeTerminal'>;
 type Dispatch = (action: ContinueAction) => void;
@@ -99,6 +99,11 @@ function firstRun(offered: readonly HarnessInfo[]): Run | null {
   const h = offered[0];
   const m = h?.models.find((x) => x.default) ?? h?.models[0];
   return h && m ? { harness: h.id, model: m.id, effort: '' } : null;
+}
+
+/** "Codex · GPT" style label for the run on the Continue on row, and the harness under it. */
+export function runLabel(run: Run, offered: readonly HarnessInfo[]): { title: string; harness: string } {
+  return { title: runChipLabel(asRunThread(run), [...offered]) || run.model, harness: offered.find((h) => h.id === run.harness)?.name ?? run.harness };
 }
 
 /** The picker's rows for the harnesses Continue offers, with the picked run checked. Null when there is nothing to list. */

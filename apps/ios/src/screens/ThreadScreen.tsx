@@ -22,6 +22,7 @@ import { useHarnessCatalog } from '../thread/hooks';
 import { targetOfThread } from '../thread/target';
 
 const FLASH_MS = 3000;
+const FORK_FALLBACK_MS = 800;
 
 export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   const { id } = route.params;
@@ -49,6 +50,21 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
       headerRight: hasThread ? () => <HeaderButton label="•••" accessibilityLabel="Thread menu" onPress={() => setMenuOpen(true)} /> : undefined,
     });
   }, [navigation, title, hasThread]);
+
+  // Fork opens a screen, and a screen cannot present while the menu sheet is still dismissing. The menu reports that it is
+  // gone through onClose (the sheet's onDismiss), and a timer covers a dismissal that never reports.
+  const forking = useRef(false);
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    if (!forking.current) return;
+    forking.current = false;
+    navigation.navigate('Continue', { id });
+  }, [navigation, id]);
+  const fork = useCallback(() => {
+    forking.current = true;
+    setMenuOpen(false);
+    setTimeout(closeMenu, FORK_FALLBACK_MS);
+  }, [closeMenu]);
 
   const say = useCallback((message: string) => {
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -78,7 +94,7 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
           <ThreadComposer live={live} thread={view.thread} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} />
         </ThreadFooter>
       ) : null}
-      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={() => setMenuOpen(false)} onChanged={say} machine={machine} />
+      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={closeMenu} onChanged={say} machine={machine} onFork={fork} />
       <TakeoverSheet
         visible={machine.ui.asking}
         takeover={takeoverShown(view.takeover, view.handoff)}

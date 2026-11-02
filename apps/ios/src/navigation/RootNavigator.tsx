@@ -6,6 +6,7 @@ import { usePairing } from '../pairing/PairingProvider';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
+import { ContinueScreen } from '../screens/ContinueScreen';
 import { NewThreadScreen } from '../screens/NewThreadScreen';
 import { ServersScreen } from '../screens/ServersScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
@@ -61,6 +62,7 @@ export function RootNavigator() {
           />
           <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
           <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="Continue" component={ContinueScreen} options={{ title: 'Continue with another harness', presentation: 'modal' }} />
           <Stack.Screen
             name="Servers"
             component={ServersScreen}
