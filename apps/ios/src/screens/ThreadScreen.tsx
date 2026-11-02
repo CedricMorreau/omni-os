@@ -1,3 +1,4 @@
+import { takeoverShown } from '@omni/shared/thread-machine.ts';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet } from 'react-native';
@@ -5,13 +6,16 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { HeaderButton } from '../components/HeaderButton';
 import { Notice } from '../components/Notice';
+import { HandoffBanner } from '../components/thread/HandoffBanner';
 import { RunSheet } from '../components/thread/RunSheet';
 import { ThreadBody } from '../components/thread/ThreadBody';
 import { ThreadComposer } from '../components/thread/ThreadComposer';
 import { ThreadFooter } from '../components/thread/ThreadFooter';
+import { TakeoverSheet } from '../components/thread/TakeoverSheet';
 import { ThreadHeader } from '../components/thread/ThreadHeader';
 import { ThreadMenuSheet } from '../components/thread/ThreadMenuSheet';
 import { useChannels, useThreadLive, useThreadView } from '../live/react';
+import { useThreadMachine } from '../machine/hooks';
 import type { RootScreenProps } from '../navigation/types';
 import { useOmniTheme } from '../theme';
 import { useHarnessCatalog } from '../thread/hooks';
@@ -32,6 +36,7 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const thread = view?.thread ?? null;
+  const machine = useThreadMachine(view);
   const catalog = useHarnessCatalog(thread?.channel_id, thread !== null);
   const target = useMemo(() => (thread ? targetOfThread(thread) : null), [thread]);
   const folders = useMemo(() => channels?.find((c) => c.id === thread?.channel_id)?.folders ?? [], [channels, thread?.channel_id]);
@@ -66,13 +71,22 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   return (
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={[styles.screen, { backgroundColor: colors.bg }]}>
       <ThreadHeader view={view} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} flash={flash} />
+      <HandoffBanner view={view} machine={machine} />
       <ThreadBody view={view} live={live} />
       {live && view.thread ? (
         <ThreadFooter>
           <ThreadComposer live={live} thread={view.thread} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} />
         </ThreadFooter>
       ) : null}
-      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={() => setMenuOpen(false)} onChanged={say} />
+      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={() => setMenuOpen(false)} onChanged={say} machine={machine} />
+      <TakeoverSheet
+        visible={machine.ui.asking}
+        takeover={takeoverShown(view.takeover, view.handoff)}
+        busy={machine.ui.sending === 'takeOver'}
+        error={machine.takeOverError}
+        onConfirm={() => void machine.takeOver()}
+        onCancel={machine.closeAsk}
+      />
       <RunSheet
         visible={runOpen}
         onClose={() => setRunOpen(false)}

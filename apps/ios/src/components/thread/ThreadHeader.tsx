@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { HarnessInfo, ThreadStatus } from '@omni/client-core';
+import { blockedNote } from '@omni/shared/thread-machine.ts';
 
 import type { ThreadView } from '../../live/hub';
 import { fontSize, lineHeight, radius, space, useOmniTheme } from '../../theme';
@@ -20,6 +21,8 @@ interface ThreadHeaderProps {
 export function ThreadHeader({ view, harnesses, onOpenRun, flash }: ThreadHeaderProps) {
   const { colors } = useOmniTheme();
   const { thread } = view;
+  // The handoff card and the Take over note say it when they can, so the same sentence is not shown twice.
+  const blocked = blockedNote(view.blocked, view.handoff, thread?.status, view.takeover);
   const statusLine = [threadStatusLabel(thread?.status), view.channel?.name, thread?.pinned_at ? 'Pinned' : null].filter(Boolean).join(' · ');
   return (
     <>
@@ -38,9 +41,9 @@ export function ThreadHeader({ view, harnesses, onOpenRun, flash }: ThreadHeader
           <RunChip thread={thread} harnesses={harnesses} onPress={onOpenRun} />
         </View>
       ) : null}
-      {view.blocked ? (
+      {blocked ? (
         <View style={[styles.blocked, { borderColor: colors.lineStrong }]}>
-          <Text style={[styles.blockedText, { color: colors.fg }]}>{view.blocked}</Text>
+          <Text style={[styles.blockedText, { color: colors.fg }]}>{blocked}</Text>
         </View>
       ) : null}
     </>

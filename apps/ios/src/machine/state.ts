@@ -1,4 +1,4 @@
-import { takeoverNote } from '@omni/shared/handoff.ts';
+import { takeoverNote, type HandoffView } from '@omni/shared/handoff.ts';
 import { HERE, type ThreadMachine } from '@omni/shared/thread-machine.ts';
 
 import type { FailureKind } from '../failure';
@@ -29,6 +29,9 @@ export const machineNote = (m: ThreadMachine) => (m.kind === 'held' ? takeoverNo
 
 /** The thread menu row: "Runs on Studio". */
 export const runsOnLabel = (m: ThreadMachine) => `Runs on ${m.rows.find((r) => r.value === m.value)?.label ?? 'another machine'}`;
+
+/** A Take over that waits for the other machine is cancelled as a request, a handoff the other machine has not picked up as a handoff. */
+export const cancelLabel = (h: Pick<HandoffView, 'state'>) => (h.state.phase === 'requested' ? 'Cancel request' : 'Cancel handoff');
 
 export interface MachineError {
   command: CommandType;

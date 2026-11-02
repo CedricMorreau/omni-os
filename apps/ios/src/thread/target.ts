@@ -84,12 +84,8 @@ export function folderChoices(folders: readonly Pick<Folder, 'id' | 'parent_id' 
   return out;
 }
 
-/**
- * The thread's menu: the Organize actions from the list every client shares (`@omni/shared/thread-actions.ts`). Fork,
- * reference and Grok Bot wait for the flows they open, so they are left out here rather than shown dead.
- */
-export function organizeItems(target: ThreadTarget): ThreadMenuItem[] {
-  const groups = threadMenu({
+function menuFacts(target: ThreadTarget) {
+  return {
     row: true,
     archived: target.archived,
     pinned: target.pinned,
@@ -98,6 +94,18 @@ export function organizeItems(target: ThreadTarget): ThreadMenuItem[] {
     child: target.child,
     harness: target.harness,
     grokBot: false,
-  });
-  return groups.find((g) => g.id === 'organize')?.items ?? [];
+  };
+}
+
+/**
+ * The thread's menu: the Organize actions from the list every client shares (`@omni/shared/thread-actions.ts`).
+ * Reference and Grok Bot wait for the flows they open, so they are left out here rather than shown dead.
+ */
+export function organizeItems(target: ThreadTarget): ThreadMenuItem[] {
+  return threadMenu(menuFacts(target)).find((g) => g.id === 'organize')?.items ?? [];
+}
+
+/** Fork thread, from the same list: its `off` says why a harness whose files are not on this machine cannot be forked. */
+export function forkItem(target: ThreadTarget): ThreadMenuItem | null {
+  return threadMenu(menuFacts(target)).find((g) => g.id === 'continue')?.items.find((i) => i.id === 'fork') ?? null;
 }

@@ -2,8 +2,8 @@ import { HERE } from '@omni/shared/thread-machine.ts';
 import { describe, expect, it } from 'vitest';
 
 import { machineOf } from '../../src/machine/facts';
-import { decidePick, errorFor, HOLDS_NOTE, IDLE, machineNote, machineReducer, runsOnLabel, type MachineUi } from '../../src/machine/state';
-import { device, sync, takeover } from './fixtures';
+import { cancelLabel, decidePick, errorFor, HOLDS_NOTE, IDLE, machineNote, machineReducer, runsOnLabel, type MachineUi } from '../../src/machine/state';
+import { device, handoff, sync, takeover } from './fixtures';
 
 const facts = { sync: sync(), devices: [device(), device({ id: 'm3', name: 'Mini', reachability: 'offline' })], hereName: 'Laptop' };
 const holds = machineOf(facts, { status: 'done', blocked: null, handoff: null, takeover: null });
@@ -43,6 +43,14 @@ describe('labels', () => {
     expect(HOLDS_NOTE).toBe('Pick another machine to hand the thread off. Replies and Stop follow it there.');
     expect(machineNote(held!)).toBe('Last ran on Studio.');
     expect(machineNote(heldRefused!)).toBe('This thread is running on Studio.');
+  });
+});
+
+describe('cancelLabel', () => {
+  it('calls a waiting Take over a request and any other handoff a handoff', () => {
+    expect(cancelLabel(handoff({ state: { phase: 'requested', stale: false } }))).toBe('Cancel request');
+    expect(cancelLabel(handoff({ state: { phase: 'offered', stale: true } }))).toBe('Cancel handoff');
+    expect(cancelLabel(handoff({ state: { phase: 'preparing', step: 'packing' } }))).toBe('Cancel handoff');
   });
 });
 

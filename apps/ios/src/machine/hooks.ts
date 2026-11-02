@@ -1,4 +1,4 @@
-import { mayHandOff, type Holding, type ThreadMachine } from '@omni/shared/thread-machine.ts';
+import { mayHandOff, takeoverShown, type Holding, type ThreadMachine } from '@omni/shared/thread-machine.ts';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import type { ThreadView } from '../live/hub';
@@ -62,6 +62,12 @@ export function useThreadMachine(view: ThreadView | null): ThreadMachineControl 
   const machine = useMemo(() => (held ? machineOf(facts, held) : null), [facts, held]);
   const [ui, dispatch] = useReducer(machineReducer, IDLE);
   const busy = useRef(false);
+  const canAsk = takeoverShown(takeover, handoff) !== null;
+  const asking = ui.asking;
+  useEffect(() => {
+    // The thread moved on while the confirm was open (the other machine handed it over): it must not come back later.
+    if (asking && !canAsk) dispatch({ type: 'closeAsk' });
+  }, [asking, canAsk]);
 
   const run = useCallback(
     async (command: MachineCommand) => {
