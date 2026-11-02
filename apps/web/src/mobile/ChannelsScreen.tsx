@@ -22,6 +22,8 @@ const GROUPS: { label: string; kinds: string[] }[] = [
 ];
 const KIND_LABEL: Record<string, string> = { client: 'Client', internal: 'Internal', personal: 'Personal', system: 'System' };
 
+export const extraRepoLabels = (ch: Pick<ChannelWithRunning, 'extra_repos'> | undefined) => (ch?.extra_repos ?? []).map((r) => r.github || r.path);
+
 function Counts({ needs, running }: { needs: number; running: number }) {
   return (
     <>
@@ -223,7 +225,7 @@ export function ChannelScreen({ id }: { id: string }) {
       <MoHeader
         onBack={shell.back}
         title={name}
-        sub={[KIND_LABEL[ch?.kind ?? ''], ch?.store_domain, ch?.github_repo].filter(Boolean).join(' · ') || undefined}
+        sub={[KIND_LABEL[ch?.kind ?? ''], ch?.store_domain, ch?.github_repo, ...extraRepoLabels(ch)].filter(Boolean).join(' · ') || undefined}
         right={<MoRound icon="more" label="Channel settings" onClick={() => shell.open(href.settings(id))} />}
       />
       <MoScroll>

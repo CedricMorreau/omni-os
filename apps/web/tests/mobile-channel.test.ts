@@ -31,7 +31,7 @@ vi.mock('../src/components/ThreadList.tsx', () => ({ useLiveThreads: () => ({ da
 vi.mock('../src/folders.tsx', () => ({ useFolders: () => ({ toggle: vi.fn() }) }));
 vi.mock('../src/mobile/shell.tsx', () => ({ useShell: () => ({ open: vi.fn(), back: vi.fn(), sheet: vi.fn() }) }));
 
-import { ChannelScreen } from '../src/mobile/ChannelsScreen.tsx';
+import { ChannelScreen, extraRepoLabels } from '../src/mobile/ChannelsScreen.tsx';
 
 const fixtures = resolve(import.meta.dirname, '../../mac/OmniKit/Tests/OmniKitTests/Fixtures');
 const base = (JSON.parse(readFileSync(resolve(fixtures, 'recent.json'), 'utf8')) as Thread[])[0];
@@ -106,5 +106,20 @@ describe('phone channel folders', () => {
     expect(active).not.toContain('Thread team');
     expect(badge(active, 'Active')).toBe(0);
     expect(render('recent')).toContain('Thread finished');
+  });
+});
+
+describe('phone channel extra repositories', () => {
+  it('names each extra repository by its GitHub repo, else its path', () => {
+    expect(extraRepoLabels({ extra_repos: [{ path: '/tmp/x/acme-back', github: 'acme/acme-back' }, { path: '/tmp/x/acme-docs', github: null }] })).toEqual([
+      'acme/acme-back',
+      '/tmp/x/acme-docs',
+    ]);
+  });
+
+  it('adds nothing when the channel has no extra repositories', () => {
+    expect(extraRepoLabels({ extra_repos: [] })).toEqual([]);
+    expect(extraRepoLabels({})).toEqual([]);
+    expect(extraRepoLabels(undefined)).toEqual([]);
   });
 });

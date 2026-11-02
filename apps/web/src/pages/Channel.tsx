@@ -107,6 +107,23 @@ function MissingChannel({ id }: { id: string }) {
   );
 }
 
+function RepoPills({ github, path, linkCls }: { github: string | null; path: string | null; linkCls: string }) {
+  return (
+    <>
+      {github && (
+        <a href={`https://github.com/${github}`} target="_blank" rel="noopener noreferrer" className={linkCls}>
+          <Icon name="branch" size={13} className="text-fg-3" /> <span className="truncate">{github}</span>
+        </a>
+      )}
+      {path && (
+        <span className="inline-flex h-7 max-w-full items-center rounded-full px-2.5 font-mono text-[11px] text-fg-4 shadow-[inset_0_0_0_1px_var(--line)]" title={path}>
+          <span className="truncate">{path}</span>
+        </span>
+      )}
+    </>
+  );
+}
+
 export function ChannelPage({ id, tab, pr }: { id: string; tab: ChannelTab; pr?: number }) {
   const { channel, channelsLoaded } = useApp();
   const ch = channel(id);
@@ -123,6 +140,7 @@ export function ChannelPage({ id, tab, pr }: { id: string; tab: ChannelTab; pr?:
     { id: 'settings' as const, label: 'Settings', href: href.settings(id) },
   ];
 
+  const extraRepos = ch.extra_repos ?? [];
   const linkCls = 'hov inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-surface px-2.5 text-[12px] text-fg-2 [--hov:var(--surface-2)]';
 
   return (
@@ -146,23 +164,17 @@ export function ChannelPage({ id, tab, pr }: { id: string; tab: ChannelTab; pr?:
             </h1>
           </div>
         </div>
-        {(ch.store_domain || ch.github_repo || ch.repo_path || (ch.notes && isConductor)) && (
+        {(ch.store_domain || ch.github_repo || ch.repo_path || extraRepos.length > 0 || (ch.notes && isConductor)) && (
           <div className="mt-4 flex flex-wrap items-center gap-1.5">
             {ch.store_domain && (
               <a href={`https://${ch.store_domain}/admin`} target="_blank" rel="noopener noreferrer" className={linkCls}>
                 <Icon name="globe" size={13} className="text-fg-3" /> <span className="truncate">{ch.store_domain}</span>
               </a>
             )}
-            {ch.github_repo && (
-              <a href={`https://github.com/${ch.github_repo}`} target="_blank" rel="noopener noreferrer" className={linkCls}>
-                <Icon name="branch" size={13} className="text-fg-3" /> <span className="truncate">{ch.github_repo}</span>
-              </a>
-            )}
-            {ch.repo_path && (
-              <span className="inline-flex h-7 max-w-full items-center rounded-full px-2.5 font-mono text-[11px] text-fg-4 shadow-[inset_0_0_0_1px_var(--line)]" title={ch.repo_path}>
-                <span className="truncate">{ch.repo_path}</span>
-              </span>
-            )}
+            <RepoPills github={ch.github_repo} path={ch.repo_path} linkCls={linkCls} />
+            {extraRepos.map((r, i) => (
+              <RepoPills key={`${i}-${r.path}`} github={r.github} path={r.path} linkCls={linkCls} />
+            ))}
             {ch.notes && isConductor && <span className="truncate px-1 text-[12.5px] text-fg-3">{ch.notes}</span>}
           </div>
         )}

@@ -24,7 +24,11 @@ export type CommandList = HarnessCommands & { recent?: string[] };
 
 /** A channel as the API sends it: the design system's file stays on the server, only its name and size come. */
 export type { ChannelLink };
-export type Channel = Omit<ChannelRow, 'design_system' | 'default_base' | 'links'> & { design_system_size: number; links: ChannelLink[] };
+export interface ExtraRepo {
+  path: string;
+  github: string | null;
+}
+export type Channel = Omit<ChannelRow, 'design_system' | 'default_base' | 'links' | 'extra_repos'> & { design_system_size: number; links: ChannelLink[]; extra_repos?: ExtraRepo[] };
 
 /** Just enough of a thread to list it under its channel in the sidebar. */
 export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at'> &
