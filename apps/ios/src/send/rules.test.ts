@@ -1,23 +1,7 @@
-import type { PendingMsg } from '@omni/client-core';
 import { describe, expect, it } from 'vitest';
 
-import { canSendAgain, latestUserRowId, recoveredCount } from './rules';
+import { latestUserRowId } from './rules';
 
-const held = (delivery: PendingMsg['delivery'], uuid = 'u'): PendingMsg => ({ uuid, kind: 'user', text: 'hi', mode: 'steer', state: 'held', delivery });
-
-describe('what a held message can do', () => {
-  it('sends an uncertain message again only when Ben asks, as on the web', () => {
-    expect(canSendAgain(held('uncertain'))).toBe(true);
-    expect(canSendAgain(held('recovered'))).toBe(false);
-    expect(canSendAgain(held('sent'))).toBe(false);
-    expect(canSendAgain(held(undefined))).toBe(false);
-  });
-
-  it('counts the recovered messages Resume would send', () => {
-    expect(recoveredCount([held('recovered', 'a'), held('uncertain', 'b'), held('recovered', 'c'), held('sent', 'd')])).toBe(2);
-    expect(recoveredCount([])).toBe(0);
-  });
-});
 
 describe('latestUserRowId', () => {
   it('is the newest user row, whatever order the rows come in', () => {

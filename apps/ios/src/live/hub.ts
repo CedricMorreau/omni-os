@@ -107,7 +107,7 @@ export interface ThreadLive {
   loadOutput(eventId: number, offset: number): Promise<OutputChunk>;
   /** False while Ben reads older rows, so a new row does not trim what is on screen. */
   setFollowing(following: boolean): void;
-  /** What the composer does for this thread: send, retry, stop and the held-message actions. Each answer lands in `view`. */
+  /** What the composer does for this thread: send, retry and stop. Each answer lands in `view`. */
   readonly send: ThreadSender;
   /** The harness catalog behind steer-or-queue. Null until it loads. */
   readonly catalog: Store<readonly HarnessInfo[] | null>;
@@ -364,10 +364,6 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         if (t && !this.closed) this.patch({ thread: t });
         return t;
       };
-      const recovered = (r: Recovered | null) => {
-        if (r && !this.closed) this.patch({ thread: r.thread, pending: r.pending });
-        return r;
-      };
       return {
         state: sender.state,
         submit: async (t, text, files) => thread(await sender.submit(t, text, files)),
@@ -376,8 +372,6 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         cancelUpload: () => sender.cancelUpload(),
         observe: (sight) => sender.observe(sight),
         stop: async () => thread(await sender.stop()),
-        resume: async (uuid) => recovered(await sender.resume(uuid)),
-        discard: async (uuid) => recovered(await sender.discard(uuid)),
       };
     }
 

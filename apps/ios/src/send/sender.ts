@@ -1,4 +1,4 @@
-import type { HarnessInfo, OmniApi, PendingMsg, Recovered, Thread } from '@omni/client-core';
+import type { HarnessInfo, OmniApi, PendingMsg, Thread } from '@omni/client-core';
 
 import { toUploadFiles, type Staged } from '../attachments/model';
 import { createStore, type Store } from '../live/store';
@@ -8,18 +8,13 @@ import { sendModeFor } from './rules';
 export interface SendState {
   outbox: Outbox;
   stopping: boolean;
-  /** The held-message action under way, as `again:<uuid>`, `discard:<uuid>` or `resume`. Null when none is. */
-  heldBusy: string | null;
-  /** Why the last Stop or held-message action failed. The next action clears it. */
+  /** Why the last Stop failed. The next action clears it. */
   notice: string | null;
   /** How much of the files in the slot has gone out, 0 to 1. Null when none are going or the platform cannot say. */
   progress: number | null;
 }
 
-/** The `heldBusy` key while Resume runs. */
-export const RESUME_ALL = 'resume';
-
-export const IDLE_SEND: SendState = { outbox: EMPTY_OUTBOX, stopping: false, heldBusy: null, notice: null, progress: null };
+export const IDLE_SEND: SendState = { outbox: EMPTY_OUTBOX, stopping: false, notice: null, progress: null };
 
 export interface SenderDeps {
   threadId: string;
@@ -56,9 +51,6 @@ export interface ThreadSender {
    * list of accepted requests. Fed by the stream, and needs no reply.
    */
   observe(sight: FeedSight): void;
-  /** Sends held messages. Named, an uncertain one goes too. Without a name, every recovered one goes, in order. */
-  resume(uuid?: string): Promise<Recovered | null>;
-  discard(uuid: string): Promise<Recovered | null>;
 }
 
 export function createSender(deps: SenderDeps): ThreadSender {
@@ -97,19 +89,6 @@ export function createSender(deps: SenderDeps): ThreadSender {
         uploading = null;
         patch({ progress: null });
       }
-    }
-  }
-
-  async function held<T>(key: string, call: () => Promise<T>): Promise<T | null> {
-    if (state.get().heldBusy) return null;
-    patch({ heldBusy: key, notice: null });
-    try {
-      return await call();
-    } catch (e) {
-      patch({ notice: classifyFailure(e).message });
-      return null;
-    } finally {
-      patch({ heldBusy: null });
     }
   }
 
@@ -178,8 +157,6 @@ export function createSender(deps: SenderDeps): ThreadSender {
         patch({ stopping: false });
       }
     },
-    resume: (uuid) => held(uuid ? `again:${uuid}` : RESUME_ALL, () => deps.run(() => deps.api().resumeRequests(deps.threadId, uuid ? [uuid] : undefined))),
-    discard: (uuid) => held(`discard:${uuid}`, () => deps.run(() => deps.api().discardRequests(deps.threadId, [uuid]))),
   };
 }
 

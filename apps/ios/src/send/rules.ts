@@ -36,27 +36,9 @@ export function sendLabel(thread: SteerFacts, catalog: readonly HarnessInfo[] | 
   return steers(thread, catalog) ? 'Send to the running turn' : 'Send after this turn';
 }
 
-/** Accepted before a restart and waiting on Ben: `recovered` never reached a harness, `uncertain` may have. */
-export const isParked = (m: PendingMsg) => m.delivery === 'recovered' || m.delivery === 'uncertain';
-
-/**
- * A parked message Ben can send again by itself. An uncertain one may already have reached the agent, so only Ben
- * decides to repeat it. A recovered one never did: Resume sends all of those, in the order they arrived.
- */
-export const canSendAgain = (m: PendingMsg) => m.delivery === 'uncertain';
-
-export const recoveredCount = (pending: readonly PendingMsg[]) => pending.filter((m) => m.delivery === 'recovered').length;
-
-/** The line over a pending message. */
-export function pendingLabel(m: PendingMsg, blocked: boolean): string {
-  if (m.kind === 'crew_report') {
-    const from = `Crew report${m.task_id ? ` ${m.task_id}` : ''}${m.role ? ` from ${m.role}` : ''}`;
-    if (m.delivery === 'recovered') return `${from}, held for Resume`;
-    if (m.delivery === 'uncertain') return `${from}, may have reached the agent before the restart`;
-    return from;
-  }
-  if (m.delivery === 'recovered') return blocked ? 'Waiting for a session that is up to date' : 'Held after a restart';
-  if (m.delivery === 'uncertain') return 'May have reached the agent before the restart';
+/** The line over a pending message the agent has. Parked ones are the Resume card's (needs/parked.ts). */
+export function pendingLabel(m: PendingMsg): string {
+  if (m.kind === 'crew_report') return `Crew report${m.task_id ? ` ${m.task_id}` : ''}${m.role ? ` from ${m.role}` : ''}`;
   if (m.state === 'waiting') return 'Waiting for a free slot';
   if (m.state === 'held') return 'Queued, runs after this turn';
   return m.mode === 'interrupt' ? 'Interrupting, runs next' : 'Sent, the agent reads it next';

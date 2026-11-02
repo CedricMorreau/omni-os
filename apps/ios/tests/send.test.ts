@@ -289,34 +289,6 @@ describe('stop', () => {
   });
 });
 
-describe('held messages', () => {
-  const held = { uuid: 'u1', kind: 'user', text: 'did this land?', mode: 'steer', state: 'sent', delivery: 'uncertain', request_id: 'r1' };
-
-  it('sends one again by naming it, and shows the pending list it answers with', async () => {
-    const { live, posts, hub } = await opened((req) => (req.path.endsWith('/requests/resume') ? { body: { thread: thread({ status: 'running' }), pending: [] } } : undefined));
-    await live.send.resume(held.uuid);
-    expect(posts()[0]).toMatchObject({ path: '/api/threads/t1/requests/resume', body: { ids: ['u1'] } });
-    expect(live.view.get()).toMatchObject({ pending: [], thread: { status: 'running' } });
-    hub.close();
-  });
-
-  it('discards one and shows what is left', async () => {
-    const left = { ...held, uuid: 'u2' };
-    const { live, posts, hub } = await opened((req) => (req.path.endsWith('/requests/discard') ? { body: { thread: thread(), pending: [left] } } : undefined));
-    await live.send.discard(held.uuid);
-    expect(posts()[0]).toMatchObject({ path: '/api/threads/t1/requests/discard', body: { ids: ['u1'] } });
-    expect(live.view.get().pending.map((p) => p.uuid)).toEqual(['u2']);
-    hub.close();
-  });
-
-  it('keeps the list and says why when the server refuses', async () => {
-    const { live, hub } = await opened((req) => (req.path.endsWith('/requests/resume') ? { status: 409, body: { error: 'Some of these messages are no longer waiting to be resumed.' } } : undefined));
-    await live.send.resume(held.uuid);
-    expect(live.send.state.get()).toMatchObject({ heldBusy: null, notice: 'Some of these messages are no longer waiting to be resumed.' });
-    hub.close();
-  });
-});
-
 describe('a message that landed while its answer was lost', () => {
   const ledger = (requestId: string) => ({ body: [{ id: 'm1', request_id: requestId, state: 'delivered' }] });
   const asked = (sent: Sent[]) => sent.filter((s) => s.path === '/api/threads/t1/requests');
@@ -419,16 +391,6 @@ describe('a message that landed while its answer was lost', () => {
     await sending;
     expect(live.send.state.get().outbox.item).toBeNull();
     expect(asked(sent)).toHaveLength(1);
-    hub.close();
-  });
-});
-
-describe('held messages offer what each can safely do', () => {
-  it('sends all recovered messages with Resume, naming none', async () => {
-    const { live, posts, hub } = await opened((req) => (req.path.endsWith('/requests/resume') ? { body: { thread: thread(), pending: [] } } : undefined));
-    await live.send.resume();
-    expect(posts()[0]).toMatchObject({ path: '/api/threads/t1/requests/resume', body: {} });
-    expect(live.send.state.get().heldBusy).toBeNull();
     hub.close();
   });
 });
