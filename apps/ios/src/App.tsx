@@ -28,14 +28,14 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <KeyboardProvider>
-        <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
-        <PairingProvider>
-          <NavigationContainer theme={navTheme}>
-            <ActiveSessionProvider>
-              <RootNavigator />
-            </ActiveSessionProvider>
-          </NavigationContainer>
-        </PairingProvider>
+          <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+          <PairingProvider>
+            <NavigationContainer theme={navTheme}>
+              <ActiveSessionProvider>
+                <RootNavigator />
+              </ActiveSessionProvider>
+            </NavigationContainer>
+          </PairingProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

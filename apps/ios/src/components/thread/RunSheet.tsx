@@ -6,8 +6,8 @@ import { useRunSwitch, type HarnessCatalog } from '../../thread/hooks';
 import { runSheetModel, type RunThread } from '../../thread/run-model';
 import { Button } from '../../ui/Button';
 import { Callout } from '../../ui/Callout';
-import { OptionGroup, OptionRow } from '../../ui/OptionRow';
 import { Sheet } from '../../ui/Sheet';
+import { RunOptions } from './RunOptions';
 
 interface RunSheetProps {
   visible: boolean;
@@ -47,39 +47,14 @@ export function RunSheet({ visible, onClose, threadId, thread, busy, catalog }: 
           </Callout>
         ) : null}
         {!model && !catalog.error ? <ActivityIndicator color={colors.fg3} style={styles.loading} /> : null}
-        {model?.effortTitle ? (
-          <OptionGroup title={model.effortTitle}>
-            {model.efforts.map((e, i) => (
-              <OptionRow
-                key={e.value || 'default'}
-                label={e.label}
-                selected={e.selected}
-                disabled={switching}
-                onPress={() => void pick({ effort: e.value })}
-                last={i === model.efforts.length - 1}
-              />
-            ))}
-          </OptionGroup>
+        {model ? (
+          <RunOptions
+            model={model}
+            disabled={switching}
+            onEffort={(effort) => void pick({ effort })}
+            onModel={(harness, id) => void pick({ harness, model: id })}
+          />
         ) : null}
-        {model?.harnesses.map((h) => (
-          <OptionGroup key={h.id} title={h.name} trailing={h.plan}>
-            {h.available ? (
-              h.models.map((m, i) => (
-                <OptionRow
-                  key={m.id}
-                  label={m.label}
-                  sub={m.note}
-                  selected={m.selected}
-                  disabled={switching}
-                  onPress={() => void pick({ harness: h.id, model: m.id })}
-                  last={i === h.models.length - 1}
-                />
-              ))
-            ) : (
-              <OptionRow label="Not available" sub={h.fix || 'Install and log in on the machine Omni runs on'} last />
-            )}
-          </OptionGroup>
-        ))}
         <View style={styles.end} />
       </ScrollView>
     </Sheet>
