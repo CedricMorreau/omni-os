@@ -23,6 +23,7 @@ import {
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
+import { createActivityLive, type ActivityState } from './activity';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
@@ -77,7 +78,9 @@ export interface LiveHub {
   readonly channels: Store<ChannelsState>;
   /** The header's link state, reduced from the feed and the open thread. */
   readonly link: Store<Link>;
+  readonly activity: Store<ActivityState>;
   refreshChannels(): Promise<void>;
+  refreshActivity(): Promise<void>;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -123,6 +126,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       throw e;
     }
   }
+
+  const activity = createActivityLive({ api, withAuth, now });
 
   function requireApi(): OmniApi {
     if (!api) throw new Error('Not paired');
@@ -176,10 +181,12 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       refreshAuth: () => session.refreshAuth(),
       onMessage: (message) => {
         if (isListChange(message)) scheduleRefresh();
+        activity.applyFeed(message);
       },
       // The feed keeps no replay, so every reconnect refetches the list. The open thread catches up through its own stream.
       onReconnect: () => {
         void refreshChannels();
+        void activity.refresh();
       },
       onState: (state) => {
         feedState = state;
@@ -356,13 +363,16 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   if (http) {
     startFeed(http);
     void refreshChannels();
+    void activity.refresh();
   }
   recomputeLink();
 
   return {
     channels,
     link,
+    activity: activity.state,
     refreshChannels,
+    refreshActivity: activity.refresh,
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -380,6 +390,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         feed?.resume();
         for (const t of openThreads) t.resume();
         void refreshChannels();
+        void activity.refresh();
       }
       recomputeLink();
     },

@@ -143,13 +143,14 @@ describe('channel list', () => {
     await settle();
     const [first] = t.feeds();
     first?.sink.open();
-    const afterFirstOpen = calls.length;
+    const listLoads = () => calls.filter((p) => p === '/api/channels').length;
+    const afterFirstOpen = listLoads();
     first?.sink.error({});
     await settle(1_000);
     const [second] = t.feeds();
     second?.sink.open();
     await settle();
-    expect(calls.length).toBe(afterFirstOpen + 1);
+    expect(listLoads()).toBe(afterFirstOpen + 1);
     hub.close();
   });
 

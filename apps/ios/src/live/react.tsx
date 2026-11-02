@@ -50,13 +50,17 @@ export function useChannels() {
   return useStore(useLiveHub().channels);
 }
 
+export function useActivity() {
+  return useStore(useLiveHub().activity);
+}
+
 /** A pull-to-refresh that shows its spinner only for a pull. A refresh the app starts itself, as on returning to the front, stays quiet. */
 export function usePullRefresh() {
   const hub = useLiveHub();
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = () => {
     setRefreshing(true);
-    void hub.refreshChannels().finally(() => setRefreshing(false));
+    void Promise.all([hub.refreshChannels(), hub.refreshActivity()]).finally(() => setRefreshing(false));
   };
   return { refreshing, onRefresh };
 }
