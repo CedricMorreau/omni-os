@@ -1,6 +1,6 @@
 import { canTake, handoffText, type Device, type HandoffView, type Takeover } from '@omni/shared/handoff.ts';
+import { relTime } from '@omni/shared/format.ts';
 import type { SyncStatus } from './api.ts';
-import { relTime } from './format.ts';
 
 // What the Web UI shows for handing a running thread to another synced Mac, and for taking one over from the Mac that
 // holds it (packages/shared/handoff.ts owns the shapes and the text). The desktop header, the right-click menu, the

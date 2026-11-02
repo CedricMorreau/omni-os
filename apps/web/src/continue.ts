@@ -17,8 +17,8 @@ import {
   type ContinuePreview,
 } from '@omni/shared/continue.ts';
 import { sameRun, type Run } from '@omni/shared/run-switch.ts';
+import { bytes } from '@omni/shared/format.ts';
 import { ApiError, errorText, type HarnessWithRunning, type Thread } from './api.ts';
-import { bytes } from './format.ts';
 import { requestIdFor, type PendingRequest } from './requests.ts';
 
 /** The thread a sheet continues. */

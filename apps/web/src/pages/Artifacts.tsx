@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { relTime, toDate } from '@omni/shared/format.ts';
 import { artifactUrl, useApi, type ArtifactWithThread } from '../api.ts';
 import { kindIcon } from '../components/ArtifactViewer.tsx';
 import { Empty, ErrorNote, Icon, Loading, PageHeader, Segmented } from '../components/ui.tsx';
-import { relTime, toDate } from '../format.ts';
 import { href } from '../router.ts';
 import { readPref, useApp, useFeed, writePref } from '../store.tsx';
 

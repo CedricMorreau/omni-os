@@ -2,8 +2,8 @@
 // top of the transcript fold (transcript/fold.ts), so it reads the same events the desktop transcript does.
 import type { ThreadQuestion } from '@omni/shared/question.ts';
 import type { Clipped, Span } from '@omni/shared/history.ts';
+import { toDate } from '@omni/shared/format.ts';
 import type { Artifact, Thread } from '../api.ts';
-import { toDate } from '../format.ts';
 import { cloudStatus } from '../cloud-agent.ts';
 import { buildItems, isAsking, toolLabel, toolSummary, type CloudAgentP, type Item, type ReportP, type ResultP, type SwitchItem, type Todo, type ToolCall, type TranscriptEvent, type UserP } from '../transcript/fold.ts';
 

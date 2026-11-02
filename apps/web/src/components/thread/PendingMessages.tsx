@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { bytes } from '@omni/shared/format.ts';
 import { Attachments } from './Attachments.tsx';
 import { api, ApiError, errorText, type Attachment, type PendingMsg, type Thread } from '../../api.ts';
-import { bytes, plural } from '../../format.ts';
+import { plural } from '../../format.ts';
 import { Button, copyText, Icon, IconButton } from '../ui.tsx';
 import { isOmnis, isParked, parkedHeading, parkedLabel, parkedOf, requestIdFor } from '../../requests.ts';
 import { useSending } from '../../sending.ts';

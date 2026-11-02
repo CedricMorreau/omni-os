@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { bytes, relTime } from '@omni/shared/format.ts';
 import { artifactUrl, type Artifact } from '../api.ts';
-import { bytes, relTime } from '../format.ts';
 import { useImageZoom, ZoomableImage, ZoomControls, type ImageZoom } from './ImageZoom.tsx';
 import { Markdown } from './Markdown.tsx';
 import { PublishedActions } from './Published.tsx';
