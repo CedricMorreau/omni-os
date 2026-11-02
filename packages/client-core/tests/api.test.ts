@@ -67,6 +67,18 @@ describe('omni api', () => {
     ]);
   });
 
+  it('sends the id the client chose, so a retry starts the thread once', async () => {
+    const { sent, api: a } = api({ json: { id: 'abc' } });
+    await a.createThread({ id: 'f7d0b1c4-3b0e-4a43-9a43-0c1f6d2f6a10', channel: 'inbox', prompt: 'hi' });
+    expect(sent).toEqual([{ method: 'POST', url: at('/threads'), body: { id: 'f7d0b1c4-3b0e-4a43-9a43-0c1f6d2f6a10', channel: 'inbox', prompt: 'hi' } }]);
+  });
+
+  it('lists the crew roles', async () => {
+    const { sent, api: a } = api({ json: [{ id: 'conductor' }] });
+    expect(await a.crew()).toEqual([{ id: 'conductor' }]);
+    expect(sent).toEqual([{ method: 'GET', url: at('/crew') }]);
+  });
+
   it('sends a message with its mode, request id and context as JSON', async () => {
     const { sent, api: a } = api();
     const context = [{ kind: 'note', v: 1, id: 'c1', label: 'Note', note: '', body: { text: 'x' } }];
