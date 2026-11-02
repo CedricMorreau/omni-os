@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { createNativeStackNavigator, type NativeStackNavigationOptions, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { HeaderButton } from '../components/HeaderButton';
+import { ActionsScreen } from '../screens/ActionsScreen';
 import { ArtifactScreen } from '../screens/ArtifactScreen';
 import { AutomationsScreen } from '../screens/AutomationsScreen';
 import { ChannelScreen } from '../screens/ChannelScreen';
@@ -70,6 +71,7 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', headerBackTitle: backTitle }} />
       <Stack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Devices', headerBackTitle: 'Settings' }} />
       <Stack.Screen name="Automations" component={AutomationsScreen} options={{ title: 'Automations', headerBackTitle: 'Settings' }} />
+      <Stack.Screen name="Actions" component={ActionsScreen} options={{ title: 'Actions', headerBackTitle: 'Thread' }} />
       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers', headerBackTitle: 'Settings' }} />
       <Stack.Screen name="AddServer" component={ConnectScreen} options={{ title: 'Add server', headerBackTitle: 'Back' }} />
       <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ title: 'Notifications', headerBackTitle: 'Back' }} />

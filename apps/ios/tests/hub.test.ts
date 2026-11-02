@@ -204,6 +204,36 @@ describe('channel list', () => {
   });
 });
 
+describe('folder collapse', () => {
+  it('keeps a folder closed on a list fetched before the server answered the PATCH', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const json = (body: unknown) => ({
+      status: 200,
+      headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'application/json' : null) },
+      text: async () => JSON.stringify(body),
+    });
+    const list = [channel('c', { folders: [{ id: 'f1', collapsed: 0, count: 0, running: 0, threads: [] }] })];
+    const fetch: Fetch = async (_url, init) => {
+      if (init?.method === 'PATCH') {
+        await held;
+        return json({ id: 'f1', collapsed: 1 });
+      }
+      return json(list);
+    };
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    const collapsed = () => hub.channels.get().channels?.[0]?.folders?.[0]?.collapsed;
+    const toggled = hub.setFolderCollapsed('f1', true);
+    expect(collapsed()).toBe(1);
+    await hub.refreshChannels();
+    expect(collapsed()).toBe(1);
+    release();
+    expect(await toggled).toBeNull();
+    hub.close();
+  });
+});
+
 describe('link and background', () => {
   it('reads live once the feed is open, pauses in the background and recovers on return', async () => {
     const t = fakeTransport();

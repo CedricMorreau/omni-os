@@ -23,6 +23,8 @@ export type RootStackParamList = {
   Settings: undefined;
   Devices: undefined;
   Automations: undefined;
+  /** The channel's named actions, run in this thread's checkout. Pushed from a thread's header. */
+  Actions: { threadId: string };
   Servers: undefined;
   /** Pairing another server. A separate route, so pairing the first server swaps Connect out for the tabs. */
   AddServer: undefined;

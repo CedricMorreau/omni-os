@@ -2,6 +2,7 @@
 // them, not validated. One file per domain: a domain owns its types and the calls that return them.
 import type { HttpClient } from '../http.ts';
 import { accountApi } from './account.ts';
+import { actionsApi } from './actions.ts';
 import { activityApi } from './activity.ts';
 import { artifactsApi } from './artifacts.ts';
 import { automationsApi } from './automations.ts';
@@ -19,6 +20,7 @@ import { searchApi } from './search.ts';
 import { threadsApi } from './threads.ts';
 
 export * from './account.ts';
+export * from './actions.ts';
 export * from './activity.ts';
 export * from './artifacts.ts';
 export * from './automations.ts';
@@ -56,5 +58,6 @@ export function createOmniApi(http: HttpClient) {
     ...searchApi(http),
     ...accountApi(http),
     ...automationsApi(http),
+    ...actionsApi(http),
   };
 }

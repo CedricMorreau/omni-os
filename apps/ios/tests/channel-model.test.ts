@@ -1,7 +1,7 @@
-import type { ChannelWithRunning, ThreadStub } from '@omni/client-core';
+import type { ChannelWithRunning, Thread, ThreadStub } from '@omni/client-core';
 import { describe, expect, it } from 'vitest';
 
-import { channelSections, channelThreads, shortAgo, threadRow } from '../src/live/channel-model';
+import { channelSections, channelSubtitle, channelThreads, CONDUCTOR_SUBTITLE, needsByChannel, shortAgo, threadRow, threadSections } from '../src/live/channel-model';
 
 const NOW = Date.parse('2026-11-02T12:00:00Z');
 
@@ -124,5 +124,125 @@ describe('thread rows for the menu', () => {
 
   it('is not pinned without a pin time', () => {
     expect(threadRow(stub({ id: 'q' }), NOW)).toMatchObject({ pinned: false, target: { pinned: false } });
+  });
+});
+
+describe('folder counts', () => {
+  const folders = [
+    {
+      id: 'f1',
+      name: 'Launch',
+      collapsed: 1,
+      threads: [stub({ id: 'a', status: 'running', folder_id: 'f1' }), stub({ id: 'b', status: 'queued', folder_id: 'f1' }), stub({ id: 'c', folder_id: 'f1' })],
+    },
+  ] as unknown as ChannelWithRunning['folders'];
+
+  it('counts every row and the busy ones, and reads collapsed from the server', () => {
+    const [folder] = channelThreads(channel({ id: 'c', folders }), NOW).folders;
+    expect(folder).toMatchObject({ id: 'f1', collapsed: true, count: 3, running: 2 });
+  });
+
+  it('keeps a closed folder as a header with no rows', () => {
+    const sections = threadSections(channelThreads(channel({ id: 'c', recent: [stub({ id: 'loose' })], folders }), NOW));
+    expect(sections.map((s) => [s.key, s.data.length])).toEqual([
+      ['folder-f1', 0],
+      ['recent', 1],
+    ]);
+    expect(sections[0]?.folder).toEqual({ id: 'f1', collapsed: true, count: 3, running: 2 });
+  });
+
+  it('lists an open folder busy rows first', () => {
+    const open = folders!.map((f) => ({ ...f, collapsed: 0 }));
+    const [section] = threadSections(channelThreads(channel({ id: 'c', folders: open }), NOW));
+    expect(section?.data.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('Conductor handoffs', () => {
+  const parent = stub({ id: 'p', title: 'Plan the launch', status: 'done', source: 'conductor', channel_id: 'conductor' });
+  const kid = (id: string, status: ThreadStub['status'], channel_id = 'web') => stub({ id, status, channel_id, title: `Task ${id}`, parent_id: 'p' } as Partial<ThreadStub> & { id: string });
+  const conductor = (children: ThreadStub[], over: Partial<ChannelWithRunning> = {}) =>
+    channel({ id: 'conductor', kind: 'system', recent: [parent, ...children], handoffs: [{ parent, children }], ...over });
+  const names = (id: string) => (id === 'web' ? 'Web' : id);
+
+  it('nests the delegated threads under their parent and drops them from the list', () => {
+    const model = channelThreads(conductor([kid('k1', 'done'), kid('k2', 'done')]), NOW, names);
+    expect(model.recent.map((r) => r.id)).toEqual(['p']);
+    expect(model.recent[0]?.handoff).toEqual({
+      running: 0,
+      children: [
+        { id: 'k1', title: 'Task k1', status: 'done', busy: false, channelId: 'web', channel: 'Web' },
+        { id: 'k2', title: 'Task k2', status: 'done', busy: false, channelId: 'web', channel: 'Web' },
+      ],
+    });
+  });
+
+  it('promotes a finished parent to active while a child runs or waits', () => {
+    const model = channelThreads(conductor([kid('k1', 'running'), kid('k2', 'queued'), kid('k3', 'done')]), NOW, names);
+    expect(model.active.map((r) => r.id)).toEqual(['p']);
+    expect(model.recent).toEqual([]);
+    expect(model.active[0]?.handoff?.running).toBe(2);
+  });
+
+  it('does not list a parent twice when it is already active', () => {
+    const busy = { ...parent, status: 'running' } as ThreadStub;
+    const model = channelThreads(channel({ id: 'conductor', active: [busy], handoffs: [{ parent: busy, children: [kid('k1', 'running')] }] }), NOW);
+    expect(model.active.map((r) => r.id)).toEqual(['p']);
+  });
+
+  it('restores a parent the lists no longer hold', () => {
+    const model = channelThreads(channel({ id: 'conductor', handoffs: [{ parent, children: [kid('k1', 'running')] }] }), NOW);
+    expect(model.active.map((r) => r.id)).toEqual(['p']);
+  });
+
+  it('leaves a parent in its folder when promoting it', () => {
+    const inFolder = { ...parent, folder_id: 'f1' } as ThreadStub;
+    const model = channelThreads(
+      channel({
+        id: 'conductor',
+        folders: [{ id: 'f1', name: 'Plans', collapsed: 0, threads: [inFolder] }] as unknown as ChannelWithRunning['folders'],
+        handoffs: [{ parent: inFolder, children: [kid('k1', 'running')] }],
+      }),
+      NOW,
+    );
+    expect(model.active).toEqual([]);
+    expect(model.folders[0]).toMatchObject({ count: 1, running: 0 });
+    expect(model.folders[0]?.active.map((r) => r.id)).toEqual(['p']);
+  });
+
+  it('names a child channel by id until the channel list has it', () => {
+    const model = channelThreads(conductor([kid('k1', 'done', 'gone')]), NOW);
+    expect(model.recent[0]?.handoff?.children[0]?.channel).toBe('gone');
+  });
+
+  it('ignores handoffs outside the Conductor and groups with no children', () => {
+    const other = channel({ id: 'web', recent: [parent], handoffs: [{ parent, children: [kid('k1', 'running')] }] });
+    expect(channelThreads(other, NOW).recent[0]?.handoff).toBeUndefined();
+    expect(channelThreads(conductor([]), NOW, names).recent[0]?.handoff).toBeUndefined();
+  });
+});
+
+describe('channelSubtitle', () => {
+  it('uses the Conductor notes, then its role', () => {
+    expect(channelSubtitle(channel({ id: 'conductor', notes: 'Runs the crew' }))).toBe('Runs the crew');
+    expect(channelSubtitle(channel({ id: 'conductor', notes: null }))).toBe(CONDUCTOR_SUBTITLE);
+  });
+
+  it('prefers the store domain to the repo and shows nothing for a bare channel', () => {
+    expect(channelSubtitle(channel({ id: 'a', store_domain: 'shop.test', github_repo: 'o/r' }))).toBe('shop.test');
+    expect(channelSubtitle(channel({ id: 'b', github_repo: 'o/r' }))).toBe('o/r');
+    expect(channelSubtitle(channel({ id: 'c' }))).toBeNull();
+  });
+});
+
+describe('needsByChannel', () => {
+  it('counts the threads waiting on Ben per channel', () => {
+    let n = 0;
+    const item = (channel_id: string) => ({ thread: stub({ id: `t${n++}`, channel_id }) as unknown as Thread, result: null, blockers: [], at: '' });
+    const counts = needsByChannel({ items: [item('a'), item('b'), item('a')], unread: 0, blocked: 0 });
+    expect(counts.get('a')).toBe(2);
+    expect(counts.get('b')).toBe(1);
+    expect(counts.get('c')).toBeUndefined();
+    expect(needsByChannel(null).size).toBe(0);
   });
 });

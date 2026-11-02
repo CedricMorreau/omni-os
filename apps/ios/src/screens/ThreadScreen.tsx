@@ -57,20 +57,25 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
     if (menuOpen) reloadMachines();
   }, [menuOpen, reloadMachines]);
 
-  // Fork opens a screen, and a screen cannot present while the menu sheet is still dismissing. The menu reports that it is
-  // gone through onClose (the sheet's onDismiss), and a timer covers a dismissal that never reports.
-  const forking = useRef(false);
+  // Fork and Actions open a screen, and a screen cannot present while the menu sheet is still dismissing. The menu reports
+  // that it is gone through onClose (the sheet's onDismiss), and a timer covers a dismissal that never reports.
+  const afterMenu = useRef<(() => void) | null>(null);
   const closeMenu = useCallback(() => {
     setMenuOpen(false);
-    if (!forking.current) return;
-    forking.current = false;
-    navigation.navigate('Continue', { id });
-  }, [navigation, id]);
-  const fork = useCallback(() => {
-    forking.current = true;
-    setMenuOpen(false);
-    setTimeout(closeMenu, FORK_FALLBACK_MS);
-  }, [closeMenu]);
+    const next = afterMenu.current;
+    afterMenu.current = null;
+    next?.();
+  }, []);
+  const leaveMenuFor = useCallback(
+    (open: () => void) => {
+      afterMenu.current = open;
+      setMenuOpen(false);
+      setTimeout(closeMenu, FORK_FALLBACK_MS);
+    },
+    [closeMenu],
+  );
+  const fork = useCallback(() => leaveMenuFor(() => navigation.navigate('Continue', { id })), [leaveMenuFor, navigation, id]);
+  const openActions = useCallback(() => leaveMenuFor(() => navigation.navigate('Actions', { threadId: id })), [leaveMenuFor, navigation, id]);
 
   const say = useCallback((message: string) => {
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -100,7 +105,7 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
           <ThreadComposer live={live} thread={view.thread} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} />
         </ThreadFooter>
       ) : null}
-      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={closeMenu} onChanged={say} machine={machine} onFork={fork} />
+      <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={closeMenu} onChanged={say} machine={machine} onFork={fork} onActions={openActions} />
       <TakeoverSheet
         visible={machine.ui.asking}
         takeover={takeoverShown(view.takeover, view.handoff)}

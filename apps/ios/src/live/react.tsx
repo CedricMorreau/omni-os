@@ -1,12 +1,15 @@
 import { eventSourceTransport, xhrUploadTransport, type NeedsYou } from '@omni/client-core';
 import { useIsFocused } from '@react-navigation/native';
 import { addNetworkStateListener } from 'expo-network';
+import * as SecureStore from 'expo-secure-store';
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import EventSource from 'react-native-sse';
 
 import { clearArtifactCache } from '../artifacts/files';
 import { shownResult } from '../needs/inbox';
+import type { ActionsLive, ActionsView } from './actions';
+import { createHandoffPrefs, type HandoffPrefs } from './handoff-prefs';
 import { createLiveHub, type LiveHub, type ThreadLive, type ThreadView } from './hub';
 import type { Link } from './connection';
 import type { OmniSession } from './session';
@@ -127,12 +130,54 @@ export function useThreadLive(threadId: string): ThreadLive | null {
   return live;
 }
 
+const HANDOFF_PREF_KEY = 'omni.pref.handoffs.closed';
+let handoffPrefs: HandoffPrefs | null = null;
+
+/** One per app: whether a parent shows its delegated threads is a choice of this device, not of the server it is paired with. */
+function sharedHandoffPrefs(): HandoffPrefs {
+  handoffPrefs ??= createHandoffPrefs({
+    read: () => SecureStore.getItemAsync(HANDOFF_PREF_KEY),
+    write: (value) => SecureStore.setItemAsync(HANDOFF_PREF_KEY, value),
+  });
+  return handoffPrefs;
+}
+
+/** Whether the Conductor parent shows the threads it delegated (open unless closed), and a toggle that remembers it. */
+export function useHandoffOpen(parentId: string): [open: boolean, toggle: () => void] {
+  const prefs = sharedHandoffPrefs();
+  const closed = useStore(prefs.closed);
+  return [!closed.has(parentId), () => prefs.toggle(parentId)];
+}
+
 const idle = createStore<null>(null);
 
 /** The thread's view, or null until its screen has opened it. */
 export function useThreadView(live: ThreadLive | null): ThreadView | null {
   return useSyncExternalStore(
     (listener) => (live ? live.view.subscribe(listener) : idle.subscribe(listener)),
+    () => (live ? live.view.get() : null),
+  );
+}
+
+export function useActionsLive(threadId: string): ActionsLive | null {
+  const hub = useLiveHub();
+  const [live, setLive] = useState<ActionsLive | null>(null);
+  useEffect(() => {
+    const actions = hub.openActions(threadId);
+    setLive(actions);
+    return () => {
+      actions.close();
+      setLive(null);
+    };
+  }, [hub, threadId]);
+  return live;
+}
+
+const idleActions = createStore<null>(null);
+
+export function useActionsView(live: ActionsLive | null): ActionsView | null {
+  return useSyncExternalStore(
+    (listener) => (live ? live.view.subscribe(listener) : idleActions.subscribe(listener)),
     () => (live ? live.view.get() : null),
   );
 }

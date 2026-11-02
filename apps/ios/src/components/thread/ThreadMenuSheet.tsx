@@ -39,10 +39,12 @@ interface ThreadMenuSheetProps {
   machine?: ThreadMachineControl;
   /** Opens Continue for the open thread. Without it the menu has no Fork thread row. */
   onFork?: () => void;
+  /** Opens the channel's Actions for the open thread. Without it the menu has no Actions row. */
+  onActions?: () => void;
 }
 
 /** The thread menu as a sheet: pin, done, rename, move to folder and archive, from the header and from a list row. */
-export function ThreadMenuSheet({ target, folders, onClose, onChanged, machine, onFork }: ThreadMenuSheetProps) {
+export function ThreadMenuSheet({ target, folders, onClose, onChanged, machine, onFork, onActions }: ThreadMenuSheetProps) {
   const { colors } = useOmniTheme();
   const run = useThreadActions();
   const [asked, setPage] = useState<'menu' | 'move' | 'machine' | 'takeover'>('menu');
@@ -60,7 +62,7 @@ export function ThreadMenuSheet({ target, folders, onClose, onChanged, machine, 
   // The machine pages fall back to the menu when the picker goes away, as when a handoff starts from the other machine.
   const page = (asked === 'machine' || asked === 'takeover') && !picker ? 'menu' : asked;
   const items = useMemo(() => (target ? organizeItems(target) : []), [target]);
-  const extras = useMemo(() => (target ? menuExtras(target, picker, !!onFork) : []), [target, picker, onFork]);
+  const extras = useMemo(() => (target ? menuExtras(target, picker, !!onFork, !!onActions) : []), [target, picker, onFork, onActions]);
   const choices = useMemo(() => folderChoices(folders, target?.folderId ?? null), [folders, target?.folderId]);
 
   async function perform(action: ThreadAction) {
@@ -160,10 +162,10 @@ export function ThreadMenuSheet({ target, folders, onClose, onChanged, machine, 
                 key={extra.id}
                 label={extra.label}
                 sub={extra.sub}
-                leading={<Text style={[styles.glyph, { color: colors.fg }]}>{extra.id === 'machine' ? '🖥' : GLYPH.branch}</Text>}
+                leading={<Text style={[styles.glyph, { color: colors.fg }]}>{extra.id === 'machine' ? '🖥' : extra.id === 'actions' ? '▶' : GLYPH.branch}</Text>}
                 opens={extra.id === 'machine'}
                 disabled={pending || !!extra.off}
-                onPress={() => (extra.id === 'machine' ? openMachine() : onFork?.())}
+                onPress={() => (extra.id === 'machine' ? openMachine() : extra.id === 'actions' ? onActions?.() : onFork?.())}
                 last={i === extras.length - 1}
               />
             ))}

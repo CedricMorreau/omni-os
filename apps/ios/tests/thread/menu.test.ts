@@ -36,6 +36,13 @@ describe('menuExtras', () => {
     expect(cloud[0]?.sub).toBe(cloud[0]?.off);
   });
 
+  it('adds Actions last, only where the screen can open them', () => {
+    const extras = menuExtras(targetOfThread(thread()), holds, true, true);
+    expect(extras.map((e) => e.id)).toEqual(['machine', 'fork', 'actions']);
+    expect(extras[2]).toMatchObject({ id: 'actions', label: 'Actions', off: null });
+    expect(menuExtras(targetOfThread(thread()), holds, true).map((e) => e.id)).toEqual(['machine', 'fork']);
+  });
+
   it('offers no Fork thread without the screen to open it', () => {
     expect(menuExtras(targetOfThread(thread()), null, false)).toEqual([]);
   });

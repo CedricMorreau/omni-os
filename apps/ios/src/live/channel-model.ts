@@ -1,4 +1,6 @@
-import type { ChannelWithRunning, ThreadStub } from '@omni/client-core';
+import type { ChannelWithRunning, NeedsYou, ThreadStub } from '@omni/client-core';
+
+type ConductorHandoff = NonNullable<ChannelWithRunning['handoffs']>[number];
 
 import { targetOfStub, type ThreadTarget } from '../thread/target';
 
@@ -29,6 +31,21 @@ export function channelSections(channels: readonly ChannelWithRunning[]): Channe
   };
 }
 
+export const CONDUCTOR_SUBTITLE = 'Delegates to crew threads in every channel';
+
+/** The line under a channel's name: the Conductor's notes or its role, otherwise the store or repo the channel is for. */
+export function channelSubtitle(channel: ChannelWithRunning): string | null {
+  if (channel.id === 'conductor') return channel.notes || CONDUCTOR_SUBTITLE;
+  return channel.store_domain || channel.github_repo || null;
+}
+
+/** How many threads wait on Ben in each channel. */
+export function needsByChannel(needsYou: NeedsYou | null): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of needsYou?.items ?? []) counts.set(item.thread.channel_id, (counts.get(item.thread.channel_id) ?? 0) + 1);
+  return counts;
+}
+
 /** A thread as a list row. `busy` is the running or queued state, which the list puts first. */
 export interface ThreadRow {
   id: string;
@@ -42,6 +59,25 @@ export interface ThreadRow {
   pinned: boolean;
   /** What the swipe actions and the long-press menu act on. */
   target: ThreadTarget;
+  /** The threads the Conductor delegated from this one, when it is a handoff parent. */
+  handoff?: HandoffGroup;
+}
+
+/** A thread delegated from a Conductor thread, which can run in any channel. */
+export interface HandoffChild {
+  id: string;
+  title: string;
+  status: ThreadStub['status'];
+  busy: boolean;
+  channelId: string;
+  /** The channel's name, or its id while the channel list does not have it. */
+  channel: string;
+}
+
+export interface HandoffGroup {
+  children: HandoffChild[];
+  /** How many of the children run or wait to. */
+  running: number;
 }
 
 const STATUS_LABEL: Partial<Record<ThreadStub['status'], string>> = {
@@ -80,6 +116,9 @@ export interface FolderSection {
   id: string;
   name: string;
   collapsed: boolean;
+  /** Every row in the folder, busy and finished. */
+  count: number;
+  running: number;
   active: ThreadRow[];
   recent: ThreadRow[];
 }
@@ -91,31 +130,88 @@ export interface ChannelThreads {
   folders: FolderSection[];
 }
 
-export function channelThreads(channel: ChannelWithRunning, now: number): ChannelThreads {
-  const seen = new Set<string>();
+interface Bucket {
+  active: ThreadRow[];
+  recent: ThreadRow[];
+}
+
+const split = (rows: ThreadRow[]): Bucket => ({ active: rows.filter((r) => r.busy), recent: rows.filter((r) => !r.busy) });
+
+function handoffGroup(group: ConductorHandoff, channelName: (id: string) => string): HandoffGroup {
+  const children = group.children.map((c): HandoffChild => ({
+    id: c.id,
+    title: c.title || 'Untitled',
+    status: c.status,
+    busy: c.status === 'running' || c.status === 'queued',
+    channelId: c.channel_id,
+    channel: channelName(c.channel_id),
+  }));
+  return { children, running: children.filter((c) => c.busy).length };
+}
+
+/**
+ * `channelName` names the channels a handoff's children run in. The Conductor's delegated threads nest under their
+ * parent and leave the list, and a parent with a running child counts as active even when it finished itself, as on
+ * phone web.
+ */
+export function channelThreads(channel: ChannelWithRunning, now: number, channelName: (id: string) => string = (id) => id): ChannelThreads {
+  const handoffs = (channel.id === 'conductor' ? channel.handoffs ?? [] : []).filter((g) => g.children.length > 0);
+  const groups = new Map(handoffs.map((g) => [g.parent.id, handoffGroup(g, channelName)]));
+  const seen = new Set(handoffs.flatMap((g) => g.children.map((c) => c.id)));
   const fresh = (stubs: readonly ThreadStub[] | undefined): ThreadStub[] =>
     (stubs ?? []).filter((t) => {
       if (t.source === 'team' || seen.has(t.id)) return false;
       seen.add(t.id);
       return true;
     });
-
-  const folders: FolderSection[] = (channel.folders ?? []).map((f) => {
-    const rows = fresh(f.threads).map((t) => threadRow(t, now));
-    return {
-      id: f.id,
-      name: f.name,
-      collapsed: !!f.collapsed,
-      active: rows.filter((r) => r.busy),
-      recent: rows.filter((r) => !r.busy),
-    };
-  });
-
-  const ungrouped = fresh([...(channel.active ?? []), ...(channel.recent ?? [])]).filter((t) => !t.folder_id);
-  const rows = ungrouped.map((t) => threadRow(t, now));
-  return {
-    active: rows.filter((r) => r.busy),
-    recent: rows.filter((r) => !r.busy),
-    folders: folders.filter((f) => f.active.length + f.recent.length > 0),
+  const rowOf = (t: ThreadStub): ThreadRow => {
+    const handoff = groups.get(t.id);
+    return handoff ? { ...threadRow(t, now), handoff } : threadRow(t, now);
   };
+
+  const folders = (channel.folders ?? []).map((f) => ({ folder: f, bucket: split(fresh(f.threads).map(rowOf)) }));
+  const loose = split(fresh([...(channel.active ?? []), ...(channel.recent ?? [])]).filter((t) => !t.folder_id).map(rowOf));
+  const buckets = [loose, ...folders.map((f) => f.bucket)];
+
+  for (const group of handoffs) {
+    const parent = group.parent;
+    if (!groups.get(parent.id)?.running || buckets.some((b) => b.active.some((r) => r.id === parent.id))) continue;
+    const home = folders.find((f) => f.folder.id === parent.folder_id)?.bucket ?? loose;
+    const existing = buckets.flatMap((b) => b.recent).find((r) => r.id === parent.id);
+    for (const b of buckets) b.recent = b.recent.filter((r) => r.id !== parent.id);
+    home.active.push(existing ?? rowOf(parent));
+  }
+
+  return {
+    active: loose.active,
+    recent: loose.recent,
+    folders: folders
+      .filter((f) => f.bucket.active.length + f.bucket.recent.length > 0)
+      .map(({ folder, bucket }) => ({
+        id: folder.id,
+        name: folder.name,
+        collapsed: !!folder.collapsed,
+        count: bucket.active.length + bucket.recent.length,
+        running: [...bucket.active, ...bucket.recent].filter((r) => r.busy).length,
+        ...bucket,
+      })),
+  };
+}
+
+/** One list section of a channel: the busy threads, a folder, or the finished ones. A closed folder keeps its header and no rows. */
+export interface ThreadSection {
+  key: string;
+  title: string;
+  folder: Pick<FolderSection, 'id' | 'collapsed' | 'count' | 'running'> | null;
+  data: ThreadRow[];
+}
+
+export function threadSections(model: ChannelThreads): ThreadSection[] {
+  const out: ThreadSection[] = [];
+  if (model.active.length) out.push({ key: 'active', title: 'Active', folder: null, data: model.active });
+  for (const f of model.folders) {
+    out.push({ key: `folder-${f.id}`, title: f.name, folder: { id: f.id, collapsed: f.collapsed, count: f.count, running: f.running }, data: f.collapsed ? [] : [...f.active, ...f.recent] });
+  }
+  if (model.recent.length) out.push({ key: 'recent', title: 'Recent', folder: null, data: model.recent });
+  return out;
 }

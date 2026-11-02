@@ -38,7 +38,9 @@ import { createCatalog, createSenders, newRequestId, type ThreadSender } from '.
 import { runNeedsAction, type NeedsAction } from '../needs/actions';
 import { withoutResult } from '../needs/inbox';
 import { coalesced } from './coalesce';
+import { createActionsLive, type ActionsLive } from './actions';
 import { createActivityLive, type ActivityState } from './activity';
+import { createFolderCollapse, createPendingFolders } from './folders';
 import { linkOf, type Link } from './connection';
 import { createLibraryLive, type LibraryState } from './library';
 import type { OmniSession } from './session';
@@ -139,7 +141,10 @@ export interface LiveHub {
   uploadLimitMb(): Promise<number>;
   /** Where an uploaded file of a thread is read from, and the credentials that go with it. Null without a server. */
   fileSource(threadId: string, name: string, options?: { download?: boolean }): Promise<FileSource | null>;
+  /** Opens or closes a folder for every client. Resolves to the failure's message, or null. */
+  setFolderCollapsed(folderId: string, collapsed: boolean): Promise<string | null>;
   openThread(threadId: string): ThreadLive;
+  openActions(threadId: string): ActionsLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
   /** Connects now instead of waiting out a backoff, as when the network comes back. */
@@ -173,6 +178,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   const channels = createStore<ChannelsState>({ channels: null, loading: false, error: null, loadedAt: null });
   const link = createStore<Link>(linkOf({ paired, foreground: true, feed: null, thread: null }));
   const openThreads = new Set<ThreadLiveImpl>();
+  const openActions = new Set<ActionsLive>();
   let activeThread: ThreadLiveImpl | null = null;
   let foreground = true;
   let feed: SSEClient | null = null;
@@ -234,6 +240,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     return http;
   }
 
+  const pendingFolders = createPendingFolders();
+
   // One refetch at a time. A call that arrives meanwhile asks for one more pass, so the last state wins.
   let refreshing: Promise<void> | null = null;
   let refreshAgain = false;
@@ -249,7 +257,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         refreshAgain = false;
         try {
           const list = await withAuth(() => requireApi().channels());
-          channels.set({ channels: list, loading: false, error: null, loadedAt: now() });
+          channels.set({ channels: pendingFolders.apply(list), loading: false, error: null, loadedAt: now() });
         } catch (e) {
           channels.set((s) => ({ ...s, loading: false, error: messageOf(e) }));
         }
@@ -279,6 +287,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     await withAuth(() => requireApi().markResultRead(uid)).catch(refreshInstead);
     await refreshNeedsYou();
   }
+  const setFolderCollapsed = createFolderCollapse({ api, withAuth, channels, refresh: refreshChannels, pending: pendingFolders });
 
   function scheduleRefresh() {
     if (refreshTimer !== null) return;
@@ -573,6 +582,20 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       for (const t of openThreads) t.applyHandoff(thread, handoff);
       void refreshChannels();
     },
+    setFolderCollapsed,
+    openActions(threadId) {
+      const actions = createActionsLive({ api, withAuth, threadId });
+      if (!foreground) actions.pause();
+      const close = actions.close;
+      openActions.add(actions);
+      return {
+        ...actions,
+        close() {
+          openActions.delete(actions);
+          close();
+        },
+      };
+    },
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -586,9 +609,11 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       if (!active) {
         feed?.pause();
         for (const t of openThreads) t.pause();
+        for (const a of openActions) a.pause();
       } else {
         feed?.resume();
         for (const t of openThreads) t.resume();
+        for (const a of openActions) a.resume();
         void refreshChannels();
         void refreshNeedsYou();
         void activity.refresh();
@@ -608,6 +633,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       feed?.close();
       feed = null;
       for (const t of [...openThreads]) t.close();
+      for (const a of [...openActions]) a.close();
+      openActions.clear();
     },
   };
 }
