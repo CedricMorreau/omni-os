@@ -5,7 +5,7 @@ import type { HarnessInfo, ThreadStatus } from '@omni/client-core';
 import type { ThreadView } from '../../live/hub';
 import { fontSize, lineHeight, radius, space, useOmniTheme } from '../../theme';
 import { StatusLine } from '../StatusLine';
-import { NextTurnChip, RunChip } from './RunChips';
+import { RunChip } from './RunChips';
 
 interface ThreadHeaderProps {
   view: ThreadView;
@@ -36,7 +36,6 @@ export function ThreadHeader({ view, harnesses, onOpenRun, flash }: ThreadHeader
       {thread ? (
         <View style={styles.chips}>
           <RunChip thread={thread} harnesses={harnesses} onPress={onOpenRun} />
-          <NextTurnChip thread={thread} harnesses={harnesses} onPress={onOpenRun} />
         </View>
       ) : null}
       {view.blocked ? (

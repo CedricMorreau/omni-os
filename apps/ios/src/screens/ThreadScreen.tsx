@@ -1,10 +1,13 @@
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { HeaderButton } from '../components/HeaderButton';
 import { Notice } from '../components/Notice';
 import { RunSheet } from '../components/thread/RunSheet';
 import { ThreadBody } from '../components/thread/ThreadBody';
+import { ThreadComposer } from '../components/thread/ThreadComposer';
 import { ThreadFooter } from '../components/thread/ThreadFooter';
 import { ThreadHeader } from '../components/thread/ThreadHeader';
 import { ThreadMenuSheet } from '../components/thread/ThreadMenuSheet';
@@ -21,6 +24,7 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   const { colors } = useOmniTheme();
   const live = useThreadLive(id);
   const view = useThreadView(live);
+  const headerHeight = useHeaderHeight();
   const { channels } = useChannels();
   const [menuOpen, setMenuOpen] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
@@ -60,10 +64,14 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.bg }]}>
+    <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={[styles.screen, { backgroundColor: colors.bg }]}>
       <ThreadHeader view={view} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} flash={flash} />
       <ThreadBody view={view} live={live} />
-      <ThreadFooter />
+      {live && view.thread ? (
+        <ThreadFooter>
+          <ThreadComposer live={live} thread={view.thread} harnesses={catalog.harnesses} onOpenRun={() => setRunOpen(true)} />
+        </ThreadFooter>
+      ) : null}
       <ThreadMenuSheet target={menuOpen ? target : null} folders={folders} onClose={() => setMenuOpen(false)} onChanged={say} />
       <RunSheet
         visible={runOpen}
@@ -73,7 +81,7 @@ export function ThreadScreen({ route, navigation }: RootScreenProps<'Thread'>) {
         busy={thread?.status === 'running' || thread?.status === 'queued'}
         catalog={catalog}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

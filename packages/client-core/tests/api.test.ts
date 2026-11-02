@@ -78,6 +78,13 @@ describe('omni api', () => {
     ]);
   });
 
+  it("lists a thread's accepted requests", async () => {
+    const rows = [{ id: 'm1', request_id: 'r-1', state: 'delivered' }];
+    const { sent, api: a } = api({ json: rows });
+    expect(await a.requests('t 1')).toEqual(rows);
+    expect(sent).toEqual([{ method: 'GET', url: at('/threads/t%201/requests') }]);
+  });
+
   it('switches the run, marks done and not done, and stops', async () => {
     const { sent, api: a } = api();
     await a.switchRun('t1', { harness: 'codex', model: '', effort: 'high' });

@@ -48,6 +48,16 @@ export interface HarnessInfo {
   install?: string;
 }
 
+/**
+ * Whether a follow-up on a busy thread can steer, or has to queue. The catalog is `GET /harnesses`. While it has not
+ * loaded, or has no row for this harness, every harness but Cursor and Cursor Cloud steers.
+ */
+export function canSteer(harnessId: string, catalog: readonly Pick<HarnessInfo, 'id' | 'capabilities'>[] | null | undefined): boolean {
+  const row = catalog?.find((h) => h.id === harnessId);
+  if (row) return row.capabilities.steer;
+  return harnessId !== 'cursor' && harnessId !== 'cursor-cloud';
+}
+
 export function harnessesApi(http: HttpClient) {
   return {
     /** With a channel, as that channel sees them: Cursor Cloud needs its GitHub repo. The server probes a harness that is down first. */
