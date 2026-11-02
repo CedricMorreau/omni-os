@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AttachmentRow } from '../../../attachments/AttachmentRow';
+import { showsBubble } from '../../../context/labels';
 import { duration, plural } from '../../../thread/format';
 import { outcomeText, type ThreadRow } from '../../../thread/rows';
 import { fontSize, minTarget, radius, space, useOmniTheme } from '../../../theme';
+import { ContextChips } from '../../ContextChips';
 import { type DotTone, StatusDot } from '../../StatusDot';
 import { Markdown } from '../Markdown';
 import { QuestionCard } from '../QuestionCard';
@@ -33,24 +35,27 @@ export function PromptRow({ row }: Of<'prompt'>) {
   const { p, caption } = row;
   return (
     <View style={styles.end}>
-      <View style={[styles.bubble, { backgroundColor: colors.surface2 }, p.dropped && styles.dim]}>
-        {p.attachments?.length ? <AttachmentRow threadId={threadId} items={p.attachments} /> : null}
-        {p.text ? (
-          <Text selectable style={[styles.bubbleText, { color: colors.fg }]}>
-            {p.text}
-          </Text>
-        ) : null}
-        {p.items?.length ? (
-          <View style={styles.wake}>
-            {p.items.map((it, i) => (
-              <Text key={i} numberOfLines={2} style={[styles.small, { color: colors.fg2 }]}>
-                {[it.label, it.kind, it.excerpt].filter(Boolean).join(' · ')}
-              </Text>
-            ))}
-            {p.more ? <Text style={[styles.small, { color: colors.fg3 }]}>{`${p.more} more`}</Text> : null}
-          </View>
-        ) : null}
-      </View>
+      <ContextChips records={p.context} />
+      {showsBubble(p) ? (
+        <View style={[styles.bubble, { backgroundColor: colors.surface2 }, p.dropped && styles.dim]}>
+          {p.attachments?.length ? <AttachmentRow threadId={threadId} items={p.attachments} /> : null}
+          {p.text ? (
+            <Text selectable style={[styles.bubbleText, { color: colors.fg }]}>
+              {p.text}
+            </Text>
+          ) : null}
+          {p.items?.length ? (
+            <View style={styles.wake}>
+              {p.items.map((it, i) => (
+                <Text key={i} numberOfLines={2} style={[styles.small, { color: colors.fg2 }]}>
+                  {[it.label, it.kind, it.excerpt].filter(Boolean).join(' · ')}
+                </Text>
+              ))}
+              {p.more ? <Text style={[styles.small, { color: colors.fg3 }]}>{`${p.more} more`}</Text> : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       {caption ? <Text style={[styles.caption, { color: colors.fg3 }]}>{caption}</Text> : null}
       {p.clipped ? <LoadWhole label="Load whole message" onPress={() => loadWhole(p.key)} /> : null}
     </View>
@@ -297,7 +302,15 @@ const styles = StyleSheet.create({
   mono: { fontFamily: MONO, fontSize: 12.5, lineHeight: 19 },
   links: { flexDirection: 'row', gap: space.s8 },
   link: { fontSize: 13, fontWeight: '600' },
-  kid: { flexDirection: 'row', alignItems: 'center', gap: space.s6, minHeight: minTarget, paddingHorizontal: space.s6, paddingVertical: space.s4, borderRadius: radius.md },
+  kid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s6,
+    minHeight: minTarget,
+    paddingHorizontal: space.s6,
+    paddingVertical: space.s4,
+    borderRadius: radius.md,
+  },
   kidTitle: { fontSize: 14 },
   fileIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   pill: { minHeight: minTarget, flexDirection: 'row', alignItems: 'center', borderRadius: radius.pill, paddingHorizontal: 14 },
