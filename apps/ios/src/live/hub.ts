@@ -11,10 +11,12 @@ import {
   type Channel,
   type ChannelWithRunning,
   type Fetch,
+  type HarnessInfo,
   type HistoryEvent,
   type HttpClient,
   type OmniApi,
   type PendingMsg,
+  type Recovered,
   type SSEClient,
   type SSEState,
   type SSETransport,
@@ -23,6 +25,7 @@ import {
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
 
+import { createCatalog, createSenders, newRequestId, type ThreadSender } from '../send/sender';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
@@ -70,6 +73,10 @@ export interface ThreadLive {
   loadFullRow(eventId: number): Promise<void>;
   /** False while Ben reads older rows, so a new row does not trim what is on screen. */
   setFollowing(following: boolean): void;
+  /** What the composer does for this thread: send, retry, stop and the held-message actions. Each answer lands in `view`. */
+  readonly send: ThreadSender;
+  /** The harness catalog behind steer-or-queue. Null until it loads. */
+  readonly catalog: Store<readonly HarnessInfo[] | null>;
   close(): void;
 }
 
@@ -128,6 +135,9 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     if (!api) throw new Error('Not paired');
     return api;
   }
+
+  const catalog = createCatalog(() => withAuth(() => requireApi().harnesses()));
+  const senders = createSenders({ api: requireApi, run: withAuth, catalog: catalog.store.get, newId: newRequestId });
 
   function requireHttp(): HttpClient {
     if (!http) throw new Error('Not paired');
@@ -190,6 +200,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
 
   class ThreadLiveImpl implements ThreadLive {
     readonly view: Store<ThreadView>;
+    readonly send: ThreadSender;
+    readonly catalog = catalog.store;
     private history: ThreadHistory<HistoryEvent> | null = null;
     private stream: SSEClient | null = null;
     private following = true;
@@ -197,6 +209,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     private closed = false;
 
     constructor(private readonly threadId: string) {
+      this.send = this.applying(senders.for(threadId));
       this.view = createStore<ThreadView>({
         threadId,
         status: 'loading',
@@ -220,6 +233,27 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       this.view.set((v) => ({ ...v, ...next }));
     }
 
+    /** The sender, with what each answer says about the thread put on screen before the stream repeats it. */
+    private applying(sender: ThreadSender): ThreadSender {
+      const thread = (t: Thread | null) => {
+        if (t && !this.closed) this.patch({ thread: t });
+        return t;
+      };
+      const recovered = (r: Recovered | null) => {
+        if (r && !this.closed) this.patch({ thread: r.thread, pending: r.pending });
+        return r;
+      };
+      return {
+        state: sender.state,
+        submit: async (t, text) => thread(await sender.submit(t, text)),
+        retry: async () => thread(await sender.retry()),
+        edit: () => sender.edit(),
+        stop: async () => thread(await sender.stop()),
+        resume: async (uuid) => recovered(await sender.resume(uuid)),
+        discard: async (uuid) => recovered(await sender.discard(uuid)),
+      };
+    }
+
     start(): Promise<void> {
       if (this.closed) return Promise.resolve();
       if (this.opening) return this.opening;
@@ -228,6 +262,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         return Promise.resolve();
       }
       this.patch({ error: null, status: this.view.get().thread ? 'ready' : 'loading' });
+      void catalog.ensure();
       this.opening = this.open().finally(() => {
         this.opening = null;
       });
