@@ -1,9 +1,11 @@
-import { eventSourceTransport } from '@omni/client-core';
+import { eventSourceTransport, type NeedsYou } from '@omni/client-core';
+import { useIsFocused } from '@react-navigation/native';
 import { addNetworkStateListener } from 'expo-network';
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import EventSource from 'react-native-sse';
 
+import { shownResult } from '../needs/inbox';
 import { createLiveHub, type LiveHub, type ThreadLive, type ThreadView } from './hub';
 import type { Link } from './connection';
 import type { OmniSession } from './session';
@@ -48,6 +50,34 @@ export function useStore<T>(store: Store<T>): T {
 
 export function useChannels() {
   return useStore(useLiveHub().channels);
+}
+
+/** What waits on Ben: unread results and blockers across the server's threads. Null until the first load. */
+export function useNeedsYou(): NeedsYou | null {
+  return useStore(useLiveHub().needsYou).data;
+}
+
+function useAppActive(): boolean {
+  const [active, setActive] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => setActive(state === 'active'));
+    return () => sub.remove();
+  }, []);
+  return active;
+}
+
+/**
+ * Like the desktop thread page, a thread's newest result counts as read while the thread is on screen: this screen is
+ * the one in front and the app is in the foreground. Once read, the thread leaves Needs you.
+ */
+export function useMarkResultRead(threadId: string, status: string | undefined) {
+  const hub = useLiveHub();
+  const focused = useIsFocused();
+  const active = useAppActive();
+  const uid = shownResult(useNeedsYou(), threadId, status);
+  useEffect(() => {
+    if (uid && focused && active) void hub.markResultRead(uid);
+  }, [hub, uid, focused, active]);
 }
 
 /** A pull-to-refresh that shows its spinner only for a pull. A refresh the app starts itself, as on returning to the front, stays quiet. */

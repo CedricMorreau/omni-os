@@ -3,12 +3,16 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { TranscriptItem } from '../live/transcript';
 import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme } from '../theme';
 import { type DotTone, StatusDot } from './StatusDot';
+import { QuestionCard, type SendAnswers } from './thread/QuestionCard';
 
-/** One folded transcript item. Read only: the phone draws what the desktop draws, and sending comes later. */
-export function TranscriptRow({ item, onLoadWhole }: { item: TranscriptItem; onLoadWhole: (eventId: number) => void }) {
+/** One folded transcript item. The only thing Ben can act on here is a question the agent asked. */
+export function TranscriptRow({ item, onLoadWhole, onAnswer }: { item: TranscriptItem; onLoadWhole: (eventId: number) => void; onAnswer: SendAnswers }) {
   const { colors } = useOmniTheme();
 
   switch (item.kind) {
+    case 'question':
+      return <QuestionCard q={item.q} send={onAnswer} />;
+
     case 'user':
       return (
         <View style={styles.userWrap}>

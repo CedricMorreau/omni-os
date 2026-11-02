@@ -12,14 +12,15 @@ interface Reply {
   body?: unknown;
 }
 
-/** Answers each request by its path. `calls` records every path asked for, in order. */
-function fakeFetch(reply: (path: string) => Reply) {
+function fakeFetch(reply: (path: string, method: string) => Reply) {
   const calls: string[] = [];
-  const fetch: Fetch = async (url) => {
+  const requests: { method: string; path: string; body: unknown }[] = [];
+  const fetch: Fetch = async (url, init) => {
     const { pathname, search } = new URL(url);
     const path = pathname + search;
     calls.push(path);
-    const r = reply(path);
+    requests.push({ method: init.method, path, body: init.body ? JSON.parse(init.body) : undefined });
+    const r = reply(path, init.method);
     const text = r.body === undefined ? '' : JSON.stringify(r.body);
     return {
       status: r.status ?? 200,
@@ -27,7 +28,7 @@ function fakeFetch(reply: (path: string) => Reply) {
       text: async () => text,
     };
   };
-  return { fetch, calls };
+  return { fetch, calls, requests };
 }
 
 interface FakeConn {
@@ -143,13 +144,16 @@ describe('channel list', () => {
     await settle();
     const [first] = t.feeds();
     first?.sink.open();
-    const afterFirstOpen = calls.length;
+    const asked = (path: string) => calls.filter((p) => p === path).length;
+    const channelsBefore = asked('/api/channels');
+    const needsBefore = asked('/api/needs-you');
     first?.sink.error({});
     await settle(1_000);
     const [second] = t.feeds();
     second?.sink.open();
     await settle();
-    expect(calls.length).toBe(afterFirstOpen + 1);
+    expect(asked('/api/channels')).toBe(channelsBefore + 1);
+    expect(asked('/api/needs-you')).toBe(needsBefore + 1);
     hub.close();
   });
 
@@ -260,6 +264,185 @@ describe('open thread', () => {
     const live = hub.openThread('gone');
     await settle();
     expect(live.view.get().status).toBe('missing');
+    live.close();
+    hub.close();
+  });
+});
+
+const waiting = (id: string, over: Record<string, unknown> = {}) => ({
+  thread: { id, channel_id: 'c', title: `Thread ${id}`, status: 'done', created_at: '', updated_at: '' },
+  result: { uid: `result-${id}`, status: 'done', event_uid: null, at: '' },
+  blockers: [],
+  at: '',
+  ...over,
+});
+const inbox = (items: ReturnType<typeof waiting>[]) => ({
+  items,
+  unread: items.filter((i) => i.result).length,
+  blocked: items.filter((i) => i.blockers.length).length,
+});
+
+describe('needs you', () => {
+  it('loads when the hub opens, and once more after a burst of needs_you messages', async () => {
+    const t = fakeTransport();
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/needs-you' ? { body: inbox([waiting('a')]) } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    expect(hub.needsYou.get().data?.items.map((i) => i.thread.id)).toEqual(['a']);
+
+    const asked = () => calls.filter((p) => p === '/api/needs-you').length;
+    const before = asked();
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    feed?.sink.message(frame({ type: 'needs_you', thread_id: 'a' }));
+    feed?.sink.message(frame({ type: 'needs_you', thread_id: 'a' }));
+    feed?.sink.message(frame({ type: 'needs_you', thread_id: 'b' }));
+    await settle();
+    expect(asked() - before).toBeLessThanOrEqual(2);
+    expect(asked()).toBeGreaterThan(before);
+    hub.close();
+  });
+
+  it('keeps the last inbox on screen when a load fails', async () => {
+    let fail = false;
+    const { fetch } = fakeFetch((path) => (path === '/api/needs-you' ? (fail ? { status: 500, body: { error: 'down' } } : { body: inbox([waiting('a')]) }) : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    fail = true;
+    await hub.refreshNeedsYou();
+    expect(hub.needsYou.get().error).toBe('down');
+    expect(hub.needsYou.get().data?.items).toHaveLength(1);
+    hub.close();
+  });
+
+  it('drops a read result at once, posts the read, then loads what the server says', async () => {
+    let unread = true;
+    const { fetch, requests } = fakeFetch((path, method) => {
+      if (path === '/api/needs-you/read') {
+        unread = false;
+        return { body: { thread_id: 'a', item: null } };
+      }
+      if (path === '/api/needs-you' && method === 'GET') return { body: inbox(unread ? [waiting('a')] : []) };
+      return { body: [] };
+    });
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    const done = hub.markResultRead('result-a');
+    expect(hub.needsYou.get().data?.items).toEqual([]);
+    await done;
+    expect(requests.find((r) => r.path === '/api/needs-you/read')).toMatchObject({ method: 'POST', body: { uid: 'result-a' } });
+    expect(hub.needsYou.get().data).toMatchObject({ items: [], unread: 0 });
+    hub.close();
+  });
+
+  it('keeps a blocker when its result is read', async () => {
+    const blocked = waiting('a', { blockers: [{ kind: 'setup', detail: null, count: 1 }] });
+    const { fetch } = fakeFetch((path) => (path === '/api/needs-you' ? { body: inbox([blocked]) } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    await settle();
+    void hub.markResultRead('result-a');
+    expect(hub.needsYou.get().data).toMatchObject({ unread: 0, blocked: 1 });
+    expect(hub.needsYou.get().data?.items[0]?.result).toBeNull();
+    hub.close();
+  });
+
+  it('does not let a load that began before the read bring the result back', async () => {
+    let read = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let gets = 0;
+    const base = fakeFetch((path, method) => {
+      if (path === '/api/needs-you/read') {
+        read = true;
+        return { body: { thread_id: 'a', item: null } };
+      }
+      if (path === '/api/needs-you' && method === 'GET') return { body: inbox(read ? [] : [waiting('a')]) };
+      return { body: [] };
+    });
+    const slow: Fetch = async (url, init) => {
+      const reply = await base.fetch(url, init);
+      if (new URL(url).pathname === '/api/needs-you' && init.method === 'GET' && ++gets === 1) await gate;
+      return reply;
+    };
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch: slow });
+    await settle();
+    const seen: number[] = [];
+    hub.needsYou.subscribe(() => seen.push(hub.needsYou.get().data?.items.length ?? -1));
+    const done = hub.markResultRead('result-a');
+    release();
+    await done;
+    await settle();
+    expect(seen).not.toContain(1);
+    expect(hub.needsYou.get().data?.items).toEqual([]);
+    hub.close();
+  });
+});
+
+describe('answers and card buttons on an open thread', () => {
+  const answer = [{ selected: ['Ship it'], other: null }];
+
+  it('sends the answers to the question and loads Needs you again', async () => {
+    const { fetch, requests } = fakeFetch((path, method) => {
+      if (path.split('?')[0] === '/api/threads/t1') return { body: threadDetail() };
+      if (method === 'POST') return { body: { state: 'answered', via: 'tool' } };
+      return { body: [] };
+    });
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    const before = requests.filter((r) => r.path === '/api/needs-you').length;
+    await expect(live.answerQuestion('q1', answer)).resolves.toEqual({ state: 'answered', via: 'tool' });
+    await settle();
+    expect(requests.find((r) => r.path === '/api/threads/t1/questions/q1/answer')).toMatchObject({ method: 'POST', body: { answers: answer } });
+    expect(requests.filter((r) => r.path === '/api/needs-you').length).toBeGreaterThan(before);
+    live.close();
+    hub.close();
+  });
+
+  it('rejects with the 409 and its state when the question was answered already', async () => {
+    const { fetch } = fakeFetch((path, method) => {
+      if (path.split('?')[0] === '/api/threads/t1') return { body: threadDetail() };
+      if (method === 'POST') return { status: 409, body: { error: 'These questions were already answered.', state: 'answered' } };
+      return { body: [] };
+    });
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    await expect(live.answerQuestion('q1', answer)).rejects.toMatchObject({ failure: { kind: 'http', status: 409, body: { state: 'answered' } } });
+    live.close();
+    hub.close();
+  });
+
+  it('shows the thread and pending list a card button answers with', async () => {
+    const limited = { id: 't1', channel_id: 'c', title: 'Fix build', status: 'stopped', limit_state: 'limited', limit_resets_at: null, harness: 'claude-code' };
+    const { fetch, requests } = fakeFetch((path, method) => {
+      if (path.split('?')[0] === '/api/threads/t1') return { body: threadDetail({ thread: limited }) };
+      if (path === '/api/threads/t1/limit/resume' && method === 'POST') return { body: { thread: { ...limited, status: 'running', limit_state: null }, pending: [] } };
+      return { body: [] };
+    });
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    expect(live.view.get().thread?.limit_state).toBe('limited');
+    await live.act({ kind: 'limit', action: 'resume' });
+    expect(requests.some((r) => r.path === '/api/threads/t1/limit/resume' && r.method === 'POST')).toBe(true);
+    expect(live.view.get().thread).toMatchObject({ status: 'running', limit_state: null });
+    live.close();
+    hub.close();
+  });
+
+  it('leaves the thread as it was and rejects when a card button fails', async () => {
+    const { fetch } = fakeFetch((path, method) => {
+      if (path.split('?')[0] === '/api/threads/t1') return { body: threadDetail() };
+      if (method === 'POST') return { status: 409, body: { error: 'It did not say when it resets.' } };
+      return { body: [] };
+    });
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    const before = live.view.get().thread;
+    await expect(live.act({ kind: 'limit', action: 'schedule' })).rejects.toThrow('It did not say when it resets.');
+    expect(live.view.get().thread).toBe(before);
     live.close();
     hub.close();
   });

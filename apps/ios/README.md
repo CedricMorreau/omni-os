@@ -1,6 +1,6 @@
 # Omni OS for iOS
 
-This development client pairs with an Omni server, then reads its channels and threads and follows them live. It is read only: sending messages comes in a later milestone. Expo Go is not supported.
+This development client pairs with an Omni server, then reads its channels and threads and follows them live. What waits on you shows in the thread: answer a question the agent asked, retry a setup that failed, schedule or cancel a resume after a usage limit, and resume or discard messages the server held. Opening a thread marks its result read. Sending messages comes in a later milestone. Expo Go is not supported.
 
 ## Run on the iOS simulator
 

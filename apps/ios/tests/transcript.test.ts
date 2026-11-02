@@ -89,3 +89,52 @@ describe('toolSummary', () => {
     expect(toolSummary(null)).toBe('');
   });
 });
+
+describe('foldTranscript questions', () => {
+  const questions = [
+    {
+      question: 'Which goal first?',
+      multiSelect: false,
+      options: [
+        { label: 'Ship', description: '' },
+        { label: 'Test', description: '' },
+      ],
+    },
+  ];
+  const asked = () => ev('question', { id: 'q1', questions });
+
+  it('draws a question the agent asked as pending, in place of its tool call', () => {
+    const items = foldTranscript([
+      ev('assistant_text', { text: 'One thing first.' }),
+      ev('tool_use', { id: 'call', name: 'mcp__omni-ask__ask_user_question', input: { questions } }),
+      asked(),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(['text', 'question']);
+    expect(items[1]).toMatchObject({ kind: 'question', q: { id: 'q1', state: 'pending', answers: null } });
+  });
+
+  it('settles it with the answer event, and keeps the first answer', () => {
+    const answers = [{ selected: ['Ship'], other: null }];
+    const items = foldTranscript([
+      asked(),
+      ev('question_answer', { id: 'q1', state: 'answered', answers, via: 'tool' }),
+      ev('question_answer', { id: 'q1', state: 'dismissed', answers: null, via: 'tool' }),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ q: { state: 'answered', answers } });
+  });
+
+  it('leaves out a question it cannot draw, and an answer for one it never saw', () => {
+    const items = foldTranscript([
+      ev('question', { id: 'q2', questions: [] }),
+      ev('question', { id: 'q3' }),
+      ev('question_answer', { id: 'nope', state: 'answered', answers: null }),
+    ]);
+    expect(items).toEqual([]);
+  });
+
+  it('still draws other tool calls', () => {
+    const items = foldTranscript([ev('tool_use', { id: 'a', name: 'Bash', input: { command: 'ls' } })]);
+    expect(items.map((i) => i.kind)).toEqual(['tool']);
+  });
+});

@@ -7,12 +7,14 @@ import {
   openThreadLive,
   parseBaseUrl,
   ThreadHistory,
+  type AnswerResult,
   type Artifact,
   type Channel,
   type ChannelWithRunning,
   type Fetch,
   type HistoryEvent,
   type HttpClient,
+  type NeedsYou,
   type OmniApi,
   type PendingMsg,
   type SSEClient,
@@ -22,13 +24,19 @@ import {
   type ThreadOpen,
 } from '@omni/client-core';
 import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
+import type { Answer } from '@omni/shared/question.ts';
 
+import { runNeedsAction, type NeedsAction } from '../needs/actions';
+import { withoutResult } from '../needs/inbox';
+import { coalesced } from './coalesce';
 import { linkOf, type Link } from './connection';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
 
 /** Feed messages that change the channel list's counts and rows. Usage and mod lines do not. */
 const LIST_CHANGES = new Set(['thread', 'channel', 'tasks', 'folder']);
+/** Feed messages that change what waits on Ben: a result arrived or was read, or a blocker came or went. */
+const NEEDS_YOU = 'needs_you';
 /** A burst of feed messages refetches the list once, this long after the last one. */
 export const REFRESH_DEBOUNCE_MS = 300;
 
@@ -60,9 +68,20 @@ export interface ThreadView {
   link: SSEState | null;
 }
 
+export interface NeedsYouState {
+  /** Unread results and blockers across the server's threads. Null until the first load. */
+  data: NeedsYou | null;
+  /** The last load's failure. The inbox it held stays on screen. */
+  error: string | null;
+}
+
 /** One open thread: its detail, its bounded history and its stream. Created by `LiveHub.openThread`. */
 export interface ThreadLive {
   readonly view: Store<ThreadView>;
+  /** Sends the answers to a question the agent asked. A 409 means it was answered already. */
+  answerQuestion(questionId: string, answers: Answer[]): Promise<AnswerResult>;
+  /** Runs a needs-you card's button. The thread and its pending list update from the server's answer. Throws when the call fails. */
+  act(action: NeedsAction): Promise<void>;
   /** Tries the thread again after a failed open. A no-op while it is open or opening. */
   retry(): void;
   loadOlder(): Promise<void>;
@@ -77,7 +96,11 @@ export interface LiveHub {
   readonly channels: Store<ChannelsState>;
   /** The header's link state, reduced from the feed and the open thread. */
   readonly link: Store<Link>;
+  readonly needsYou: Store<NeedsYouState>;
   refreshChannels(): Promise<void>;
+  refreshNeedsYou(): Promise<void>;
+  /** Ben saw this result. The inbox drops it now and the server confirms. */
+  markResultRead(uid: string): Promise<void>;
   openThread(threadId: string): ThreadLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
   setForeground(active: boolean): void;
@@ -160,6 +183,26 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     return refreshing;
   }
 
+  const needsYou = createStore<NeedsYouState>({ data: null, error: null });
+  let readsMarked = 0;
+  const refreshNeedsYou = coalesced(async () => {
+    if (!api) return;
+    const readsAtStart = readsMarked;
+    try {
+      const data = await withAuth(() => requireApi().needsYou());
+      if (readsAtStart === readsMarked) needsYou.set({ data, error: null });
+    } catch (e) {
+      needsYou.set((s) => ({ ...s, error: messageOf(e) }));
+    }
+  });
+
+  async function markResultRead(uid: string): Promise<void> {
+    readsMarked += 1;
+    needsYou.set((s) => (s.data ? { ...s, data: withoutResult(s.data, uid) } : s));
+    await withAuth(() => requireApi().markResultRead(uid)).catch(refreshInstead);
+    await refreshNeedsYou();
+  }
+
   function scheduleRefresh() {
     if (refreshTimer !== null) return;
     refreshTimer = setTimeout(() => {
@@ -176,10 +219,12 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       refreshAuth: () => session.refreshAuth(),
       onMessage: (message) => {
         if (isListChange(message)) scheduleRefresh();
+        if (isNeedsYouChange(message)) void refreshNeedsYou();
       },
       // The feed keeps no replay, so every reconnect refetches the list. The open thread catches up through its own stream.
       onReconnect: () => {
         void refreshChannels();
+        void refreshNeedsYou();
       },
       onState: (state) => {
         feedState = state;
@@ -292,6 +337,20 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       });
     }
 
+    async answerQuestion(questionId: string, answers: Answer[]): Promise<AnswerResult> {
+      try {
+        return await withAuth(() => requireApi().answerQuestion(this.threadId, questionId, answers));
+      } finally {
+        void refreshNeedsYou();
+      }
+    }
+
+    async act(action: NeedsAction): Promise<void> {
+      const recovered = await withAuth(() => runNeedsAction(requireApi(), this.threadId, action));
+      if (!this.closed) this.patch({ thread: recovered.thread, pending: recovered.pending });
+      void refreshNeedsYou();
+    }
+
     private publishRows() {
       if (!this.history) return;
       const h = this.history.history;
@@ -356,13 +415,17 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   if (http) {
     startFeed(http);
     void refreshChannels();
+    void refreshNeedsYou();
   }
   recomputeLink();
 
   return {
     channels,
     link,
+    needsYou,
     refreshChannels,
+    refreshNeedsYou,
+    markResultRead,
     openThread(threadId) {
       const thread = new ThreadLiveImpl(threadId);
       openThreads.add(thread);
@@ -380,6 +443,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         feed?.resume();
         for (const t of openThreads) t.resume();
         void refreshChannels();
+        void refreshNeedsYou();
       }
       recomputeLink();
     },
@@ -398,6 +462,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   };
 }
 
+const refreshInstead = (): void => undefined;
+
 function isUnauthorized(e: unknown): boolean {
   return isStatus(e, 401);
 }
@@ -412,6 +478,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function isListChange(message: unknown): boolean {
   return isRecord(message) && typeof message.type === 'string' && LIST_CHANGES.has(message.type);
+}
+
+function isNeedsYouChange(message: unknown): boolean {
+  return isRecord(message) && message.type === NEEDS_YOU;
 }
 
 function messageOf(e: unknown): string {
