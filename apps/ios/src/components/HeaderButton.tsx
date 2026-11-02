@@ -2,12 +2,29 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { fontSize, minTarget, useOmniTheme } from '../theme';
 
-/** A text button for a navigation header. */
-export function HeaderButton({ label, onPress }: { label: string; onPress: () => void }) {
+export function HeaderButton({
+  label,
+  onPress,
+  accessibilityLabel,
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  accessibilityLabel?: string;
+  disabled?: boolean;
+}) {
   const { colors } = useOmniTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={8} style={styles.button}>
-      <Text style={[styles.label, { color: colors.fg }]}>{label}</Text>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      hitSlop={8}
+      style={styles.button}
+    >
+      <Text style={[styles.label, { color: colors.fg, opacity: disabled ? 0.4 : 1 }]}>{label}</Text>
     </Pressable>
   );
 }

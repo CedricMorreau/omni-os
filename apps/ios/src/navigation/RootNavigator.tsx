@@ -1,14 +1,16 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { StyleSheet, View } from 'react-native';
 
 import { HeaderButton } from '../components/HeaderButton';
 import { usePairing } from '../pairing/PairingProvider';
 import { ChannelScreen } from '../screens/ChannelScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
+import { NewThreadScreen } from '../screens/NewThreadScreen';
 import { ServersScreen } from '../screens/ServersScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
 import { useHasSession } from '../session/ActiveSession';
-import { useOmniTheme } from '../theme';
+import { space, useOmniTheme } from '../theme';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -38,14 +40,26 @@ export function RootNavigator() {
             component={ChannelsScreen}
             options={({ navigation }) => ({
               title: 'Channels',
-              headerRight: () => <HeaderButton label="Servers" onPress={() => navigation.navigate('Servers')} />,
+              headerRight: () => (
+                <View style={styles.actions}>
+                  <HeaderButton label="Servers" onPress={() => navigation.navigate('Servers')} />
+                  <HeaderButton label="New" accessibilityLabel="New thread" onPress={() => navigation.navigate('NewThread')} />
+                </View>
+              ),
             })}
           />
           <Stack.Screen
             name="Channel"
             component={ChannelScreen}
-            options={{ title: 'Channel', headerBackTitle: 'Channels' }}
+            options={({ navigation, route }) => ({
+              title: 'Channel',
+              headerBackTitle: 'Channels',
+              headerRight: () => (
+                <HeaderButton label="New" accessibilityLabel="New thread" onPress={() => navigation.navigate('NewThread', { channel: route.params.id })} />
+              ),
+            })}
           />
+          <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
           <Stack.Screen name="Thread" component={ThreadScreen} options={{ title: 'Thread', headerBackTitle: 'Back' }} />
           <Stack.Screen
             name="Servers"
@@ -64,3 +78,10 @@ export function RootNavigator() {
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  actions: {
+    flexDirection: 'row',
+    gap: space.s8,
+  },
+});

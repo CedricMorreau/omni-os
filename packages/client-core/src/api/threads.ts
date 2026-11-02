@@ -49,7 +49,7 @@ export interface Thread {
 }
 
 /** The part of a thread the channel list sends for each of its threads. */
-export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at' | 'updated_at' | 'folder_id' | 'harness' | 'done_at' | 'parent_id' | 'source'>;
+export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at' | 'updated_at' | 'folder_id' | 'harness' | 'pinned_at' | 'done_at' | 'parent_id' | 'source'>;
 
 export interface ListThreads {
   channel?: string;
@@ -60,6 +60,11 @@ export interface ListThreads {
 
 /** POST /threads, without files. A field left out takes the role's, then the channel's default, then Auto. */
 export interface CreateThreadRequest {
+  /**
+   * A uuid the client picks. The server makes the thread under it once, so a retry after a lost reply gets the same thread
+   * back and sends the first message once. Keep it across retries of one request and pick a new one when the request changes.
+   */
+  id?: string;
   /** Left out: `inbox`. */
   channel?: string;
   /** The first message, not empty. */

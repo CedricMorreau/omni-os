@@ -7,6 +7,8 @@ export type RootStackParamList = {
   Channels: undefined;
   Channel: { id: string };
   Thread: { id: string };
+  /** Starts a thread. Opens on the channel it was asked from, else the Conductor. */
+  NewThread: { channel?: string } | undefined;
   Servers: undefined;
   /** Pairing another server. A separate route, so pairing the first server swaps Connect out for Channels. */
   AddServer: undefined;

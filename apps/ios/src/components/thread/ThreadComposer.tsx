@@ -1,13 +1,14 @@
 import { useRef, type ComponentRef, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { Thread } from '@omni/client-core';
+import type { HarnessInfo, Thread } from '@omni/client-core';
 
 import type { ThreadLive } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canStop, composerPlaceholder, sendLabel } from '../../send/rules';
 import { fontSize, lineHeight, radius, space, useOmniTheme } from '../../theme';
 import { restoreDraft, setDraft, useDraft, useFocusRequests } from './drafts';
+import { NextTurnChip } from './RunChips';
 
 const INPUT_LINE_HEIGHT = Math.round(fontSize.input * lineHeight.body);
 const MAX_LINES = 6;
@@ -20,7 +21,18 @@ const INPUT_PADDING = (BUTTON_SIZE - INPUT_LINE_HEIGHT) / 2;
  * which), and swaps Send for Stop when the box is empty and a turn can be stopped. The draft is per thread and
  * outlives the screen.
  */
-export function ThreadComposer({ live, thread }: { live: ThreadLive; thread: Thread }) {
+export function ThreadComposer({
+  live,
+  thread,
+  harnesses,
+  onOpenRun,
+}: {
+  live: ThreadLive;
+  thread: Thread;
+  /** From `/harnesses`; null until it loads. */
+  harnesses: HarnessInfo[] | null;
+  onOpenRun: () => void;
+}) {
   const { colors } = useOmniTheme();
   const catalog = useStore(live.catalog);
   const { outbox, stopping, notice } = useStore(live.send.state);
@@ -44,6 +56,9 @@ export function ThreadComposer({ live, thread }: { live: ThreadLive; thread: Thr
 
   return (
     <View style={styles.composer}>
+      <View style={styles.nextTurn}>
+        <NextTurnChip thread={thread} harnesses={harnesses} onPress={onOpenRun} />
+      </View>
       {notice ? (
         <Text accessibilityRole="alert" style={[styles.notice, { color: colors.fg2 }]}>
           {notice}
@@ -107,6 +122,9 @@ function RoundButton({
 const styles = StyleSheet.create({
   composer: {
     gap: space.s2,
+  },
+  nextTurn: {
+    flexDirection: 'row',
   },
   notice: {
     fontSize: fontSize.meta,

@@ -1,5 +1,7 @@
 import type { ChannelWithRunning, ThreadStub } from '@omni/client-core';
 
+import { targetOfStub, type ThreadTarget } from '../thread/target';
+
 /** The channel list's groups, in the order the phone web app shows them. */
 const GROUPS: readonly { label: string; kinds: readonly string[] }[] = [
   { label: 'Clients', kinds: ['client'] },
@@ -37,6 +39,9 @@ export interface ThreadRow {
   statusLabel: string | null;
   /** "now", "5m", "3h", "2d". */
   ago: string;
+  pinned: boolean;
+  /** What the swipe actions and the long-press menu act on. */
+  target: ThreadTarget;
 }
 
 const STATUS_LABEL: Partial<Record<ThreadStub['status'], string>> = {
@@ -66,6 +71,8 @@ export function threadRow(t: ThreadStub, now: number): ThreadRow {
     busy: t.status === 'running' || t.status === 'queued',
     statusLabel: STATUS_LABEL[t.status] ?? null,
     ago: shortAgo(t.updated_at ?? t.created_at, now),
+    pinned: !!t.pinned_at,
+    target: targetOfStub(t),
   };
 }
 

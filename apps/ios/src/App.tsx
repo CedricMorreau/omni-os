@@ -1,5 +1,6 @@
 import { DarkTheme, DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -24,17 +25,19 @@ export default function App() {
   };
 
   return (
-    <SafeAreaProvider>
-      <KeyboardProvider>
-        <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
-        <PairingProvider>
-          <NavigationContainer theme={navTheme}>
-            <ActiveSessionProvider>
-              <RootNavigator />
-            </ActiveSessionProvider>
-          </NavigationContainer>
-        </PairingProvider>
-      </KeyboardProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <KeyboardProvider>
+          <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+          <PairingProvider>
+            <NavigationContainer theme={navTheme}>
+              <ActiveSessionProvider>
+                <RootNavigator />
+              </ActiveSessionProvider>
+            </NavigationContainer>
+          </PairingProvider>
+        </KeyboardProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

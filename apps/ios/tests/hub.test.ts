@@ -264,3 +264,49 @@ describe('open thread', () => {
     hub.close();
   });
 });
+
+describe('thread changes made in the app', () => {
+  it('sends a request with the session and retries once with fresh credentials after a 401', async () => {
+    let attempts = 0;
+    const refreshAuth = vi.fn(async () => true);
+    const { fetch, calls } = fakeFetch((path) => {
+      if (path !== '/api/threads/t1') return { body: [] };
+      attempts += 1;
+      return attempts === 1 ? { status: 401, body: { error: 'expired' } } : { body: { id: 't1', pinned_at: 'now' } };
+    });
+    const hub = createLiveHub({ session: session({ refreshAuth }), transport: fakeTransport().transport, fetch });
+    await settle();
+    const thread = await hub.request((api) => api.setPinned('t1', true));
+    expect(thread).toMatchObject({ id: 't1', pinned_at: 'now' });
+    expect(refreshAuth).toHaveBeenCalledOnce();
+    expect(calls.filter((p) => p === '/api/threads/t1')).toHaveLength(2);
+    hub.close();
+  });
+
+  it('puts the changed thread into the open thread and refetches the lists', async () => {
+    const { fetch, calls } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: threadDetail() } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    const before = calls.filter((p) => p === '/api/channels').length;
+
+    const changed = { ...threadDetail().thread, title: 'Renamed', pinned_at: '2026-11-02T10:00:00Z' };
+    hub.applyThread(changed as never);
+    expect(live.view.get().thread).toMatchObject({ title: 'Renamed', pinned_at: '2026-11-02T10:00:00Z' });
+    await settle();
+    expect(calls.filter((p) => p === '/api/channels').length).toBe(before + 1);
+    live.close();
+    hub.close();
+  });
+
+  it('leaves other open threads alone', async () => {
+    const { fetch } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: threadDetail() } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    hub.applyThread({ ...threadDetail().thread, id: 'other', title: 'Not this one' } as never);
+    expect(live.view.get().thread?.title).toBe('Fix build');
+    live.close();
+    hub.close();
+  });
+});
