@@ -8,7 +8,7 @@ import { ClippedNote } from '../components/thread/HistoryEdgeRow.tsx';
 import type { useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { OmniMark } from '../components/brand.tsx';
 import { ContextChips, hasContext } from '../message-context/ContextChips.tsx';
-import { changesView } from '../changes.ts';
+import { changesView } from '@omni/shared/changes-view.ts';
 import { atStart } from '@omni/shared/history.ts';
 import { href } from '../router.ts';
 import { ArtifactCard, ChangesCard, Clamped, Delegation, MoProse, NowLine, Outcome, Plan, Report, StepsRow } from './ThreadCards.tsx';

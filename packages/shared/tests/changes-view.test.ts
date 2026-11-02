@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { BranchChanges, TurnChanges, TurnView } from '../src/api.ts';
-import { baseLabel, changesView, headMove, shortSha, turnChangesView, turnStateNote, turnTitle } from '../src/changes.ts';
-import { parseDiff, startsOpen } from '../src/diff.ts';
+import type { BranchChanges, TurnChanges, TurnView } from '../changes.ts';
+import { baseLabel, changesView, headMove, shortSha, turnChangesView, turnStateNote, turnTitle } from '../changes-view.ts';
+import { parseDiff, startsOpen } from '../diff.ts';
 
-// The Web UI's Changes panel model (apps/web/src/changes.ts, apps/web/src/diff.ts) on the recorded server answers the Mac app's
+// The Changes view model both phone clients share (packages/shared/changes-view.ts, diff.ts) on the recorded server answers the Mac app's
 // Swift tests decode too (apps/server/tests/mac-fixtures.test.ts records them).
 
-const FIXTURES = join(resolve(import.meta.dirname, '../..'), 'mac', 'OmniKit', 'Tests', 'OmniKitTests', 'Fixtures');
+const FIXTURES = join(resolve(import.meta.dirname, '../../../apps'), 'mac', 'OmniKit', 'Tests', 'OmniKitTests', 'Fixtures');
 const fixture = <T>(name: string) => JSON.parse(readFileSync(join(FIXTURES, name), 'utf8')) as T;
 
 describe('changes panel', () => {

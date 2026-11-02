@@ -9,8 +9,8 @@ import { CONTEXT_KINDS, readContexts } from '@omni/shared/message-context-kinds.
 import { CONTEXT_MAX, newContext, type MessageContext } from '@omni/shared/message-context.ts';
 import type { ThreadDetail } from '../src/api.ts';
 import { DiffFile } from '../src/components/DiffViewer.tsx';
-import { pressLine, type LinePick } from '../src/components/thread/panel/LineSelection.tsx';
-import { parseDiff, type DiffLine } from '../src/diff.ts';
+import { pressLine, type LinePick } from '@omni/shared/diff-pick.ts';
+import { parseDiff, type DiffLine } from '@omni/shared/diff.ts';
 import { parsePayload } from '../src/format.ts';
 import { cantShowText, ContextChips, ContextInspector, NEWER_LABEL } from '../src/message-context/ContextChips.tsx';
 import { rangeText, sourceText } from '../src/message-context/diff-selection.tsx';

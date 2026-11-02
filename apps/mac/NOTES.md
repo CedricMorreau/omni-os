@@ -700,7 +700,7 @@ Wired (both composers):
 ## Changes tab (#207)
 
 - The inspector's Changes tab (`Omni/ChangesTab.swift`), as the Web UI's `ChangesTab.tsx`: GET /api/threads/:id/changes (`apps/server/changes.ts`), the thread's checkout against the base commit Omni recorded (`thread_bases`, local), in committed, staged, unstaged and untracked groups. Loads when opened, when a turn ends and on Refresh. A thread with no checkout here (Hermes, no repo, another Mac) shows the server's reason.
-- OmniKit: `Changes.swift` (`BranchChanges`, `ChangesView`, `OmniClient.changes(forThread:)`); `DiffParser.swift` now numbers lines (`DiffLine`, `FileDiff.rows`), the same model as `apps/web/src/diff.ts`. `DiffFileView` in `DiffView.swift` draws one file for the PR page and the Changes tab (label, status badge, notice). Fixtures `changes.json`, `changes-unavailable.json`.
+- OmniKit: `Changes.swift` (`BranchChanges`, `ChangesView`, `OmniClient.changes(forThread:)`); `DiffParser.swift` now numbers lines (`DiffLine`, `FileDiff.rows`), the same model as `packages/shared/diff.ts`. `DiffFileView` in `DiffView.swift` draws one file for the PR page and the Changes tab (label, status badge, notice). Fixtures `changes.json`, `changes-unavailable.json`.
 - The inspector's tabs scroll sideways when the panel is too narrow to show them all.
 - QA step: `{"inspector": "changes"}`.
 

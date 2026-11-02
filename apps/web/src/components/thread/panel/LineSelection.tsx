@@ -1,40 +1,14 @@
 // Picking lines in a thread's Changes panel to send to the agent: one pick per panel, then a dock to add a note and
 // put it on the next message as a diff_selection (packages/shared/message-context-diff.ts).
 import { useCallback, useContext, useMemo, useState, type KeyboardEvent } from 'react';
-import { clampToHunk, diffSelection, selectRows, type DiffFileLike, type DiffLineLike, type DiffSource } from '@omni/shared/message-context-diff.ts';
+import { pickedLines, pressLine, type LinePick, type PickedLines } from '@omni/shared/diff-pick.ts';
+import { diffSelection, selectRows, type DiffSource } from '@omni/shared/message-context-diff.ts';
 import { NOTE_MAX, newContext } from '@omni/shared/message-context.ts';
-import type { ChangeKind } from '../../../api.ts';
-import type { ChangeFileView, ChangeGroupView } from '../../../changes.ts';
+import type { ChangeFileView, ChangeGroupView } from '@omni/shared/changes-view.ts';
 import { plural } from '../../../format.ts';
 import { addDraftContext } from '../../../message-context/draft.ts';
 import { ShellCtx } from '../../../mobile/shell.tsx';
 import { Button, ErrorNote, Icon } from '../../ui.tsx';
-
-/** Lines `from`..`to` of one file, as indexes into its lines. `to` may be above `from`. */
-export interface LinePick {
-  file: string;
-  from: number;
-  to: number;
-}
-
-/**
- * The pick after a press on line `i` of `file`. Extending moves `to`, within the hunk `from` is in; a press past
- * that hunk, in another file, or without `extend` starts a new pick. Pressing the only picked line clears it.
- */
-export function pressLine(pick: LinePick | null, file: string, lines: readonly DiffLineLike[], i: number, extend: boolean): LinePick | null {
-  const mine = pick?.file === file ? pick : null;
-  if (mine && mine.from === i && mine.to === i) return null;
-  if (extend && mine && clampToHunk(lines, mine.from, i).to === i) return { file, from: mine.from, to: i };
-  return { file, from: i, to: i };
-}
-
-/** The picked file, ready for `selectRows`. */
-export interface PickedLines {
-  group: ChangeKind;
-  file: DiffFileLike;
-  from: number;
-  to: number;
-}
 
 /**
  * The panel's pick. A new `scope` (another turn) drops it, and so does a reload that changed the picked file's diff,
@@ -49,14 +23,7 @@ export function useLineSelection(scope: string, groups: readonly ChangeGroupView
   );
   const clear = useCallback(() => setHeld({ scope, pick: null, diff: '' }), [scope]);
   const pick = held.scope === scope ? held.pick : null;
-  const picked = useMemo((): PickedLines | null => {
-    if (!pick) return null;
-    for (const g of groups ?? []) {
-      const f = g.files.find((x) => x.key === pick.file && x.file.diff === held.diff);
-      if (f) return { group: g.kind, file: { path: f.diff.path, old_path: f.file.old_path, header: f.diff.header, lines: f.diff.lines }, from: pick.from, to: pick.to };
-    }
-    return null;
-  }, [pick, groups, held.diff]);
+  const picked = useMemo(() => pickedLines(pick, held.diff, groups), [pick, groups, held.diff]);
   /** For the panel's root: Esc there clears the pick instead of interrupting the thread (useThreadInterruptKey). */
   const root = {
     'data-keeps-esc': picked ? '' : undefined,
