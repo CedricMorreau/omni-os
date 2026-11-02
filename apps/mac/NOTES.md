@@ -184,7 +184,7 @@ What the server sends (see the `.sse` fixtures and `apps/server/app.ts`):
 - Decoding happens off the main actor: stream messages in `SSEClient`'s reader, the snapshot in `OmniClient`, and the first transcript layout in a nonisolated function.
 - `ThreadStoreRegistry` shares one store per thread id: `acquire` makes and starts it, the last `release` stops and drops it, `apply(feed:)` passes the event to every store. A store that is let go without `stop()` closes its stream in its deinit.
 
-`Transcript` is `buildItems` from `apps/web/src/components/Transcript.tsx`:
+`Transcript` is `buildItems` from `packages/shared/transcript-fold.ts`:
 
 - Items: `.user`, `.text`, `.tools(ToolGroup)`, `.plan`, `.result`, `.error`, `.report`. A group gathers the calls between two breaking rows (user, text, result, error, crew report), with sub-agent calls nested under their parent by `parent_tool_use_id`. A result can come before its call.
 - Ids are stable across updates: a group is `.event(first call's event id)`, the plan is `.plan`. The live plan is one item, updated in place, placed after the group of its latest `TodoWrite`.

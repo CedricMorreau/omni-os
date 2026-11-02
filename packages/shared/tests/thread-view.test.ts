@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Artifact, Thread } from '../src/api.ts';
-import { nowDoing, threadView } from '../src/mobile/thread-view.ts';
-import type { TranscriptEvent } from '../src/transcript/fold.ts';
+import { nowDoing, threadView, type TurnThread } from '../thread-view.ts';
+import type { TranscriptEvent } from '../transcript-fold.ts';
 
 let id = 0;
 const at = (m: number) => `2026-10-23T10:${String(m).padStart(2, '0')}:00.000Z`;
@@ -12,9 +11,9 @@ const out = (tid: string, m: number, is_error = false) => ev('tool_result', { to
 const text = (t: string, m: number) => ev('assistant_text', { text: t }, m);
 const result = (m: number, extra = {}) => ev('result', { ok: true, subtype: 'success', duration_ms: 90_000, turns: 3, ...extra }, m);
 
-const thread = (status: string) => ({ status, cwd: '/w/volero', harness: 'codex' }) as Pick<Thread, 'status' | 'cwd' | 'harness'>;
-const art = (name: string, m: number) => ({ id: m, thread_id: 't', path: name, name, kind: 'html', size: 1, url: null, description: null, created_at: at(m), updated_at: at(m) }) as Artifact;
-const child = (cid: string, m: number, source = 'conductor') => ({ id: cid, created_at: at(m), source, status: 'running' }) as unknown as Thread;
+const thread = (status: string): TurnThread => ({ status, cwd: '/w/volero', harness: 'codex' });
+const art = (name: string, m: number) => ({ id: m, path: name, name, updated_at: at(m) });
+const child = (cid: string, m: number, source = 'conductor') => ({ id: cid, created_at: at(m), source, status: 'running' });
 
 describe('threadView', () => {
   it('folds each turn into its prompt, steps, failures, answer and outcome', () => {

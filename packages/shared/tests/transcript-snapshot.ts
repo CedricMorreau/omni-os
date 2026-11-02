@@ -1,5 +1,5 @@
-import type { Span } from '@omni/shared/history.ts';
-import { buildItems, toolSummary, type Item, type Todo, type ToolCall, type TranscriptEvent } from '../src/transcript/fold.ts';
+import type { Span } from '../history.ts';
+import { buildItems, toolSummary, type Item, type Todo, type ToolCall, type TranscriptEvent } from '../transcript-fold.ts';
 
 // The shape Swift's transcript tests read back from packages/test-fixtures/transcript/corpus.json.
 // Dates and event ids on a call are left out: both clients key a row by the event id, and a call by its tool id.
