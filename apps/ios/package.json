@@ -31,6 +31,7 @@
     "marked": "^16.4.2",
     "react": "19.3.0",
     "react-native": "0.88.0",
+    "react-native-enriched-markdown": "^1.1.1",
     "react-native-gesture-handler": "~3.3.0",
     "react-native-keyboard-controller": "1.22.8",
     "react-native-reanimated": "4.7.1",
@@ -42,6 +43,7 @@
     "uniwind": "1.13.0"
   },
   "devDependencies": {
+    "@omni/test-fixtures": "*",
     "@babel/core": "^7.29.7",
     "@babel/eslint-parser": "^7.29.9",
     "@types/react": "~19.3.0",
