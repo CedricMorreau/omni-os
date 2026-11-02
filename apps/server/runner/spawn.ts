@@ -1,4 +1,5 @@
 // Start a thread's process, including its browser profile and MCP config.
+import { prepareExtraWorktrees } from '../extra-repos.ts';
 import { config } from '../config.ts';
 import { channels, messageRequests, threads, type Thread } from '../db.ts';
 import { getCrew } from '../crew.ts';
@@ -106,6 +107,8 @@ async function spawnLive(live: Live, thread: Thread) {
   const problem = remote ? null : await inWorkspace(thread, (missing) => missing ?? workdirProblem(thread, channel.repo_path));
   if (lives.get(thread.id) !== live) return;
   if (problem) return refuseStart(live, problem);
+  if (!remote) await prepareExtraWorktrees(thread).catch((err) => console.error(`[spawn] ${thread.id}: extra worktrees:`, (err as Error).message));
+  if (lives.get(thread.id) !== live) return;
   // Chrome locks a profile dir: the first live process in a channel keeps it until it exits.
   const holder = browserHolder.get(channel.id);
   const browserBusy = !!holder && holder !== thread.id;

@@ -337,7 +337,7 @@ export function migrate() {
   // When Ben marked the thread done, out of Needs you; null for every existing thread. Synced with the row.
   ensureColumn('threads', 'done_at', 'TEXT');
   // What a new thread in the channel runs on when neither the thread nor its role picks (apps/server/harness/resolve.ts).
-  for (const col of ['default_harness', 'default_model', 'default_effort', 'default_base', 'links']) ensureColumn('channels', col, 'TEXT');
+  for (const col of ['default_harness', 'default_model', 'default_effort', 'default_base', 'links', 'extra_repos']) ensureColumn('channels', col, 'TEXT');
   ensureColumn('tickets', 'role', 'TEXT');
   ensureColumn('tickets', 'route', 'TEXT');
   ensureColumn('tickets', 'route_proposal', 'TEXT');

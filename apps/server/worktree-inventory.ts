@@ -2,6 +2,7 @@
 // or may go. Nothing here deletes anything. The scan runs in the background, a couple of folders at a time, and can be
 // cancelled. `inspectWorktree` and `lastLook` are the checks the cleanup (worktree-cleanup.ts) runs right before it
 // removes a folder, on top of the git checks in worktree-sweep.ts: busy threads, uncommitted, untracked and unpushed work.
+import { extraRepos, isExtraRepoOf, worktreeThreadId } from './extra-repos.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
@@ -56,7 +57,9 @@ interface Known {
 
 function known(): Known {
   const repos = new Set<string>();
-  for (const c of channels.list(true)) if (c.repo_path && existsSync(c.repo_path)) repos.add(real(c.repo_path));
+  for (const c of channels.list(true)) {
+    for (const path of [c.repo_path, ...extraRepos(c).map((r) => r.path)]) if (path && existsSync(path)) repos.add(real(path));
+  }
   const byCwd = new Map<string, string[]>();
   for (const t of db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE cwd != ''`).all() as unknown as Thread[]) {
     const k = real(t.cwd);
@@ -67,7 +70,7 @@ function known(): Known {
 
 /** What makes a thread's ownership of its folder: if any of it changes during a check, the verdict cannot be trusted. */
 export const ownership = (id: string) => {
-  const t = threads.get(id);
+  const t = threads.get(worktreeThreadId(id));
   return t ? JSON.stringify([t.channel_id, t.archived, t.status, t.setup, t.cwd, t.branch]) : 'gone';
 };
 
@@ -125,7 +128,7 @@ async function inspect(id: string, dir: string, opts: InspectOptions, ctx: Known
   }
 
   const before = ownership(id);
-  const t = threads.get(id) ?? null;
+  const t = threads.get(worktreeThreadId(id)) ?? null;
   const channel: Channel | null = t ? (channels.get(t.channel_id) ?? null) : null;
   const sizing =
     opts.size === false
@@ -152,7 +155,7 @@ async function inspect(id: string, dir: string, opts: InspectOptions, ctx: Known
   const branch = (await git(dir, 'branch', '--show-current')) || null;
   const planned = `omni/${id.slice(0, 8)}`;
   const channelRepo = channel?.repo_path ? real(channel.repo_path) : null;
-  const owned = t ? channelRepo === real(repo) : ctx.repos.has(real(repo)) && branch === planned;
+  const owned = t ? channelRepo === real(repo) || isExtraRepoOf(channel, repo) : ctx.repos.has(real(repo)) && branch === planned;
   if (!owned) {
     keep('unowned', t ? "Its thread's channel uses a different repository than the one this folder belongs to." : `No thread owns it, and it is not on ${planned} in a channel's repo.`);
     return done({ repo, branch, registered: true });
@@ -250,7 +253,8 @@ async function inspect(id: string, dir: string, opts: InspectOptions, ctx: Known
  * thread is as it was when the checks began (`before`, from ownership), and neither it nor another thread working
  * in the folder is busy, has messages waiting or has a terminal open. The reason to keep it, or null.
  */
-export function lastLook(id: string, dir: string, before: string): KeepReason | null {
+export function lastLook(worktreeId: string, dir: string, before: string): KeepReason | null {
+  const id = worktreeThreadId(worktreeId);
   if (ownership(id) !== before) return { code: 'changed-meanwhile', message: 'Its thread changed while it was checked.' };
   for (const uid of new Set([id, ...(known().byCwd.get(real(dir)) ?? [])])) {
     const t = threads.get(uid);

@@ -30,6 +30,7 @@ const channel = (patch: Partial<Channel> = {}): Channel => ({
   default_effort: null,
   default_base: null,
   links: null,
+  extra_repos: null,
   design_system: null,
   design_system_name: null,
   browser_headless: 1,

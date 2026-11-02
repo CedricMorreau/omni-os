@@ -2,6 +2,7 @@
 // for Retry with the first prompt and its files saved. Nothing runs in the channel's own checkout instead.
 import { channels, continuations, messageRequests, outbox, requestFingerprint, threads, type Thread } from '../db.ts';
 import { prepareWorktree } from '../sandbox.ts';
+import { prepareExtraWorktrees } from '../extra-repos.ts';
 import { withWorkspace } from '../workspace.ts';
 import { recordStartBase } from '../changes.ts';
 import { baseFor } from '../worktree-base.ts';
@@ -86,6 +87,7 @@ async function prepare(t: Thread): Promise<Thread | undefined> {
       await carryInto(t);
       await prepareWorktree(repo, t.cwd, branch, base);
     });
+    await prepareExtraWorktrees(t);
     // The commit the branch starts from, for the Changes panel. Recorded before anything runs there.
     await recordStartBase(t.id, repo!, t.cwd).catch((err) => console.error(`[setup] ${t.id}: could not record the base commit:`, (err as Error).message));
   } catch (err) {

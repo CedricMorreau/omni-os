@@ -1,4 +1,5 @@
 // The system prompt handed to a harness for one thread.
+import { extraRepoLines } from '../extra-repos.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { config, artifactsDir, browserOutDir, clientFile, designSystemFile } from '../config.ts';
 import { artifacts, type Channel, type Thread } from '../db.ts';
@@ -54,6 +55,7 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
       : thread.branch
         ? `- You are in a dedicated git worktree on branch ${thread.branch}. Commit here; open a PR when asked.`
         : '',
+    ...(remote ? [] : extraRepoLines(thread)),
     channel.notes ? `- Channel notes: ${channel.notes}` : '',
     ...clientLines(channel),
     ...(role?.mcp.includes('omni')

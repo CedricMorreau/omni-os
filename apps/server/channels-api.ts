@@ -84,6 +84,11 @@ const channelSchema = z.object({
     .max(20)
     .nullish()
     .transform((l) => (l == null ? l : JSON.stringify(l))),
+  extra_repos: z
+    .array(z.object({ path: z.string().trim().min(1).transform(expandHome), github: z.string().trim().min(1).nullish().transform((g) => g ?? null) }))
+    .max(5)
+    .nullish()
+    .transform((l) => (l == null ? l : JSON.stringify(l))),
 });
 
 /** A channel's latest threads of any status, so the sidebar can keep finished ones findable. */

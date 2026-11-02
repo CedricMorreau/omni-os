@@ -23,6 +23,7 @@ export interface Channel {
   default_effort: string | null;
   default_base: string | null;
   links: string | null;
+  extra_repos: string | null;
   /** A standalone HTML file the channel's threads follow for the pages they write. Kept out of the API: see publicChannel. */
   design_system: string | null;
   design_system_name: string | null;
@@ -49,8 +50,8 @@ export const channels = {
     return tx(() => {
       db.prepare(
         `INSERT INTO channels (id, name, kind, repo_path, github_repo, use_worktree, base_dir, store_domain, portal_slug, browser_headless, notes, icon,
-           default_harness, default_model, default_effort, default_base, links)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           default_harness, default_model, default_effort, default_base, links, extra_repos)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         c.id,
         c.name,
@@ -69,6 +70,7 @@ export const channels = {
         c.default_effort ?? null,
         c.default_base ?? null,
         c.links ?? null,
+        c.extra_repos ?? null,
       );
       record('channel', c.id);
       return channels.get(c.id)!;
@@ -78,7 +80,7 @@ export const channels = {
     const allowed = [
       'name', 'kind', 'repo_path', 'github_repo', 'use_worktree', 'base_dir',
       'store_domain', 'portal_slug', 'browser_headless', 'notes', 'icon', 'design_system', 'design_system_name', 'archived',
-      'default_harness', 'default_model', 'default_effort', 'default_base', 'links',
+      'default_harness', 'default_model', 'default_effort', 'default_base', 'links', 'extra_repos',
     ] as const;
     const keys = allowed.filter((k) => k in patch);
     if (keys.length) {
@@ -100,14 +102,16 @@ export interface ChannelLink {
   url: string;
 }
 
-export function channelLinks(raw: string | null): ChannelLink[] {
+export function parseJsonList<T>(raw: string | null): T[] {
   try {
-    return raw ? (JSON.parse(raw) as ChannelLink[]) : [];
+    return raw ? (JSON.parse(raw) as T[]) : [];
   } catch {
     return [];
   }
 }
 
-export function publicChannel<T extends Channel>({ design_system, default_base: _base, links, ...rest }: T) {
-  return { ...rest, links: channelLinks(links), design_system_size: design_system ? Buffer.byteLength(design_system) : 0 };
+export const channelLinks = (raw: string | null) => parseJsonList<ChannelLink>(raw);
+
+export function publicChannel<T extends Channel>({ design_system, default_base: _base, links, extra_repos, ...rest }: T) {
+  return { ...rest, links: channelLinks(links), extra_repos: parseJsonList(extra_repos), design_system_size: design_system ? Buffer.byteLength(design_system) : 0 };
 }

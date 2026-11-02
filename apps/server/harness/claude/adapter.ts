@@ -10,6 +10,7 @@ import { apiToken } from '../../api-token.ts';
 import { config, paths, artifactsDir, memoryDir, threadDir } from '../../config.ts';
 import type { Thread } from '../../db.ts';
 import { ASK_TIMEOUT_SEC } from '../../sandbox.ts';
+import { extraWorktreeDirs } from '../../extra-repos.ts';
 import { parseEvent, LineSplitter } from '../../stream.ts';
 import { harnessEnv } from '../env-guard.ts';
 import { normalizeClaudeCommands } from './commands.ts';
@@ -106,6 +107,7 @@ export const claudeAdapter: HarnessAdapter = {
     ];
     if (thread.effort) args.push('--effort', thread.effort);
     if (thread.cwd !== config.brainDir && existsSync(config.brainDir)) args.push('--add-dir', config.brainDir);
+    for (const dir of extraWorktreeDirs(thread)) if (existsSync(dir)) args.push('--add-dir', dir);
     if (mcpFile) args.push('--mcp-config', mcpFile);
     // Its own AskUserQuestion cannot be answered in -p mode: agents ask with Omni's ask_user_question instead.
     args.push('--disallowedTools', 'AskUserQuestion');

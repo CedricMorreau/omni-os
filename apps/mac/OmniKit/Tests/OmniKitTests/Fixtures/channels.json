@@ -19,6 +19,7 @@
     "default_model": null,
     "default_effort": null,
     "links": [],
+    "extra_repos": [],
     "design_system_size": 0,
     "running": 0,
     "active": [],
@@ -45,6 +46,7 @@
     "default_model": null,
     "default_effort": null,
     "links": [],
+    "extra_repos": [],
     "design_system_size": 0,
     "running": 1,
     "active": [
@@ -99,6 +101,7 @@
     "default_model": null,
     "default_effort": null,
     "links": [],
+    "extra_repos": [],
     "design_system_size": 0,
     "running": 0,
     "active": [],

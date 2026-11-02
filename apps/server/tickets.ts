@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { renameExtraBranches } from './extra-repos.ts';
 import { randomUUID } from 'node:crypto';
 import { db, needsYou, threads, type NeedsYouBlocker, type Thread } from './db.ts';
 import { now } from './db/connection.ts';
@@ -149,6 +150,7 @@ function renameBranch(threadId: string, branch: string) {
   if (!thread?.branch?.startsWith('omni/') || !thread.cwd) return;
   try {
     execFileSync('git', ['-C', thread.cwd, 'branch', '-m', thread.branch, branch], { stdio: 'ignore' });
+    void renameExtraBranches(thread, branch);
     threads.update(threadId, { branch });
   } catch {}
 }
