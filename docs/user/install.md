@@ -2,6 +2,25 @@
 
 Omni runs on the Mac where your agents work. Set that machine up first; the Web UI on your phone talks to it later.
 
+## The desktop app
+
+The desktop app (`apps/desktop`, [ADR 0010](../adr/0010-desktop-app-is-electron.md)) is replacing the SwiftUI Mac app and the Linux launcher below. It is the Web UI in a window of its own, with the Omni server inside: no repo checkout, Node or Xcode to install. You still need Claude Code signed in, and `gh` for the GitHub panel ([What you need](#what-you-need)).
+
+- **Mac:** open the DMG and drag Omni to Applications. Take `arm64` for Apple silicon, `x64` for an Intel Mac, or `universal` for either. macOS blocks a build that is not notarized the first time it opens; allow it under **System Settings > Privacy & Security > Open Anyway**.
+- **Linux:** make the AppImage executable and run it: `chmod +x Omni-*.AppImage && ./Omni-*.AppImage`. It adds no launcher entry by itself.
+- **Build it yourself** from a checkout: `cd apps/desktop && npx tsx scripts/dist.ts --platform mac --arch arm64` (or `x64`, `universal`; `--platform linux --arch x64` for the AppImage). The build lands in `apps/desktop/release/`. A Linux build needs a working docker unless this machine's glibc is 2.28 or older. On a Mac, `npm run build:desktop` (`scripts/build-desktop.sh`) builds for this Mac, installs to `~/Applications/Omni.app` and opens it. That is the path `scripts/build-mac.sh` installs the SwiftUI app to, so each refuses to replace the other's app: move the old one away first. [apps/desktop/README.md](../../apps/desktop/README.md) has the details.
+
+Opening the app starts the server on port 4747, or attaches to one this install already runs there. Quitting stops a server the app started. On its first launch, if the SwiftUI app or the Linux launcher kept data in a checkout's `data/`, the app asks once whether to keep using that folder where it is or start fresh. It never copies or moves the old folder. Kept in place, the server still reads the checkout's `.env` for its server options. Variables exported in your shell do not reach the app's server.
+
+| | Mac | Linux |
+| --- | --- | --- |
+| Data (database, threads, worktrees) | `~/Library/Application Support/Omni/data` | `~/.local/share/omni-os/data` |
+| Server log (**Server > Show Server Log**) | `~/Library/Logs/Omni/server.log` | `~/.local/state/omni-os/server.log` |
+| App settings (Quick Prompt, zoom, launch at login) | `~/Library/Application Support/Omni/settings.json` | `~/.config/Omni/settings.json` |
+| Server options (`.env`, [Configuration](configuration.md#server-options)) | `~/Library/Application Support/Omni/data/.env` | `~/.local/share/omni-os/data/.env` |
+
+The rest of this page sets Omni up from a checkout: the SwiftUI app, the Linux launcher and `npm run dev`. Those stay until the desktop app replaces them.
+
 ## What you need
 
 | Need | Check | Fix |
@@ -89,8 +108,9 @@ Running it again is safe: every answer defaults to what is saved. `npm run setup
 
 | How | Command | Notes |
 | --- | --- | --- |
-| Mac app | `scripts/build-mac.sh` | Release build, installs to `~/Applications/Omni.app`, opens it. Starts and stops the server itself |
-| Linux app | `scripts/install-linux.sh` | Builds the Web UI, installs `~/.local/share/applications/omni-os.desktop`. Open Omni from the app launcher. It starts the server, and stops it on quit only when this launch started it |
+| Desktop app | Open Omni from Applications, or run the AppImage | No checkout needed. See [The desktop app](#the-desktop-app) |
+| Mac app (being replaced by the desktop app) | `scripts/build-mac.sh` | Release build, installs to `~/Applications/Omni.app`, opens it. Starts and stops the server itself |
+| Linux app (being replaced by the desktop app) | `scripts/install-linux.sh` | Builds the Web UI, installs `~/.local/share/applications/omni-os.desktop`. Open Omni from the app launcher. It starts the server, and stops it on quit only when this launch started it |
 | Development | `npm run dev` | Server on :4747, Web UI with hot reload on http://localhost:4748 |
 | Production | `npm run build && npm start` | One process, serves the built Web UI on http://127.0.0.1:4747 |
 
@@ -117,7 +137,9 @@ Click **Update**. The server checks origin's `main` every 15 minutes. When `main
 3. rebuilds the Web UI and restarts the server,
 4. in the Mac app, when the app itself is behind, rebuilds and relaunches it.
 
-Update needs an app that started the server: the Mac app or the Linux app. A server you run with `npm run dev` or `npm start` shows the notice without the button; update it by hand:
+The desktop app updates itself instead: it checks the GitHub Releases of the repo it was built from, downloads a new version in the background and offers to relaunch into it. It installs a downloaded version when you quit, unless you keep the server running for turns: then it waits for a later quit. Relaunch to Update with turns running offers to update once they finish or stop them now. A build without a release feed (a development build, or an AppImage in a folder it cannot write) updates by installing the new DMG or AppImage over the old one.
+
+Update needs an app that started the server from a checkout: the Mac app, the Linux app, or the desktop app run with `--dev`. A server you run with `npm run dev` or `npm start` shows the notice without the button; update it by hand:
 
 ```bash
 git pull                  # a fork: git fetch upstream && git merge upstream/main
