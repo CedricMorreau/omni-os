@@ -1,6 +1,7 @@
 // A thread as the phone lists it: in Activity, in a channel and in search. Pure.
 import type { Thread, ThreadStub } from '../api.ts';
 import { relTime } from '../format.ts';
+import { threadGlyph } from '../components/ui/status.tsx';
 
 export interface RowItem {
   id: string;
@@ -40,7 +41,7 @@ export function rowOf(t: ListedThread, channel: ChannelInfo | undefined, now: nu
     channelId: t.channel_id,
     channelIcon: channel?.icon ?? null,
     role: t.role ?? null,
-    status: t.status,
+    status: threadGlyph(t),
     settled: t.status !== 'running' && t.status !== 'queued',
     time: shortTime(t.updated_at ?? t.created_at, now),
     meta: META[t.status] ?? null,

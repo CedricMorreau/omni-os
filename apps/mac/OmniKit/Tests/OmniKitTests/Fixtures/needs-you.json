@@ -36,6 +36,7 @@
         "limit_resets_at": null,
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },
@@ -90,6 +91,7 @@
         "limit_resets_at": "2026-01-05T09:00:00.000Z",
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },
@@ -147,6 +149,7 @@
         "limit_resets_at": null,
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },
@@ -206,6 +209,7 @@
         "limit_resets_at": null,
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },
@@ -260,6 +264,7 @@
         "limit_resets_at": null,
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },
@@ -308,6 +313,7 @@
         "limit_resets_at": null,
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },
@@ -356,6 +362,7 @@
         "limit_resets_at": null,
         "limit_elsewhere": 0,
         "continued_from": null,
+        "waiting_on": null,
         "created_at": "2026-01-05T09:00:00.000Z",
         "updated_at": "2026-01-05T09:00:00.000Z"
       },

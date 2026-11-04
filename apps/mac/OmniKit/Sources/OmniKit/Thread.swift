@@ -90,6 +90,8 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
   public let taskID: String?
   /// The thread this one continues on another harness (packages/shared/continue.ts). Older servers leave it out.
   public let continuedFrom: String?
+  /// Who its ticket waits on outside the team. Older servers leave it out.
+  public let waitingOn: String?
   public let source: ThreadSource
   public let automation: String?
   public let lastText: String?
@@ -140,6 +142,7 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
     case parentID = "parent_id"
     case taskID = "task_id"
     case continuedFrom = "continued_from"
+    case waitingOn = "waiting_on"
     case lastText = "last_text"
     case createdAt = "created_at"
     case updatedAt = "updated_at"
@@ -166,6 +169,7 @@ public struct OmniThread: Decodable, Hashable, Sendable, Identifiable {
     parentID = try c.decodeIfPresent(String.self, forKey: .parentID)
     taskID = try c.decodeIfPresent(String.self, forKey: .taskID)
     continuedFrom = try c.decodeIfPresent(String.self, forKey: .continuedFrom)
+    waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
     source = try c.decode(ThreadSource.self, forKey: .source)
     automation = try c.decodeIfPresent(String.self, forKey: .automation)
     lastText = try c.decodeIfPresent(String.self, forKey: .lastText)

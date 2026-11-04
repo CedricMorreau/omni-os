@@ -151,7 +151,7 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
        FROM threads t
        JOIN completions c ON c.uid = (SELECT uid FROM completions WHERE thread_id = t.id ORDER BY n DESC, uid DESC LIMIT 1)
        LEFT JOIN result_reads r ON r.thread_id = t.id
-       WHERE ${LISTED} ${scope} AND t.status IN ('done','failed','stopped') AND (r.thread_id IS NULL OR (c.n, c.uid) > (r.n, r.uid))
+       WHERE ${LISTED} ${scope} AND t.status IN ('done','failed','stopped') AND t.waiting_on IS NULL AND (r.thread_id IS NULL OR (c.n, c.uid) > (r.n, r.uid))
          AND NOT (c.status = 'done' AND t.parent_id IS NOT NULL)`,
     )
     .all(...args) as unknown as ResultRow[];

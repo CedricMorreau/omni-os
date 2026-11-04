@@ -37,6 +37,8 @@ export function glyphFor(status: ThreadStatus | string | null | undefined): Glyp
   }
 }
 
+export const threadGlyph = (t: { status: ThreadStatus | string; waiting_on?: string | null }) => (t.waiting_on && t.status === 'done' ? 'settled' : t.status);
+
 export function StatusDot({ status, size = 8, className = '' }: { status: ThreadStatus | Glyph | string | null | undefined; size?: number; className?: string }) {
   const s = glyphFor(status);
   return (

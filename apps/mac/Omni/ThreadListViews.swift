@@ -88,13 +88,13 @@ struct ThreadListRow: View {
     if showChannel {
       ChannelAvatar(name: thread.channelID, conductor: thread.channelID == SidebarSections.conductorID, size: 32, icon: model.store.channel(thread.channelID)?.icon)
         .overlay(alignment: .bottomTrailing) {
-          StatusDot(status: thread.status, size: 8, done: thread.doneAt != nil)
+          StatusDot(status: thread.status, size: 8, done: thread.doneAt != nil, waiting: thread.waitingOn != nil)
             .padding(z(2))
             .background(Tok.bg, in: Circle())
             .offset(x: 2, y: 2)
         }
     } else {
-      StatusDot(status: thread.status, done: thread.doneAt != nil)
+      StatusDot(status: thread.status, done: thread.doneAt != nil, waiting: thread.waitingOn != nil)
         .frame(width: z(32), height: z(32))
         .background(ThreadStyle.surface, in: Circle())
     }

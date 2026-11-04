@@ -87,6 +87,7 @@ struct StatusDot: View {
   var size: CGFloat = 8
   /// Ben marked it done: a grey check in place of the dot (DoneMark in apps/web/src/components/ui/status.tsx).
   var done = false
+  var waiting = false
 
   var body: some View {
     if done {
@@ -95,8 +96,8 @@ struct StatusDot: View {
         .frame(width: size, height: size)
         .help("Marked done")
     } else {
-      GlyphView(glyph: Glyph(status), size: size)
-        .help(status.label)
+      GlyphView(glyph: waiting && status == .done ? .settled : Glyph(status), size: size)
+        .help(waiting && status == .done ? "Waiting on external" : status.label)
     }
   }
 }

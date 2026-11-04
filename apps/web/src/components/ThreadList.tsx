@@ -6,7 +6,7 @@ import { drag, useFolders } from '../folders.tsx';
 import { groupByDay, plural, relTime } from '../format.ts';
 import { href } from '../router.ts';
 import { useApp, useFeed, useNow } from '../store.tsx';
-import { Avatar, Button, Chip, DoneMark, Empty, ErrorNote, Icon, Loading, StatusDot } from './ui.tsx';
+import { Avatar, Button, Chip, DoneMark, Empty, ErrorNote, Icon, Loading, StatusDot, threadGlyph } from './ui.tsx';
 import { ThreadHandoffs } from './ThreadHandoffs.tsx';
 
 /** Loads a thread list and keeps it current from /feed. With `archived`, the list holds archived threads only. */
@@ -70,12 +70,12 @@ export function ThreadRow({ t, showChannel, pr }: { t: Thread; showChannel?: boo
         <span className="relative mt-0.5 shrink-0">
           <Avatar name={t.channel_id} channelIcon={channels.find((c) => c.id === t.channel_id)?.icon} size={32} />
           <span className="absolute -right-0.5 -bottom-0.5 grid h-3.5 w-3.5 place-items-center rounded-full bg-bg">
-            {t.done_at ? <DoneMark size={8} /> : <StatusDot status={t.status} size={8} />}
+            {t.done_at ? <DoneMark size={8} /> : <StatusDot status={threadGlyph(t)} size={8} />}
           </span>
         </span>
       ) : (
         <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-surface transition-colors group-hover:bg-bg">
-          {t.done_at ? <DoneMark /> : <StatusDot status={t.status} />}
+          {t.done_at ? <DoneMark /> : <StatusDot status={threadGlyph(t)} />}
         </span>
       )}
       <div className="min-w-0 flex-1">

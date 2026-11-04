@@ -287,7 +287,7 @@ struct SidebarView: View {
     let item = SidebarItem.thread(thread.id)
     return Button { model.route = .thread(id: thread.id) } label: {
       HStack(spacing: z(8)) {
-        ThreadStatusIcon(status: thread.status, done: thread.doneAt != nil)
+        ThreadStatusIcon(status: thread.status, done: thread.doneAt != nil, waiting: thread.waitingOn != nil)
           .frame(width: z(10))
         Text(thread.title.isEmpty ? "Untitled" : thread.title)
           .lineLimit(1)
@@ -663,7 +663,7 @@ struct ThreadRow: View {
 
   var body: some View {
     HStack(spacing: z(8)) {
-      ThreadStatusIcon(status: agents > 0 ? .running : thread.status, done: thread.doneAt != nil)
+      ThreadStatusIcon(status: agents > 0 ? .running : thread.status, done: thread.doneAt != nil, waiting: thread.waitingOn != nil)
         .frame(width: z(12))
       Text(thread.title.isEmpty ? "Untitled" : thread.title)
         .lineLimit(1)
@@ -693,7 +693,7 @@ private struct SectionRow: View {
   var body: some View {
     let title = thread.title.isEmpty ? "Untitled" : thread.title
     HStack(spacing: z(10)) {
-      ThreadStatusIcon(status: agents > 0 ? .running : thread.status, done: thread.doneAt != nil)
+      ThreadStatusIcon(status: agents > 0 ? .running : thread.status, done: thread.doneAt != nil, waiting: thread.waitingOn != nil)
         .frame(width: z(15))
       Text(title)
         .lineLimit(1)
@@ -787,14 +787,15 @@ private struct TreeLine: View {
 struct ThreadStatusIcon: View {
   let status: ThreadStatus
   var done = false
+  var waiting = false
 
   var body: some View {
     if status == .running {
       Loader(size: 11, color: Tok.live)
         .accessibilityLabel("Running")
     } else {
-      StatusDot(status: status, size: 7, done: done)
-        .accessibilityLabel(done ? "Marked done" : status.label)
+      StatusDot(status: status, size: 7, done: done, waiting: waiting)
+        .accessibilityLabel(done ? "Marked done" : waiting && status == .done ? "Waiting on external" : status.label)
     }
   }
 }

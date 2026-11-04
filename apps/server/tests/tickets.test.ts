@@ -160,9 +160,11 @@ describe('badges', () => {
   it('marks a ticket as waiting on an outside party, keeps its stage, and clears it on the next move', async () => {
     const id = await routed([1, 3]);
     expect(T.ticketView(T.setWaiting(id, ' Reviews.io support '))).toMatchObject({ stage: 1, badge: 'waiting', waiting_on: 'Reviews.io support', waiting_days: 0 });
+    expect(db.threads.get(id)?.waiting_on).toBe('Reviews.io support');
     expect(T.ticketView(T.setWaiting(id, null))).toMatchObject({ badge: 'check', waiting_on: null, waiting_days: null });
     T.setWaiting(id, 'Acme');
     expect(T.ticketView(T.moveTicket(id, 3))).toMatchObject({ stage: 3, waiting_on: null });
+    expect(db.threads.get(id)?.waiting_on).toBeNull();
   });
 
   it('hides closed tickets unless asked', async () => {

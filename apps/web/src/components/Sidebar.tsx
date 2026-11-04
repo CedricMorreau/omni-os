@@ -12,7 +12,7 @@ import { readPref, useApp, useNow, writePref } from '../store.tsx';
 import { parseChannelIcon } from '@omni/shared/channel-icon.ts';
 import { ThemeSwitch } from './theme.tsx';
 import { HARNESS_ROWS, HarnessLogo, Loader, OmniMark, SLOT_ROWS } from './brand.tsx';
-import { ChannelMark, DoneMark, ErrorNote, Icon, IconButton, Kbd, STATUS_LABEL, StatusDot, Thumb, Ticks, useSlidingThumb, Wordmark, type IconName } from './ui.tsx';
+import { ChannelMark, DoneMark, ErrorNote, Icon, IconButton, Kbd, STATUS_LABEL, StatusDot, threadGlyph, Thumb, Ticks, useSlidingThumb, Wordmark, type IconName } from './ui.tsx';
 import { ThreadHandoffs } from './ThreadHandoffs.tsx';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -192,7 +192,7 @@ function ThreadLink({ t, active, tasks, onNavigate, indent = true }: { t: Thread
         }`}
       >
         <span className="grid w-3 shrink-0 place-items-center">
-          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={t.status} size={7} />}
+          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={threadGlyph(t)} size={7} />}
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
         {t.harness && (
@@ -275,7 +275,7 @@ function SectionLink({ t, channel, active, agents, unpin, onNavigate }: { t: Thr
         }`}
       >
         <span className="grid w-[15px] shrink-0 place-items-center">
-          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={t.status} size={7} />}
+          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={threadGlyph(t)} size={7} />}
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
         <span

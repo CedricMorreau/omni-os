@@ -70,6 +70,8 @@ export interface Thread {
   limit_elsewhere: number;
   /** The thread this one continues on another harness (apps/server/continue.ts), null for most. Not a crew parent. Synced. */
   continued_from: string | null;
+  /** Who its ticket waits on outside the team (apps/server/tickets.ts), null for most. */
+  waiting_on: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -128,7 +130,7 @@ const json = (v: object | null) => (v ? JSON.stringify(v) : null);
 
 /** The columns clients read, without sync's run_machine, the limit stop's id and owner, or the session state. */
 export const THREAD_COLUMNS =
-  'id, channel_id, title, status, role, model, harness, effort, auto_reason, queued_harness, queued_model, queued_effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, limit_state, limit_resets_at, limit_elsewhere, continued_from, created_at, updated_at';
+  'id, channel_id, title, status, role, model, harness, effort, auto_reason, queued_harness, queued_model, queued_effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, limit_state, limit_resets_at, limit_elsewhere, continued_from, waiting_on, created_at, updated_at';
 
 /** Who runs a thread with this status: this machine while it is running or queued here and sync is set up, else nobody. */
 const runMachine = (status: ThreadStatus) => (status === 'running' || status === 'queued' ? outbox.machineId() : null);
@@ -203,7 +205,7 @@ export const threads = {
   create(
     t: Omit<
       Thread,
-      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'queued_harness' | 'queued_model' | 'queued_effort' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere' | 'continued_from'
+      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'queued_harness' | 'queued_model' | 'queued_effort' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere' | 'continued_from' | 'waiting_on'
     > & {
       has_run?: number; created_at?: string; harness?: string; effort?: string; auto_reason?: string | null; folder_id?: string | null; setup?: ThreadSetup | null;
     },
@@ -232,7 +234,7 @@ export const threads = {
     return { sessions: parsed(row?.sessions ?? null), handover: parsed(row?.handover ?? null) };
   },
   update(id: string, patch: Partial<Thread> & Partial<SessionState>) {
-    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'auto_reason', 'queued_harness', 'queued_model', 'queued_effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'updated_at'] as const;
+    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'auto_reason', 'queued_harness', 'queued_model', 'queued_effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'waiting_on', 'updated_at'] as const;
     const keys = allowed.filter((k) => k in patch);
     const sets = keys.map((k) => `${k} = ?`);
     const vals = keys.map((k) => (patch[k] ?? null) as string | number | null);

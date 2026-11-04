@@ -86,6 +86,7 @@ export const tickets = {
       ...(keys.map((k) => fields[k]) as (string | number | null)[]),
       threadId,
     );
+    if ('waiting_on' in patch) threads.update(threadId, { waiting_on: patch.waiting_on ?? null });
     return tickets.get(threadId)!;
   },
   remove: (threadId: string) => db.prepare('DELETE FROM tickets WHERE thread_id = ?').run(threadId),
