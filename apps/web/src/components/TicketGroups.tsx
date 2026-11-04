@@ -3,7 +3,7 @@ import { api } from '../api.ts';
 import { relTime } from '../format.ts';
 import { href } from '../router.ts';
 import { useNow } from '../store.tsx';
-import { groupByStage, phaseColor, type TicketView } from '../ticket-route.ts';
+import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticket-route.ts';
 import { StagePill } from './StagePill.tsx';
 import { Chip } from './ui.tsx';
 
@@ -34,8 +34,8 @@ export function TicketGroups({ tickets }: { tickets: TicketView[] }) {
   return (
     <div className="space-y-4">
       {sections.map((s) => (
-        <section key={s.stage} aria-labelledby={`tickets-stage-${s.stage}`}>
-          <h3 id={`tickets-stage-${s.stage}`} className="caption sticky top-0 z-[2] flex items-center gap-2 bg-bg px-3.5 py-2" style={{ color: phaseColor(s.phase) }}>
+        <section key={s.key} aria-labelledby={`tickets-${s.key}`}>
+          <h3 id={`tickets-${s.key}`} className="caption sticky top-0 z-[2] flex items-center gap-2 bg-bg px-3.5 py-2" style={{ color: phaseColor(s.phase) }}>
             {s.label}
             <span className="text-fg-4/70">{s.items.length}</span>
           </h3>
@@ -46,6 +46,7 @@ export function TicketGroups({ tickets }: { tickets: TicketView[] }) {
                 {t.ref}
               </Chip>
               <StagePill ticket={t} />
+              {waitingText(t) && <span className="min-w-0 truncate text-[12px] text-fg-3">{waitingText(t)}</span>}
               <span className="ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-4 tabular-nums">{relTime(t.updated_at)}</span>
             </a>
           ))}

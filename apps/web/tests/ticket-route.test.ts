@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_STAGES, autoOpenProposal, canClose, proposalSeenKey, proposalStamp, togglePanel, defaultRoleFor, draftLabel, draftSeenKey, draftStamp, draftUnseen, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
+import { ALL_STAGES, WAITING_LABEL, waitingText, autoOpenProposal, canClose, proposalSeenKey, proposalStamp, togglePanel, defaultRoleFor, draftLabel, draftSeenKey, draftStamp, draftUnseen, groupByStage, initialTicks, phaseColor, stageLabel, stagePhase, stagePillText, withoutTickets, routeMode, routeSummary, skipReason, stageState, toggleStage } from '../src/ticket-route.ts';
 
 const proposal = { stages: [3, 4, 9, 10], reasons: { '1': 'tiny copy fix', '2': ' no plan needed ' } };
 
@@ -221,5 +221,37 @@ describe('autoOpenProposal', () => {
 
   it('keeps one storage key per thread', () => {
     expect(proposalSeenKey('t1')).toBe('omni:ticket-proposal-seen:t1');
+  });
+});
+
+describe('waiting on external', () => {
+  const t = (thread_id: string, stage: number, updated_at: string, waiting_on: string | null = null, waiting_days: number | null = null) => ({
+    thread_id, ref: thread_id, title: thread_id, stage, updated_at, closed_at: null, waiting_on, waiting_days,
+  });
+
+  it('moves waiting tickets out of their stage into one group placed first', () => {
+    const sections = groupByStage([
+      t('a', 3, '2026-11-01'),
+      t('b', 3, '2026-11-02', 'Acme support', 2),
+      t('c', 0, '2026-11-03'),
+      t('d', 9, '2026-11-04', 'Acme legal', 0),
+    ]);
+    expect(sections.map((s) => [s.key, s.label, s.items.map((i) => i.thread_id)])).toEqual([
+      ['waiting', WAITING_LABEL, ['d', 'b']],
+      ['stage-0', 'Intake', ['c']],
+      ['stage-3', '3 Execute', ['a']],
+    ]);
+  });
+
+  it('treats a blank who as not waiting and leaves out the empty group', () => {
+    const sections = groupByStage([t('a', 3, '2026-11-01', '  ')]);
+    expect(sections.map((s) => s.key)).toEqual(['stage-3']);
+  });
+
+  it('writes the quiet label with the days, or today', () => {
+    expect(waitingText(t('a', 3, '2026-11-01', 'Acme support', 3))).toBe('Waiting on Acme support · 3d');
+    expect(waitingText(t('a', 3, '2026-11-01', 'Acme support', 0))).toBe('Waiting on Acme support · today');
+    expect(waitingText(t('a', 3, '2026-11-01', 'Acme support', null))).toBe('Waiting on Acme support · today');
+    expect(waitingText(t('a', 3, '2026-11-01'))).toBeNull();
   });
 });

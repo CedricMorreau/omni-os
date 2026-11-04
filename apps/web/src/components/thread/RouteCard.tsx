@@ -1,11 +1,13 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, ApiError, errorText, type Thread } from '../../api.ts';
 import { STAGES } from '../../roles.ts';
-import { ALL_STAGES, canClose, initialTicks, phaseColor, routeMode, routeSummary, skipReason, stagePhase, stageState, toggleStage, type Phase, type StageState, type TicketView } from '../../ticket-route.ts';
+import { ALL_STAGES, canClose, isWaiting, waitingText, initialTicks, phaseColor, routeMode, routeSummary, skipReason, stagePhase, stageState, toggleStage, type Phase, type StageState, type TicketView } from '../../ticket-route.ts';
 import { phaseStyle, StagePill } from '../StagePill.tsx';
 import { Button, ErrorNote, StatusDot } from '../ui.tsx';
 
 const ticketPath = (id: string) => `/tickets/${encodeURIComponent(id)}`;
+
+export const setTicketWaiting = (threadId: string, on: string | null) => api.post<TicketView>(`${ticketPath(threadId)}/waiting`, { on });
 
 export function useTicket(thread: Pick<Thread, 'id' | 'role' | 'status'> | null, version: number) {
   const [ticket, setTicket] = useState<TicketView | null>(null);
@@ -168,6 +170,71 @@ function CloseTicket({ ticket, onClosed }: { ticket: TicketView; onClosed: (t: T
   );
 }
 
+function WaitingControl({ ticket, onTicket }: { ticket: TicketView; onTicket: (t: TicketView) => void }) {
+  const [asking, setAsking] = useState(false);
+  const [who, setWho] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const waiting = isWaiting(ticket);
+  const id = `route-${ticket.thread_id}-waiting-on`;
+
+  const send = async (on: string | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onTicket(await setTicketWaiting(ticket.thread_id, on));
+      setAsking(false);
+      setWho('');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    if (who.trim()) void send(who.trim());
+  };
+
+  if (asking) {
+    return (
+      <form onSubmit={save} className="flex flex-col gap-2">
+        <label htmlFor={id} className="text-[12.5px] text-fg-2">
+          Who are we waiting on?
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input id={id} className="field min-w-0 flex-[1_1_12rem]" value={who} maxLength={80} onChange={(e) => setWho(e.target.value)} placeholder="Acme support" autoFocus disabled={busy} />
+          <Button type="submit" size="sm" variant="primary" busy={busy} disabled={!who.trim()}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAsking(false)} disabled={busy}>
+            Cancel
+          </Button>
+        </div>
+        {error && <ErrorNote>{error}</ErrorNote>}
+      </form>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {waiting && <span className="text-[12.5px] text-fg-2">{waitingText(ticket)}</span>}
+        {waiting ? (
+          <Button size="sm" variant="ghost" icon="x" busy={busy} onClick={() => void send(null)}>
+            Clear waiting
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" icon="clock" onClick={() => setAsking(true)}>
+            Waiting on external…
+          </Button>
+        )}
+      </div>
+      {error && <ErrorNote>{error}</ErrorNote>}
+    </div>
+  );
+}
+
 export function RouteCard({ ticket, onTicket: setTicket, className = '' }: { ticket: TicketView | null; onTicket: (t: TicketView) => void; className?: string }) {
   const [editing, setEditing] = useState(false);
 
@@ -213,6 +280,7 @@ export function RouteCard({ ticket, onTicket: setTicket, className = '' }: { tic
         </>
       )}
       {mode === 'route' && (editing && !closed ? <RouteEditor ticket={ticket} proposal={false} onSaved={saved} onCancel={() => setEditing(false)} /> : <StageChips ticket={ticket} />)}
+      {!closed && !editing && <WaitingControl key={`w-${ticket.thread_id}`} ticket={ticket} onTicket={setTicket} />}
       {!editing && canClose(ticket) && <CloseTicket key={ticket.thread_id} ticket={ticket} onClosed={setTicket} />}
       {!closed && mode === 'waiting' && <p className="text-[12.5px] text-fg-3">Claude is reading the ticket and will propose a route.</p>}
     </section>

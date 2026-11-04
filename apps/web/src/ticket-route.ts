@@ -63,23 +63,36 @@ export function stagePillText(t: Pick<TicketView, 'stage' | 'closed_at'>) {
   return t.stage >= 1 && t.stage <= STAGES.length ? `${t.stage} · ${STAGES[t.stage - 1]}` : 'Intake';
 }
 
-export type TicketRow = Pick<TicketView, 'thread_id' | 'ref' | 'title' | 'stage' | 'updated_at' | 'closed_at'>;
+export type TicketRow = Pick<TicketView, 'thread_id' | 'ref' | 'title' | 'stage' | 'updated_at' | 'closed_at'> & Partial<Pick<TicketView, 'waiting_on' | 'waiting_days'>>;
 
 export interface StageSection<T extends TicketRow> {
-  stage: number;
+  key: string;
+  stage: number | null;
   label: string;
   phase: Phase;
   items: T[];
 }
 
+export const WAITING_LABEL = 'Waiting on external';
+
+export const isWaiting = (t: Pick<TicketRow, 'waiting_on'>) => !!t.waiting_on?.trim();
+
+export function waitingText(t: Pick<TicketRow, 'waiting_on' | 'waiting_days'>) {
+  if (!isWaiting(t)) return null;
+  const days = t.waiting_days ?? 0;
+  return `Waiting on ${t.waiting_on!.trim()} · ${days > 0 ? `${days}d` : 'today'}`;
+}
+
 export function groupByStage<T extends TicketRow>(tickets: T[]): StageSection<T>[] {
+  const newest = (a: T, b: T) => b.updated_at.localeCompare(a.updated_at);
   const open = tickets.filter((t) => !t.closed_at);
-  return [0, ...ALL_STAGES].flatMap((stage) => {
-    const items = open
-      .filter((t) => (stage === 0 ? !(t.stage >= 1 && t.stage <= STAGES.length) : t.stage === stage))
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    return items.length ? [{ stage, label: stageLabel(stage), phase: stagePhase(stage), items }] : [];
+  const waiting = open.filter(isWaiting).sort(newest);
+  const moving = open.filter((t) => !isWaiting(t));
+  const stages = [0, ...ALL_STAGES].flatMap((stage) => {
+    const items = moving.filter((t) => (stage === 0 ? !(t.stage >= 1 && t.stage <= STAGES.length) : t.stage === stage)).sort(newest);
+    return items.length ? [{ key: `stage-${stage}`, stage, label: stageLabel(stage), phase: stagePhase(stage), items }] : [];
   });
+  return waiting.length ? [{ key: 'waiting', stage: null, label: WAITING_LABEL, phase: 'closed' as Phase, items: waiting }, ...stages] : stages;
 }
 
 export function withoutTickets<T extends { id: string }>(threads: T[], tickets: Pick<TicketView, 'thread_id'>[]) {

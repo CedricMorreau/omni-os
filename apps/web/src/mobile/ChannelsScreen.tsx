@@ -8,7 +8,7 @@ import { href } from '../router.ts';
 import { QuickLinks } from '../components/QuickLinks.tsx';
 import { StagePill } from '../components/StagePill.tsx';
 import { useChannelTickets } from '../components/TicketGroups.tsx';
-import { groupByStage, phaseColor, type TicketView } from '../ticket-route.ts';
+import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticket-route.ts';
 import { readPref, useApp, useNow, writePref } from '../store.tsx';
 import { useFolders } from '../folders.tsx';
 import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoRow, MoScroll, MoSection, MoTitle } from './parts.tsx';
@@ -236,7 +236,7 @@ export function ChannelScreen({ id }: { id: string }) {
         )}
         {sections.map((s) => (
           <MoSection
-            key={s.stage}
+            key={s.key}
             title={<span style={{ color: phaseColor(s.phase) }}>{s.label}</span>}
             count={s.items.length}
           >
@@ -315,6 +315,7 @@ function MobileTicketRows({ items, now, onOpen }: { items: TicketView[]; now: nu
                 {t.ref}
               </Chip>
               <StagePill ticket={t} />
+              {waitingText(t) && <span className="min-w-0 truncate text-[12px] text-fg-3">{waitingText(t)}</span>}
             </span>
           </span>
         </button>
