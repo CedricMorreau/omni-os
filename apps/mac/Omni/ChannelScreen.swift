@@ -259,7 +259,7 @@ private struct ChannelThreads: View {
       NeedsYouSection(model: model, inbox: model.store.needsYou?.inChannel(channel.id), quiet: true)
       let ticketed = loaded != nil && !shownTickets.isEmpty
       if ticketed {
-        TicketStageList(model: model, sections: TicketBoard.sections(shownTickets))
+        TicketStageList(model: model, sections: TicketBoard.sections(shownTickets)) { await reloadTickets() }
       }
       if let error, loaded == nil {
         ErrorNote(text: error) { Task { await load() } }
@@ -301,7 +301,7 @@ private struct ChannelThreads: View {
         tickets = []
         return
       }
-      if let list = try? await model.client.tickets(channel: channel.id), !Task.isCancelled { tickets = list }
+      await reloadTickets()
     }
     // A merge shows up within a minute, as on the web.
     .task(id: channel.id) {
@@ -310,6 +310,11 @@ private struct ChannelThreads: View {
         try? await Task.sleep(for: .seconds(60))
       }
     }
+  }
+
+  private func reloadTickets() async {
+    guard channel.kind == .client else { return }
+    if let list = try? await model.client.tickets(channel: channel.id), !Task.isCancelled { tickets = list }
   }
 
   private func load() async {
@@ -329,6 +334,7 @@ private struct ChannelThreads: View {
 private struct TicketStageList: View {
   let model: AppModel
   let sections: [TicketBoard.Section]
+  let reload: () async -> Void
 
   var body: some View {
     LazyVStack(alignment: .leading, spacing: z(12)) {
@@ -347,8 +353,7 @@ private struct TicketStageList: View {
           .accessibilityElement(children: .combine)
           .accessibilityLabel("\(section.title), \(Format.plural(section.tickets.count, "ticket"))")
           ForEach(section.tickets) { ticket in
-            TicketListRow(model: model, ticket: ticket)
-              .openInNewWindow(ticket.threadID, model: model, title: ticket.title)
+            TicketListRow(model: model, ticket: ticket, reload: reload)
           }
         }
       }
@@ -359,9 +364,55 @@ private struct TicketStageList: View {
 private struct TicketListRow: View {
   let model: AppModel
   let ticket: Ticket
+  let reload: () async -> Void
   @State private var hovering = false
+  @State private var asking = false
+  @State private var who = ""
+  @State private var failure: String?
 
   var body: some View {
+    row
+      .openInNewWindow(ticket.threadID, model: model, title: ticket.title, extra: [waitingAction])
+      .alert("Waiting on external", isPresented: $asking) {
+        TextField("Who", text: $who)
+        Button("Set") { setWaiting(who) }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("Who does this ticket wait on?")
+      }
+      .alert("Could not update the ticket", isPresented: Binding { failure != nil } set: { if !$0 { failure = nil } }) {
+        Button("OK", role: .cancel) {}
+      } message: {
+        Text(failure ?? "")
+      }
+  }
+
+  private var waitingAction: MenuAction {
+    if ticket.isWaiting {
+      return MenuAction(title: "Clear waiting") { setWaiting(nil) }
+    }
+    return MenuAction(title: "Waiting on external\u{2026}") {
+      who = ""
+      asking = true
+    }
+  }
+
+  private func setWaiting(_ on: String?) {
+    let value = on?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if on != nil, value?.isEmpty ?? true { return }
+    Task {
+      do {
+        _ = try await model.client.setTicketWaiting(threadID: ticket.threadID, on: value)
+        await reload()
+      } catch let e as OmniAPIError {
+        failure = e.message
+      } catch {
+        failure = error.localizedDescription
+      }
+    }
+  }
+
+  private var row: some View {
     Button {
       model.route = .thread(id: ticket.threadID)
     } label: {
@@ -373,6 +424,12 @@ private struct TicketListRow: View {
           .truncationMode(.tail)
         if !ticket.ref.isEmpty { Chip(text: ticket.ref, tone: .outline) }
         StagePill(text: ticket.stageLabel, phase: ticket.phase)
+        if let waiting = ticket.waitingLabel {
+          Text(waiting)
+            .font(.omni(size: 12))
+            .foregroundStyle(Tok.fg3)
+            .lineLimit(1)
+        }
         Spacer(minLength: z(8))
         if let updated = ticket.updated {
           TimelineView(.everyMinute) { _ in
@@ -391,7 +448,9 @@ private struct TicketListRow: View {
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(ticket.title.isEmpty ? "Untitled" : ticket.title), \(ticket.ref), \(ticket.stageLabel)")
+    .accessibilityLabel(
+      ["\(ticket.title.isEmpty ? "Untitled" : ticket.title)", ticket.ref, ticket.stageLabel, ticket.waitingLabel ?? ""]
+        .filter { !$0.isEmpty }.joined(separator: ", "))
   }
 }
 

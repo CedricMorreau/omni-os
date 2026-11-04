@@ -221,4 +221,43 @@ private let proposedJSON = """
     panels.proposalChanged(Ticket.RouteProposal(stages: [2]))
     #expect(panels.shown == .route)
   }
+  @Test func decodesWhoATicketWaitsOn() throws {
+    let waiting = try decode(Ticket.self, #"{"thread_id":"t","stage":1,"badge":"waiting","waiting_on":"Acme support","waiting_days":3}"#)
+    #expect(waiting.waitingOn == "Acme support")
+    #expect(waiting.isWaiting)
+    #expect(waiting.waitingLabel == "Waiting on Acme support · 3d")
+    let today = try decode(Ticket.self, #"{"thread_id":"t","stage":1,"waiting_on":"Acme support","waiting_days":0}"#)
+    #expect(today.waitingLabel == "Waiting on Acme support · today")
+    #expect(try decode(Ticket.self, #"{"thread_id":"t","waiting_on":null}"#).waitingOn == nil)
+    #expect(try decode(Ticket.self, #"{"thread_id":"t","waiting_on":"  "}"#).isWaiting == false)
+    #expect(try decode(Ticket.self, #"{"thread_id":"t"}"#).waitingLabel == nil)
+  }
+
+  @Test func putsWaitingTicketsInTheirOwnFirstSection() throws {
+    let list = try decode([Ticket].self, """
+      [{"thread_id":"a","stage":1,"updated_at":"2026-10-28T09:00:00.000Z"},
+       {"thread_id":"b","stage":1,"waiting_on":"Acme support","updated_at":"2026-10-28T09:00:00.000Z"},
+       {"thread_id":"c","stage":3,"waiting_on":"Acme legal","updated_at":"2026-10-29T09:00:00.000Z"},
+       {"thread_id":"d","stage":0,"updated_at":"2026-10-28T09:00:00.000Z"}]
+      """)
+    let sections = TicketBoard.sections(list)
+    #expect(sections.map(\.title) == ["Waiting on external", "Intake", "1 Research"])
+    #expect(sections[0].tickets.map(\.threadID) == ["c", "b"])
+    #expect(sections[0].isWaiting && !sections[1].isWaiting)
+    #expect(Set(sections.map(\.id)).count == sections.count)
+    #expect(!(0...10).contains(sections[0].id))
+    #expect(sections[2].tickets.map(\.threadID) == ["a"])
+    #expect(TicketBoard.sections(Array(list.prefix(1))).map(\.title) == ["1 Research"])
+  }
+
+  @Test func setsAndClearsWhatATicketWaitsOn() async throws {
+    let t = StubTransport(body: routedJSON)
+    let client = OmniClient(port: 4799, transport: t)
+    _ = try await client.setTicketWaiting(threadID: "t1", on: "Acme support")
+    _ = try await client.setTicketWaiting(threadID: "t1", on: nil)
+    #expect(t.requests[0].httpMethod == "POST")
+    #expect(t.requests[0].url?.path == "/api/tickets/t1/waiting")
+    #expect(try bodyJSON(t.requests[0]) == .object(["on": .string("Acme support")]))
+    #expect(try bodyJSON(t.requests[1]) == .object(["on": .null]))
+  }
 }

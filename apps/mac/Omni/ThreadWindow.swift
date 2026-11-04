@@ -125,9 +125,17 @@ extension View {
   /// Open in New Window in the context menu, and on an Option-click.
   /// - Parameter stub: a sidebar row's thread, which also gets "Move to Folder".
   /// - Parameter archived: the thread is archived, so the menu offers Unarchive.
-  func openInNewWindow(_ threadID: String, model: AppModel? = nil, title: String = "", stub: ThreadStub? = nil, archived: Bool = false) -> some View {
-    modifier(OpenInNewWindow(threadID: threadID, model: model, title: title, stub: stub, archived: archived))
+  func openInNewWindow(
+    _ threadID: String, model: AppModel? = nil, title: String = "", stub: ThreadStub? = nil, archived: Bool = false,
+    extra: [MenuAction] = []
+  ) -> some View {
+    modifier(OpenInNewWindow(threadID: threadID, model: model, title: title, stub: stub, archived: archived, extra: extra))
   }
+}
+
+struct MenuAction {
+  let title: String
+  let action: () -> Void
 }
 
 private struct OpenInNewWindow: ViewModifier {
@@ -138,6 +146,7 @@ private struct OpenInNewWindow: ViewModifier {
   let title: String
   let stub: ThreadStub?
   let archived: Bool
+  var extra: [MenuAction] = []
   @Environment(\.openWindow) private var openWindow
   @State private var renaming = false
   @State private var draft = ""
@@ -148,6 +157,10 @@ private struct OpenInNewWindow: ViewModifier {
     content
       .contextMenu {
         Button("Open in New Window") { openWindow(id: ThreadWindow.id, value: threadID) }
+        if !extra.isEmpty {
+          Divider()
+          ForEach(Array(extra.enumerated()), id: \.offset) { _, item in Button(item.title, action: item.action) }
+        }
         if let model {
           Divider()
           Button("Rename Thread...") {

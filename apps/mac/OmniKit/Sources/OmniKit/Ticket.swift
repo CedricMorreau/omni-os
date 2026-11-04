@@ -70,6 +70,7 @@ public struct Ticket: Decodable, Hashable, Sendable {
   public let round: Int
   public let badge: String
   public let waitingDays: Int?
+  public let waitingOn: String?
   public let gates: Gates
   public let draft: Draft?
   public let role: String?
@@ -85,6 +86,7 @@ public struct Ticket: Decodable, Hashable, Sendable {
     case stageName = "stage_name"
     case skipped, round, badge
     case waitingDays = "waiting_days"
+    case waitingOn = "waiting_on"
     case gates, draft, role, route
     case routeProposal = "route_proposal"
     case threadStatus = "thread_status"
@@ -108,6 +110,10 @@ public struct Ticket: Decodable, Hashable, Sendable {
     round = try c.decodeIfPresent(Int.self, forKey: .round) ?? 1
     badge = try c.decodeIfPresent(String.self, forKey: .badge) ?? "working"
     waitingDays = try c.decodeIfPresent(Int.self, forKey: .waitingDays)
+    waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn).flatMap {
+      let who = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+      return who.isEmpty ? nil : who
+    }
     gates = try c.decodeIfPresent(Gates.self, forKey: .gates) ?? Gates()
     draft = try c.decodeIfPresent(Draft.self, forKey: .draft)
     role = try c.decodeIfPresent(String.self, forKey: .role)
@@ -124,6 +130,13 @@ extension Ticket: Identifiable {
   public var phase: TicketPhase { .of(stage: stage, closed: closedAt != nil) }
   public var stageLabel: String { TicketPhase.label(stage: stage, name: stageName, closed: closedAt != nil) }
   public var updated: Date? { OmniJSON.parseDate(updatedAt) }
+  public var isWaiting: Bool { waitingOn != nil }
+
+  public var waitingLabel: String? {
+    guard let who = waitingOn else { return nil }
+    let days = waitingDays ?? 0
+    return "Waiting on \(who) · \(days <= 0 ? "today" : "\(days)d")"
+  }
 }
 
 public enum TicketPhase: String, CaseIterable, Hashable, Sendable {
@@ -157,17 +170,24 @@ public enum TicketBoard {
     public let tickets: [Ticket]
     public var id: Int { stage }
     public var phase: TicketPhase { .of(stage: stage) }
+    public var isWaiting: Bool { stage == TicketBoard.waitingID }
   }
+
+  public static let waitingID = -1
 
   public static func sections(_ tickets: [Ticket]) -> [Section] {
     let open = tickets.filter { $0.closedAt == nil }
-    return (0...TicketStage.all.count).compactMap { stage in
-      let here = open.filter { min(max($0.stage, 0), TicketStage.all.count) == stage }
-        .sorted { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
+    let newest: (Ticket, Ticket) -> Bool = { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
+    let waiting = open.filter(\.isWaiting).sorted(by: newest)
+    let staged = open.filter { !$0.isWaiting }
+    let stages: [Section] = (0...TicketStage.all.count).compactMap { stage in
+      let here = staged.filter { min(max($0.stage, 0), TicketStage.all.count) == stage }.sorted(by: newest)
       guard !here.isEmpty else { return nil }
       let title = stage == 0 ? "Intake" : "\(stage) \(TicketStage.all[stage - 1].name)"
       return Section(stage: stage, title: title, tickets: here)
     }
+    guard !waiting.isEmpty else { return stages }
+    return [Section(stage: waitingID, title: "Waiting on external", tickets: waiting)] + stages
   }
 
   public static func others(_ threads: [OmniThread], tickets: [Ticket]) -> [OmniThread] {
@@ -248,6 +268,17 @@ private struct CloseBody: Encodable, Sendable {
   let by: String
 }
 
+private struct WaitingBody: Encodable, Sendable {
+  let on: String?
+
+  func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(on, forKey: .on)
+  }
+
+  enum CodingKeys: String, CodingKey { case on }
+}
+
 private struct RouteBody: Encodable, Sendable {
   let stages: [Int]
 }
@@ -267,6 +298,10 @@ extension OmniClient {
 
   public func setTicketRoute(threadID: String, stages: [Int]) async throws(OmniAPIError) -> Ticket {
     try await send("POST", "/api/tickets/\(uriComponent(threadID))/route", body: RouteBody(stages: stages))
+  }
+
+  public func setTicketWaiting(threadID: String, on: String?) async throws(OmniAPIError) -> Ticket {
+    try await send("POST", "/api/tickets/\(uriComponent(threadID))/waiting", body: WaitingBody(on: on))
   }
 
   public func closeTicket(threadID: String) async throws(OmniAPIError) -> Ticket {
