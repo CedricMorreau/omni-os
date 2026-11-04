@@ -88,9 +88,15 @@ const ORIGIN_TONE: Record<Provenance, ChipTone> = {
 export function Origin({ of, label, title, onReset, busy }: { of: Provenance; label?: string; title?: string; onReset?: () => void; busy?: boolean }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
-      <Chip tone={ORIGIN_TONE[of]} title={title}>
-        {label ?? PROVENANCE_LABEL[of]}
-      </Chip>
+      {of === 'default' ? (
+        <span title={title} className="text-[11.5px] text-fg-3">
+          {label ?? PROVENANCE_LABEL[of]}
+        </span>
+      ) : (
+        <Chip tone={ORIGIN_TONE[of]} title={title}>
+          {label ?? PROVENANCE_LABEL[of]}
+        </Chip>
+      )}
       {onReset && resettable(of) && (
         <button type="button" disabled={busy} onClick={onReset} className="text-[11.5px] text-fg-3 underline-offset-2 hover:text-fg hover:underline disabled:opacity-50">
           Reset
@@ -154,7 +160,7 @@ export function ServerOptions({ section, entry, title = 'Server options' }: { se
             <li key={o.env} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2.5">
               <div className="min-w-0 flex-1 basis-56">
                 <div className="text-[13px] font-medium">{o.label}</div>
-                <p className="mt-0.5 text-[12px] text-fg-3">{o.hint}</p>
+                <p className="mt-0.5 text-[13px] leading-[18px] text-fg-3">{o.hint}</p>
                 <code className="mt-0.5 block text-[11.5px] text-fg-3">{o.env}</code>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">

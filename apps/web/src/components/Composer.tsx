@@ -142,7 +142,7 @@ export function NewThreadComposer({
 
   const { channelOptions, roleOptions } = pickerOptions(visibleChannels, channel, crew);
   return (
-    <div className={shell('rounded-xl bg-surface', att.over)} {...att.dropZone}>
+    <div className={shell('rounded-[20px] bg-surface', att.over)} {...att.dropZone}>
       <DropHint over={att.over} />
       {/* Near the top of the page, so it opens downward. */}
       {slashMenu.menu && <SlashMenu {...slashMenu.menu} below />}
@@ -159,7 +159,7 @@ export function NewThreadComposer({
         }}
         rows={big ? 3 : 2}
         placeholder={withKeys(placeholder ?? (channel === 'conductor' ? 'Ask the Conductor anything. It delegates to the crew.' : 'Describe the task'))}
-        className={`block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-1 leading-[1.8] outline-none placeholder:text-fg-4 ${big ? 'min-h-[96px] text-[16px]' : 'min-h-[60px] text-[14.5px]'}`}
+        className={`block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-1 leading-[1.8] outline-none placeholder:text-fg-3 ${big ? 'min-h-[96px] text-[16px]' : 'min-h-[60px] text-[14.5px]'}`}
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         {!channelId && <Picker label="Channel" value={channel} options={channelOptions} onChange={onChannel} />}
@@ -372,7 +372,7 @@ export function ReplyComposer({
   };
 
   return (
-    <div className={shell('rounded-xl bg-surface', att.over)} {...att.dropZone}>
+    <div className={shell('rounded-[20px] bg-surface', att.over)} {...att.dropZone}>
       <DropHint over={att.over} />
       {slashMenu.menu && <SlashMenu {...slashMenu.menu} />}
       {fileMenu.menu && <FileMenu {...fileMenu.menu} />}
@@ -398,7 +398,7 @@ export function ReplyComposer({
         }}
         rows={1}
         placeholder={suggestion ? `${suggestion} · ⇥ to use` : withKeys(!busyThread ? 'Reply' : steers ? 'Steer the agent. It reads this at its next step.' : 'Queue a message. It runs after this turn.')}
-        className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-4"
+        className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-3"
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         <AttachButton onPick={att.add} disabled={busy} />
