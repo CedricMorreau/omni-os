@@ -74,6 +74,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  'ticket_waiting',
+  {
+    description:
+      `Mark that this ticket waits on someone outside the team: the client, an app vendor, a support desk. Pass who, like "Reviews.io support". ` +
+      `The ticket keeps its stage and leaves ${USER}'s to-do list. Pass null when the answer arrives. A stage move clears it.`,
+    inputSchema: { on: z.string().max(80).nullable() },
+  },
+  async ({ on }) => text(await post('/waiting', { on })),
+);
+
+server.registerTool(
   'ticket_feedback',
   { description: 'The client sent feedback on the preview: start the next adjustment round. The ticket goes back to stage 3, and the client approval and the go are cleared.' },
   async () => text(await post('/feedback')),

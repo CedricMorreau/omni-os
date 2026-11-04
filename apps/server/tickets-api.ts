@@ -20,6 +20,7 @@ import {
   setRoute,
   useRole,
   saveDraft,
+  setWaiting,
   ticketView,
   tickets,
 } from './tickets.ts';
@@ -69,6 +70,11 @@ ticketsApi.post('/:id/gate', async (c) => {
 ticketsApi.post('/:id/draft', async (c) => {
   const { kind, text } = z.object({ kind: z.enum(DRAFT_KINDS), text: z.string() }).parse(await c.req.json());
   return c.json(view(saveDraft(c.req.param('id'), kind, text)));
+});
+
+ticketsApi.post('/:id/waiting', async (c) => {
+  const { on } = z.object({ on: z.string().max(80).nullable() }).parse(await c.req.json());
+  return c.json(view(setWaiting(c.req.param('id'), on)));
 });
 
 ticketsApi.post('/:id/feedback', (c) => c.json(view(clientFeedback(c.req.param('id')))));

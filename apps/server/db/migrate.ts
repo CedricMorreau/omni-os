@@ -341,6 +341,8 @@ export function migrate() {
   ensureColumn('tickets', 'role', 'TEXT');
   ensureColumn('tickets', 'route', 'TEXT');
   ensureColumn('tickets', 'route_proposal', 'TEXT');
+  ensureColumn('tickets', 'waiting_on', 'TEXT');
+  ensureColumn('tickets', 'waiting_at', 'TEXT');
   // The channel's design system: one standalone HTML file for the pages its threads write, and the file's name.
   ensureColumn('channels', 'design_system', 'TEXT');
   ensureColumn('channels', 'design_system_name', 'TEXT');

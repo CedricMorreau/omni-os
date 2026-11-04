@@ -13,7 +13,7 @@ const PREVIEW = 7;
 export const SOURCES = ['productive', 'slack', 'local'] as const;
 export const GATES = ['plan', 'client', 'go'] as const;
 export const DRAFT_KINDS = ['qa', 'answer', 'closing'] as const;
-export const BADGES = ['go', 'decide', 'check', 'working', 'client', 'closed'] as const;
+export const BADGES = ['go', 'decide', 'check', 'working', 'client', 'waiting', 'closed'] as const;
 
 export type Source = (typeof SOURCES)[number];
 export type Gate = (typeof GATES)[number];
@@ -39,6 +39,8 @@ export interface Ticket {
   role: string | null;
   route: number[] | null;
   route_proposal: RouteProposal | null;
+  waiting_on: string | null;
+  waiting_at: string | null;
   closed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -119,7 +121,7 @@ export function moveTicket(threadId: string, to: number) {
   if (t.stage === 2 && !t.plan_ok) throw new TicketError(`${t.ref} needs plan approval from the user before it leaves ${stageName(2)}`, 409);
   if (t.route.includes(CLIENT) && to >= DEPLOY && !t.client_ok) throw new TicketError(`${t.ref} needs client approval, or the user waives it, before ${stageName(DEPLOY)}`, 409);
   if (t.stage === DEPLOY && !t.go_ok) throw new TicketError(`${t.ref} needs the user's go before the deploy is done`, 409);
-  return tickets.update(threadId, { stage: to, stage_at: now(), draft_kind: null, draft: null, role: null });
+  return tickets.update(threadId, { stage: to, stage_at: now(), draft_kind: null, draft: null, role: null, waiting_on: null, waiting_at: null });
 }
 
 const checkStages = (stages: number[]) => {
@@ -173,7 +175,13 @@ export function clientFeedback(threadId: string) {
   const t = open(threadId);
   if (t.stage < PREVIEW) throw new TicketError(`client feedback starts a new round from ${stageName(PREVIEW)} or later; ${t.ref} is at ${stageName(t.stage)}`, 409);
   const back = (t.route ?? []).find((n) => n >= 3 && n < PREVIEW) ?? t.stage;
-  return tickets.update(threadId, { stage: back, stage_at: now(), round: t.round + 1, client_ok: null, go_ok: null, draft_kind: null, draft: null, role: null });
+  return tickets.update(threadId, { stage: back, stage_at: now(), round: t.round + 1, client_ok: null, go_ok: null, draft_kind: null, draft: null, role: null, waiting_on: null, waiting_at: null });
+}
+
+export function setWaiting(threadId: string, on: string | null) {
+  open(threadId);
+  const who = on?.trim().slice(0, 80) || null;
+  return tickets.update(threadId, { waiting_on: who, waiting_at: who ? now() : null });
 }
 
 export function closeTicket(threadId: string) {
@@ -188,6 +196,7 @@ export function badgeFor(t: Ticket, thread: Thread | undefined, blockers: NeedsY
   if (thread?.status === 'running' || thread?.status === 'queued') return 'working';
   if (blockers.some((b) => b.kind === 'question')) return 'decide';
   if (t.route_proposal) return 'decide';
+  if (t.waiting_on) return 'waiting';
   if (t.stage === DEPLOY && !t.go_ok) return 'go';
   if (t.stage === 2 && !t.plan_ok) return 'decide';
   if (t.stage === CLIENT) return 'client';
@@ -210,7 +219,8 @@ export function ticketView(t: Ticket, thread = threads.get(t.thread_id), blocker
     skipped: t.skipped,
     round: t.round,
     badge,
-    waiting_days: badge === 'client' ? Math.floor((Date.now() - Date.parse(t.stage_at)) / DAY) : null,
+    waiting_on: t.waiting_on,
+    waiting_days: t.waiting_on && t.waiting_at ? Math.floor((Date.now() - Date.parse(t.waiting_at)) / DAY) : badge === 'client' ? Math.floor((Date.now() - Date.parse(t.stage_at)) / DAY) : null,
     gates: { plan: t.plan_ok, client: t.client_ok, go: t.go_ok },
     draft: t.draft ? { kind: t.draft_kind, text: t.draft } : null,
     role: t.role,
