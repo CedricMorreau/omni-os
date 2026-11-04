@@ -32,7 +32,7 @@ export type Channel = Omit<ChannelRow, 'design_system' | 'default_base' | 'links
 
 /** Just enough of a thread to list it under its channel in the sidebar. */
 export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at'> &
-  Partial<Pick<Thread, 'parent_id' | 'source'>> & { updated_at?: string; folder_id?: string | null; harness?: string; done_at?: string | null };
+  Partial<Pick<Thread, 'parent_id' | 'source'>> & { updated_at?: string; folder_id?: string | null; harness?: string; done_at?: string | null; waiting_on?: string | null };
 /** A Conductor job and its cross-channel delegated threads, as the channel API sends them. */
 export interface ConductorHandoffGroup {
   parent: ThreadStub;

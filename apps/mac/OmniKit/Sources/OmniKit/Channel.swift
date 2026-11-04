@@ -164,9 +164,12 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
   public let parentID: String?
   /// The thread's origin, for distinguishing Conductor handoffs from other child relationships.
   public let source: ThreadSource?
+  /// Who its ticket waits on outside the team. Older servers leave it out.
+  public let waitingOn: String?
 
   enum CodingKeys: String, CodingKey {
     case id, title, status, harness, source
+    case waitingOn = "waiting_on"
     case channelID = "channel_id"
     case createdAt = "created_at"
     case updatedAt = "updated_at"
@@ -177,7 +180,8 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
 
   public init(
     id: String, channelID: String, title: String, status: ThreadStatus, createdAt: Date, updatedAt: Date? = nil,
-    folderID: String? = nil, harness: HarnessID? = nil, doneAt: Date? = nil, parentID: String? = nil, source: ThreadSource? = nil
+    folderID: String? = nil, harness: HarnessID? = nil, doneAt: Date? = nil, parentID: String? = nil, source: ThreadSource? = nil,
+    waitingOn: String? = nil
   ) {
     self.id = id
     self.channelID = channelID
@@ -190,13 +194,14 @@ public struct ThreadStub: Decodable, Hashable, Sendable, Identifiable {
     self.doneAt = doneAt
     self.parentID = parentID
     self.source = source
+    self.waitingOn = waitingOn
   }
 
   /// The sidebar's row for a thread it has the whole of.
   public init(_ t: OmniThread) {
     self.init(
       id: t.id, channelID: t.channelID, title: t.title, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt,
-      folderID: t.folderID, harness: t.harness, doneAt: t.doneAt, parentID: t.parentID, source: t.source)
+      folderID: t.folderID, harness: t.harness, doneAt: t.doneAt, parentID: t.parentID, source: t.source, waitingOn: t.waitingOn)
   }
 
   /// A running or queued thread brings its own result, so it cannot be marked done yet; the server refuses it too.
