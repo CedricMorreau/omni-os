@@ -1,0 +1,4 @@
+{
+  "extends": "@omni/typescript-config/base.json",
+  "include": ["*.ts", "../src/auth.ts", "../src/store.ts", "../src/jwt.ts", "../src/cloudflare.ts", "../src/connect.ts", "../src/signin.ts"]
+}

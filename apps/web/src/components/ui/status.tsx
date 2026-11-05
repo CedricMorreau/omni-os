@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { ThreadStatus } from '@omni/server/db.ts';
+import { shownStatus, type WorkState } from '@omni/shared/delegate-count.ts';
 import { Icon } from './icons.tsx';
 
 // ---------- status ----------
@@ -15,6 +16,10 @@ export const STATUS_LABEL: Record<string, string> = {
   settled: 'Done',
   idle: 'Idle',
 };
+
+/** A thread's status in words. A thread whose own turn is over while the threads it delegated work reads as such. */
+export const threadStatusText = (t: { status: string; delegating?: boolean }) =>
+  t.delegating && t.status !== 'running' && t.status !== 'queued' ? 'Delegated threads running' : (STATUS_LABEL[t.status] ?? t.status);
 
 export type Glyph = 'running' | 'needs' | 'done' | 'settled' | 'idle' | 'queued';
 
@@ -37,7 +42,10 @@ export function glyphFor(status: ThreadStatus | string | null | undefined): Glyp
   }
 }
 
-export const threadGlyph = (t: { status: ThreadStatus | string; waiting_on?: string | null }) => (t.waiting_on && t.status === 'done' ? 'settled' : t.status);
+export const threadGlyph = (t: WorkState & { waiting_on?: string | null }) => {
+  const shown = shownStatus(t);
+  return t.waiting_on && shown === 'done' ? 'settled' : shown;
+};
 
 export function StatusDot({ status, size = 8, className = '' }: { status: ThreadStatus | Glyph | string | null | undefined; size?: number; className?: string }) {
   const s = glyphFor(status);

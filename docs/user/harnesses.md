@@ -12,7 +12,7 @@ A harness is the agent CLI a thread runs on. Pick one per channel (its default) 
 
 - `OMNI_CLAUDE_BIN`, `OMNI_CODEX_BIN` and `OMNI_CURSOR_BIN` in `.env` point at a binary that is not on `PATH`. Without one, Codex also tries the copy inside the ChatGPT app.
 - The usage meter is per harness: Claude's rate-limit events drive the 5h / 7d meter, Codex reports its own, Cursor reports none.
-- Each harness has its own concurrency cap (4 by default): `OMNI_MAX_CONCURRENT` (Claude Code), `OMNI_MAX_CONCURRENT_CODEX`, `OMNI_MAX_CONCURRENT_CURSOR`, `OMNI_MAX_CONCURRENT_HERMES`, `OMNI_MAX_CONCURRENT_CURSOR_CLOUD`. A full harness never holds up threads on another.
+- Each harness has its own concurrency cap (12 by default): `OMNI_MAX_CONCURRENT` (Claude Code), `OMNI_MAX_CONCURRENT_CODEX`, `OMNI_MAX_CONCURRENT_CURSOR`, `OMNI_MAX_CONCURRENT_HERMES`, `OMNI_MAX_CONCURRENT_CURSOR_CLOUD`. A full harness never holds up threads on another.
 - Cursor Agent streams partial reply text into one Markdown message as it writes, and tool rows show the call name and path, command or pattern when they start. It still cannot steer or interrupt a running turn: messages sent mid-turn wait for the next one ([Sending while a thread is busy](threads.md#sending-while-a-thread-is-busy)).
 - Some features are Claude Code only: published artifact cards and [mods](mods.md).
 
@@ -31,7 +31,7 @@ The model and effort pickers in a thread's reply box move it to another model, e
 
 ## Continuing on another harness
 
-A switch keeps one thread. To leave a thread as it is and carry on in a new one, use **Fork thread** (the branch icon in the reply box, or under + on a phone). The new thread is linked both ways ("Continued from" and "Continued in"). It gets its own session on the harness, model and effort you pick, and its own worktree. The source thread, its session and its checkout stay as they were.
+A switch keeps one thread. To leave a thread as it is and carry on in a new one, use **Fork thread** (the branch icon in the reply box, under + on a phone, or the thread's menu). The new thread is linked both ways ("Continued from" and "Continued in"). It gets its own session on the harness, model and effort you pick, and its own worktree. The source thread, its session and its checkout stay as they were.
 
 - Only an idle thread can be continued. Nothing may be running in it: no turn, background task or delegated thread, no queued messages, no scheduled limit resume, no open Terminal shell (the sheet offers to close it). The sheet still shows the preview and says what is in the way. Messages waiting for Resume don't block; the carryover lists them as not sent.
 - The preview shows the **carryover**, what the new session reads ahead of your message: the thread's goal, constraints, changed files, the checks it ran, then its history. The newest history is kept whole and older entries are shortened to their first line. Whatever does not fit the 24K-character budget is listed as left out, with where the new session can read it. Your message comes after the carryover and is never cut.
@@ -41,7 +41,8 @@ A switch keeps one thread. To leave a thread as it is and carry on in a new one,
 - **Attachments** from the source are listed with their name, type, size and whether Omni still has the bytes. None goes unless you tick it. A ticked file is copied into the new thread's own uploads folder and arrives with your first message the way any attachment does: images inline on Claude Code and Codex, and as a path to the file on Cursor Agent (the sheet says which). The new thread never points at the source's folder. A file that is missing on this Mac (for example attached on the other Mac), over the upload limit, past the 4-files'-worth total, a link instead of a file, or changed since it was attached stays on the list with its reason, and the carryover names it as not carried. Cancelling the sheet copies nothing, and a retried Start gives the same thread and the same files.
 - A message that starts with a command, like `/review`, runs first, and the carryover goes with your next message.
 - Hermes and Cursor Cloud can't take a continued thread, and a thread running on them can't be continued, since their files are not on this Mac.
-- The Conductor can do the same with `continue_thread`, when you ask it to. It names the attachments to carry, and the answer says which went and why the others did not.
+- A synced thread that works in a folder (no branch) can be forked on a Mac that doesn't have that folder: the new thread starts in the channel's folder, as any new thread does. A thread running on your other Mac can't be forked until it finishes there. A thread whose worktree is not on this Mac (made on the other one, or removed by a cleanup) forks from the last commit of its branch, here or on origin, and its uncommitted changes stay behind. When that branch is gone too, for example deleted after its PR merged, the fork starts in the channel's folder like any new thread. The sheet says which.
+- The Conductor can do the same with `continue_thread`, when you ask it to, and on its own when it has a follow-up for a thread whose session went cold ([Crew](crew.md)). It names the attachments to carry, and the answer says which went and why the others did not.
 
 ## Auto
 
@@ -73,7 +74,7 @@ Auto is the first entry in the model picker and the default for a new thread. Om
 
 Hermes is an always-on agent on your own Linux server. Omni does not spawn it. The Hermes API server listens on the server's Tailscale address and is not public. A thread talks to it at `OMNI_HERMES_URL`, the server's Tailscale address and port (set it in Settings or `npm run setup`; empty means Hermes is off). The Mac must be on the tailnet.
 
-The bearer token is the Keychain secret `HERMES_API_KEY` (global). It is not an env var, not a database column and not written to logs.
+The bearer token is the global secret `HERMES_API_KEY`. It is not an env var, not a database column and not written to logs.
 
 | Piece | What |
 | --- | --- |
@@ -91,8 +92,8 @@ A Cursor Cloud thread is a [Cursor cloud agent](https://cursor.com/docs/cloud-ag
 
 It needs two things, and the model picker says which is missing:
 
-- The secret `CURSOR_API_KEY`, globally or on the channel, made at cursor.com/dashboard under Integrations. A key only in the Keychain (service `omni-os`, account `global/CURSOR_API_KEY`) works too. Omni sends it only to the Cloud Agents API, on the Authorization header: never to the local `cursor` harness (`apps/server/harness/env-guard.ts` strips it there) and never into a process environment or a log.
-- The channel's GitHub repo, set in its settings. Cursor also needs access to that repo through its GitHub integration.
+- The secret `CURSOR_API_KEY`, globally or on the channel, made at cursor.com/dashboard under Integrations. A key only in the secret store (service `omni-os`, account `global/CURSOR_API_KEY`) works too. Omni sends it only to the Cloud Agents API, on the Authorization header: never to the local `cursor` harness (`apps/server/harness/env-guard.ts` strips it there) and never into a process environment or a log.
+- The channel's GitHub repo, which Omni reads from the channel's repo path (when it cannot, type it under Advanced in the channel's settings). Cursor also needs access to that repo through its GitHub integration.
 
 | Piece | What |
 | --- | --- |
@@ -105,7 +106,7 @@ It needs two things, and the model picker says which is missing:
 | Models | Cursor default (the one set on cursor.com) or a model from Cursor's list. No effort levels |
 | Usage | Billed to your Cursor plan. Omni shows no meter for it |
 
-Not supported, since the agent runs on Linux: building or running the Mac app, Swift and Xcode tests, and screenshots of the Mac app or a browser. Its prompt tells it to say what it could not check. Pull the branch and do those on the Mac.
+Not supported, since the agent runs on a Cursor machine: a Mac build of the desktop app, running the desktop app, and screenshots of it or a browser. Its prompt tells it to say what it could not check. Pull the branch and do those on your own machine.
 
 Omni drives the [Cloud Agents API v1](https://cursor.com/docs/cloud-agent/api/endpoints), which Cursor marks as a public beta.
 

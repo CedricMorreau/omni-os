@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { watchLine, type PRWatchView } from '@omni/shared/pr-watch.ts';
 import type { PendingMsg } from '../src/api.ts';
-import { PRWakeList, watchCopy } from '../src/components/thread/PRWatch.tsx';
+import { watchCopy } from '@omni/shared/pr-watch.ts';
+import { PRWakeList } from '../src/components/thread/PRWatch.tsx';
 import { isOmnis, parkedHeading, parkedLabel } from '../src/requests.ts';
 
 const at = '2026-10-24T10:00:00.000Z';
@@ -69,6 +70,9 @@ describe('a PR watch wake waiting for Resume', () => {
     expect(parkedHeading([wake])).toBe('1 message is waiting for Resume');
     expect(parkedHeading([wake, ben])).toBe('2 messages are waiting for Resume');
     expect(parkedHeading([ben])).toBe('1 message was waiting when Omni restarted');
+    expect(parkedHeading([ben], true)).toBe('1 message is waiting for a session that is up to date');
+    expect(parkedHeading([ben, ben], true)).toBe('2 messages are waiting for a session that is up to date');
+    expect(parkedLabel({ ...ben, delivery: 'recovered' }, true)).toBe('Waiting for a session that is up to date');
   });
 });
 

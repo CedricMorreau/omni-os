@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { WIRE_FIXTURES } from '@omni/test-fixtures';
 import type { NeedsYou, PendingMsg, Thread, ThreadDetail } from '../src/api.ts';
 import { limitView, resetLabel } from '../src/limits.ts';
 import { reasonOf } from '../src/needs-you.ts';
 
-// The Web UI's side of a limit stop (apps/web/src/limits.ts, LimitCard), against the recorded server answers the Mac app's
-// Swift tests decode (apps/server/tests/mac-fixtures.test.ts records them): limited, scheduled, cancelled, resumed.
+// The Web UI's side of a limit stop (apps/web/src/limits.ts, LimitCard), against the recorded server answers
+// (apps/server/tests/wire-fixtures.test.ts records them): limited, scheduled, cancelled, resumed.
 
-const FIXTURES = join(resolve(import.meta.dirname, '../..'), 'mac', 'OmniKit', 'Tests', 'OmniKitTests', 'Fixtures');
-const fixture = <T>(name: string) => JSON.parse(readFileSync(join(FIXTURES, name), 'utf8')) as T;
+const fixture = <T>(name: string) => JSON.parse(readFileSync(join(WIRE_FIXTURES, name), 'utf8')) as T;
 type Answer = { thread: Thread; pending: PendingMsg[] };
 
 // A fixed afternoon, and resets relative to it.
@@ -37,7 +37,7 @@ describe('limit stop answers', () => {
     expect(reasonOf({ ...item, blockers: [{ kind: 'limited', detail: null, count: 0, resets_at: null, scheduled: false }] }).detail).toBe('No reset time given');
     // The other Mac's stop (sync): the same reset, and where it is.
     expect(reasonOf({ ...item, blockers: [{ kind: 'limited', detail: null, count: 0, resets_at: at(17), scheduled: false, elsewhere: true }] })).toMatchObject({
-      label: 'Usage limit reached on your other Mac',
+      label: 'Usage limit reached on your other machine',
       detail: expect.stringMatching(/^Resets at /),
     });
   });
@@ -60,12 +60,12 @@ describe('the card', () => {
 
   it("shows the other Mac's stop with its reset time and nothing to press", () => {
     expect(limitView({ limit_state: 'limited', limit_resets_at: at(17), limit_elsewhere: 1 }, 'Claude Code', NOW)).toEqual({
-      title: 'Usage limit reached on your other Mac',
-      body: "Claude Code stopped this turn at your plan's limit on your other Mac. It resets at 17:00. Resume it there.",
+      title: 'Usage limit reached on your other machine',
+      body: "Claude Code stopped this turn at your plan's limit on your other machine. It resets at 17:00. Resume it there.",
       actions: [],
     });
     expect(limitView({ limit_state: 'scheduled', limit_resets_at: at(9, 30, 1), limit_elsewhere: 1 }, 'Codex', NOW)).toMatchObject({
-      title: 'Resumes at tomorrow 09:30 on your other Mac',
+      title: 'Resumes at tomorrow 09:30 on your other machine',
       actions: [],
     });
     expect(limitView({ limit_state: 'limited', limit_resets_at: null, limit_elsewhere: 1 }, 'Codex', NOW)?.body).toContain('did not say when it resets');

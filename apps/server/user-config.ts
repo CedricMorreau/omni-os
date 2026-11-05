@@ -10,7 +10,23 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
+import {
+  isTimezone,
+  NAME_MAX,
+  SETTING_FIELDS,
+  SETTING_SECTIONS,
+  sectionFields,
+  settingId,
+  settingProblem,
+  type SettingField,
+  type SettingSection,
+  type UserConfig,
+  type UserConfigPatch,
+} from '@omni/shared/settings.ts';
 import { DEFAULT_RETENTION, RETENTION_DAYS } from '@omni/shared/worktree-cleanup.ts';
+
+export { isTimezone, NAME_MAX };
+export type { AutomationOverride, UserConfig, UserConfigPatch } from '@omni/shared/settings.ts';
 
 /** The repo root, the same as config.ts's ROOT (kept here so this module does not import config.ts). */
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -19,57 +35,32 @@ const dataDir = () => (process.env.OMNI_DATA_DIR ? resolve(ROOT, process.env.OMN
 /** Where the file lives. OMNI_CONFIG moves it, like OMNI_DATA_DIR moves the rest. */
 export const configPath = () => (process.env.OMNI_CONFIG ? resolve(ROOT, process.env.OMNI_CONFIG) : join(dataDir(), 'omni.config.json'));
 
-export const NAME_MAX = 60;
+/** The fields, their defaults and checks are @omni/shared/settings.ts; this builds the schema the file is read with. */
+const fieldSchema = (f: SettingField) =>
+  z
+    .string()
+    .trim()
+    .superRefine((v, ctx) => {
+      const problem = settingProblem(f, v, 'file');
+      if (problem) ctx.addIssue({ code: 'custom', message: problem });
+    })
+    .default(f.default);
 
-/** A folder as typed: `~/x`, `/abs/x` or relative to home. One line, no control characters, since prompts quote it. */
-const folder = z
-  .string()
-  .trim()
-  .max(1024)
-  .refine((p) => !/[\u0000-\u001f\u007f`$]/.test(p), 'A folder path cannot contain control characters, backticks or $.')
-  .default('');
+const sectionSchema = (section: SettingSection) =>
+  z.object(Object.fromEntries(sectionFields(section).map((f) => [f.key, fieldSchema(f)])) as Record<string, ReturnType<typeof fieldSchema>>);
 
 const automationOverride = z.object({ enabled: z.boolean().optional(), channel: z.string().optional() });
 
-export const userConfigSchema = z.object({
+const schema = z.object({
   version: z.literal(1).default(1),
-  /** Set when onboarding (web, Mac or `npm run setup`) finished. Missing means both clients show the wizard. */
   onboardedAt: z.string().optional(),
-  user: z
-    .object({
-      name: z.string().trim().max(NAME_MAX, `Keep the name under ${NAME_MAX} characters.`).default(''),
-      pronouns: z.string().trim().max(40).default('they/them'),
-      email: z.string().trim().max(200).default(''),
-      /** IANA zone. Empty means the system's. */
-      timezone: z.string().trim().default(''),
-    })
-    .prefault({}),
-  workspace: z
-    .object({
-      /** The folder non-repo threads run in, added to every Claude thread with its CLAUDE.md. Empty means ~/Omni. */
-      root: folder,
-      /** Where the person keeps their git checkouts. Empty means ~/code. */
-      reposDir: folder,
-      /** GitHub user or org that owns their repos and their fork of Omni. */
-      githubOwner: z.string().trim().default(''),
-    })
-    .prefault({}),
-  integrations: z
-    .object({
-      /** Hermes API server, like http://100.x.y.z:8642. Empty means Hermes is off. */
-      hermesUrl: z.string().trim().default(''),
-      /** A second-brain git repo the brain-export automation writes digests into. Empty means off. */
-      centralBrainDir: folder,
-      /**
-       * Tailscale logins allowed in through `tailscale serve`, comma separated, like ada@example.com. Set, a request on
-       * a *.ts.net or 100.64.0.0/10 Host needs a matching Tailscale-User-Login header as well as the token. Empty skips it.
-       */
-      tailscaleLogin: z.string().trim().max(500).default(''),
-    })
-    .prefault({}),
-  /** Per-machine overrides of the shared automation YAML (`enabled`, `channel`), so toggling one never edits the repo. */
+  user: sectionSchema('user').prefault({}),
+  workspace: sectionSchema('workspace').prefault({}),
+  integrations: sectionSchema('integrations').prefault({}),
+  /** Per machine, like the rest of this file (apps/server/run-on.ts). */
+  runOn: z.object({ device: z.string().trim().max(100).default('') }).prefault({}),
   automations: z.record(z.string(), automationOverride).default({}),
-  /** This Mac's worktree retention (apps/server/worktree-cleanup.ts). Off until turned on in Settings > Storage. */
+  /** Off until turned on in Settings > Worktrees. */
   worktrees: z
     .object({
       retention: z
@@ -82,25 +73,29 @@ export const userConfigSchema = z.object({
     .prefault({}),
 });
 
-export type UserConfig = z.infer<typeof userConfigSchema>;
-export type AutomationOverride = z.infer<typeof automationOverride>;
+/** Reads a saved file (or a part of one) into a full UserConfig, defaults filled in. */
+export const userConfigSchema = { parse: (v: unknown): UserConfig => schema.parse(v) as UserConfig };
 
-/** A partial update: any section, any subset of its fields. */
-export type UserConfigPatch = {
-  onboardedAt?: string | null;
-  user?: Partial<UserConfig['user']>;
-  workspace?: Partial<UserConfig['workspace']>;
-  integrations?: Partial<UserConfig['integrations']>;
-  automations?: Record<string, AutomationOverride | null>;
-};
-
+/** A partial update: any section, any subset of its fields. A client's save also goes through `checkSettingFields`. */
 export const userConfigPatch = z.object({
   onboardedAt: z.string().nullish(),
-  user: userConfigSchema.shape.user.unwrap().partial().optional(),
-  workspace: userConfigSchema.shape.workspace.unwrap().partial().optional(),
-  integrations: userConfigSchema.shape.integrations.unwrap().partial().optional(),
+  user: sectionSchema('user').partial().optional(),
+  workspace: sectionSchema('workspace').partial().optional(),
+  integrations: sectionSchema('integrations').partial().optional(),
+  runOn: schema.shape.runOn.unwrap().partial().optional(),
   automations: z.record(z.string(), automationOverride.nullable()).optional(),
 });
+
+/** A client's save, each text field checked as `settingProblem(.., 'save')` says. For a zod superRefine. */
+export function checkSettingFields(p: Partial<Record<SettingSection, Record<string, string | undefined>>>, ctx: z.RefinementCtx) {
+  for (const section of SETTING_SECTIONS) {
+    for (const f of sectionFields(section)) {
+      const v = p[section]?.[f.key];
+      const problem = v === undefined ? null : settingProblem(f, v, 'save');
+      if (problem) ctx.addIssue({ code: 'custom', path: [section, f.key], message: problem });
+    }
+  }
+}
 
 const defaults = (): UserConfig => userConfigSchema.parse({});
 
@@ -161,6 +156,7 @@ export function updateUserConfig(patch: UserConfigPatch): UserConfig {
     user: { ...cur.user, ...patch.user },
     workspace: { ...cur.workspace, ...patch.workspace },
     integrations: { ...cur.integrations, ...patch.integrations },
+    runOn: { ...cur.runOn, ...patch.runOn },
     automations,
   };
   if (patch.onboardedAt === null) delete next.onboardedAt;
@@ -194,15 +190,6 @@ export function systemTimezone() {
   }
 }
 
-export const isTimezone = (tz: string) => {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 /** What a fresh install falls back to, shown as placeholders in onboarding. */
 export const fallbacks = () => ({
   timezone: systemTimezone(),
@@ -226,7 +213,25 @@ export const resolved = {
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+  /** The tunnel's https origin, no trailing slash, or '' when unset. */
+  mcpPublicUrl: () => (process.env.OMNI_MCP_PUBLIC_URL ?? userConfig().integrations.mcpPublicUrl).trim().replace(/\/+$/, ''),
+  clerkPublishableKey: () => (process.env.OMNI_CLERK_PUBLISHABLE_KEY ?? userConfig().integrations.clerkPublishableKey).trim(),
+  clerkClientId: () => (process.env.OMNI_CLERK_CLIENT_ID ?? userConfig().integrations.clerkClientId).trim(),
 };
+
+/**
+ * The fields an environment variable overrides now, by `section.key`, as `resolved` reads them: a variable read with ??
+ * wins even when empty, one read with || only when it holds something.
+ */
+export function envOverrides(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of SETTING_FIELDS as readonly SettingField[]) {
+    if (!f.env) continue;
+    const v = process.env[f.env.name];
+    if (f.env.emptyWins ? v !== undefined : !!v) out[settingId(f)] = f.env.name;
+  }
+  return out;
+}
 
 /** How prompts refer to the person: their name, or "the user" until one is set. */
 export const userName = () => resolved.name() || 'the user';
@@ -245,12 +250,32 @@ export function objectPronoun(pronouns = resolved.pronouns()) {
 
 // ---------- the Omni checkout itself ----------
 
+const isCheckout = (dir: string) => existsSync(join(dir, 'apps', 'server', 'index.ts'));
+
+/**
+ * The Omni git checkout that automations about Omni itself work in ({{omniRoot}}, {{omniRepo}}). A server run from a
+ * checkout is in one. The desktop app's bundle is not: it uses OMNI_CHECKOUT, else the checkout whose data/ it adopted
+ * from an earlier install (apps/desktop/src/backend/data-dir.ts), else none.
+ */
+export function omniCheckout(): string | null {
+  if (!import.meta.url.endsWith('.mjs')) return ROOT;
+  const named = process.env.OMNI_CHECKOUT;
+  if (named) return isCheckout(resolve(named)) ? resolve(named) : null;
+  const ofData = dirname(dataDir());
+  return isCheckout(ofData) ? ofData : null;
+}
+
+/** Automations that work in the Omni checkout cannot run without one. */
+export const NEEDS_CHECKOUT = /\{\{\s*omni(Root|Repo)\s*\}\}/;
+
 let originCache: string | null | undefined;
-/** owner/repo of this checkout's `origin`, for the forker's own PRs. Null when there is no GitHub remote. */
+/** owner/repo of the Omni checkout's `origin`, for the forker's own PRs. Null when there is no GitHub remote. */
 export function omniRepo(): string | null {
   if (originCache !== undefined) return originCache;
+  const checkout = omniCheckout();
+  if (!checkout) return (originCache = null);
   try {
-    const url = execFileSync('git', ['-C', ROOT, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const url = execFileSync('git', ['-C', checkout, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     originCache = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1] ?? null;
   } catch {
     originCache = null;
@@ -269,7 +294,10 @@ export function fillPlaceholders(text: string) {
     workspace: () => tildify(resolved.workspaceRoot()),
     reposDir: () => tildify(resolved.reposDir()),
     githubOwner: () => resolved.githubOwner() || '<your GitHub owner>',
-    omniRoot: () => tildify(ROOT),
+    omniRoot: () => {
+      const checkout = omniCheckout();
+      return checkout ? tildify(checkout) : '<your Omni checkout>';
+    },
     omniRepo: () => omniRepo() ?? '<your Omni repo>',
     centralBrain: () => tildify(resolved.centralBrainDir()) || '<your central brain folder>',
     timezone: resolved.timezone,

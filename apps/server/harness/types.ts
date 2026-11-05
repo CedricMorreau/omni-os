@@ -8,11 +8,15 @@ export type HarnessId = 'claude-code' | 'codex' | 'cursor' | 'hermes' | 'cursor-
 
 export const HARNESS_IDS: HarnessId[] = ['claude-code', 'codex', 'cursor', 'hermes', 'cursor-cloud'];
 
-/** Harnesses that run off this Mac: no worktree, browser, MCP config or local files. */
-const REMOTE_HARNESSES = new Set<string>(['hermes', 'cursor-cloud']);
-export const isRemoteHarness = (h: string | null | undefined) => !!h && REMOTE_HARNESSES.has(h);
-/** Where a remote harness runs, for "its files are not on this Mac" reasons. */
-export const remoteWhere = (h: string) => (h === 'cursor-cloud' ? 'as a Cursor cloud agent' : 'on the Hermes server');
+/**
+ * Harnesses that run on a remote provider (the Hermes server, Cursor's cloud): no worktree, browser, MCP config or
+ * local files on any machine. Not the same as a thread another synced machine runs (apps/server/ownership.ts): a
+ * provider thread still has an owner machine, the one that talks to the provider.
+ */
+const PROVIDER_HARNESSES = new Set<string>(['hermes', 'cursor-cloud']);
+export const isProviderHarness = (h: string | null | undefined) => !!h && PROVIDER_HARNESSES.has(h);
+/** Where a provider harness runs, for "its files are not on this Mac" reasons. */
+export const providerWhere = (h: string) => (h === 'cursor-cloud' ? 'as a Cursor cloud agent' : 'on the Hermes server');
 
 /** Claude Code is the default everywhere, and existing threads carry on as Claude Code threads. */
 export const DEFAULT_HARNESS: HarnessId = 'claude-code';
@@ -90,7 +94,7 @@ export const HARNESS_META: Record<HarnessId, { name: string; plan: string }> = {
 };
 
 /**
- * How to install each local CLI, for onboarding (web, Mac, `npm run setup`). `fix` on HarnessInfo says how to sign
+ * How to install each local CLI, for onboarding (the Web UI and `npm run setup`). `fix` on HarnessInfo says how to sign
  * in once it is installed. Hermes and Cursor Cloud run off this Mac, so they have none.
  */
 export const HARNESS_INSTALL: Partial<Record<HarnessId, string>> = {

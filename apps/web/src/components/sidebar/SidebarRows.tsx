@@ -1,0 +1,271 @@
+import { useState, type MouseEvent, type ReactNode } from 'react';
+import { toDate } from '@omni/shared/format.ts';
+import { type BackgroundTask, type ChannelWithRunning, type ThreadStub } from '../../api.ts';
+import { drag } from '../../folders.tsx';
+import { duration, plural } from '../../format.ts';
+import { href, navigate } from '../../router.ts';
+import { readPref, useApp, useNow, writePref } from '../../store.tsx';
+import { HarnessLogo, Loader } from '../brand.tsx';
+import { DoneMark, Icon, StatusDot, threadGlyph, threadStatusText, type IconName } from '../ui.tsx';
+import { DelegateCount, DelegateCountSpace, delegatesHref, useDelegateSummary } from '../DelegateCount.tsx';
+import { showsRunning, type DelegateSummary } from '@omni/shared/delegate-count.ts';
+
+export function NavLink({ to, icon, lead, active, children, right, onNavigate, channelId, expanded }: { channelId?: string; to: string; icon?: IconName; lead?: ReactNode; active?: boolean; children: ReactNode; right?: ReactNode; onNavigate?: (e: MouseEvent) => void; expanded?: boolean }) {
+  return (
+    <a
+      href={to}
+      data-channel-id={channelId}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      aria-expanded={expanded}
+      data-active={active || undefined}
+      className={`hov z-[1] flex h-9 items-center gap-2.5 rounded-full px-3 text-[13.5px] transition-colors md:h-8 md:text-[13px] ${
+        active ? 'font-medium text-fg [--hov:transparent]' : 'text-fg-2 hover:text-fg'
+      }`}
+    >
+      {icon && <Icon name={icon} size={15} className={active ? 'text-fg' : 'text-fg-3'} />}
+      {lead}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {right}
+    </a>
+  );
+}
+
+export function RunningBadge({ n }: { n: number }) {
+  if (!n) return null;
+  return (
+    <span className="flex items-center gap-1.5 font-num text-[11px] text-live-text tabular-nums" title={`${n} running or queued`}>
+      <StatusDot status="running" size={6} />
+      {n}
+    </span>
+  );
+}
+
+/**
+ * A thread nested under its channel, like a Claude Code session under its project, or under a folder (which sits flush
+ * with its channel), with its running sub-agents nested under it and its harness's logo after the title. Dragged onto
+ * a folder it files there; onto its channel's name, back to the ungrouped list.
+ */
+/** A Conductor thread's delegate count on its row, and what clicking it does. */
+export interface RowDelegates {
+  summary: DelegateSummary;
+  open: () => void;
+}
+
+/** The count for a Conductor thread's delegated threads, opening the thread on its Details tab. Undefined when it delegated none. */
+export function useRowDelegates(parentId: string, children: readonly ThreadStub[] | undefined, onNavigate?: () => void): RowDelegates | undefined {
+  const summary = useDelegateSummary(children);
+  return summary
+    ? {
+        summary,
+        open: () => {
+          navigate(delegatesHref(parentId));
+          onNavigate?.();
+        },
+      }
+    : undefined;
+}
+
+/**
+ * The count laid over the right end of a row's link, in the same grid cell so it never nests inside the link. Not a
+ * positioned box: the sliding thumb reads the link's offsetTop, which a positioned parent would reset.
+ */
+function WithDelegates({ delegates, children }: { delegates: RowDelegates | undefined; children: ReactNode }) {
+  if (!delegates) return <>{children}</>;
+  return (
+    <div className="grid items-center">
+      <div className="min-w-0 [grid-area:1/1]">{children}</div>
+      <DelegateCount summary={delegates.summary} onOpen={delegates.open} className="mr-1.5 justify-self-end [grid-area:1/1]" />
+    </div>
+  );
+}
+
+export function ThreadLink({ t, active, tasks, onNavigate, indent = true, delegates }: { t: ThreadStub; active: boolean; tasks: BackgroundTask[]; onNavigate?: () => void; indent?: boolean | 'flush'; delegates?: RowDelegates }) {
+  const title = t.title || 'Untitled';
+  const agents = tasks.length;
+  // A thread whose turn ended still works while its sub-agents or the threads it delegated run.
+  const busy = showsRunning(t) || agents > 0;
+  return (
+    <>
+      <WithDelegates delegates={delegates}>
+      <a
+        href={href.thread(t.id)}
+        onClick={onNavigate}
+        draggable
+        onDragStart={(e) => {
+          drag.start({ kind: 'thread', thread: t });
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', title);
+        }}
+        onDragEnd={drag.end}
+        title={`${title} · ${agents ? plural(agents, 'agent') + ' running' : t.done_at ? 'Marked done' : threadStatusText(t)}`}
+        aria-current={active ? 'page' : undefined}
+        data-active={active || undefined}
+        className={`hov group/row z-[1] flex h-8 items-center gap-2 rounded-full px-3 text-[13px] transition-colors md:h-7 md:text-[12.5px] ${indent === 'flush' ? 'ml-1' : indent ? 'ml-[25px]' : ''} ${
+          active ? 'font-medium text-fg [--hov:transparent]' : t.done_at ? 'text-fg-4 hover:text-fg' : 'text-fg-3 hover:text-fg'
+        }`}
+      >
+        <span className="grid w-3 shrink-0 place-items-center">
+          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={threadGlyph(t)} size={7} />}
+        </span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {delegates ? (
+          <span className="-mr-1.5 flex">
+            <DelegateCountSpace summary={delegates.summary} />
+          </span>
+        ) : (
+          t.harness && (
+            <span className={`shrink-0 ${active ? 'text-fg-3' : 'text-fg-4 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100'}`}>
+              <HarnessLogo harness={t.harness} size={11} />
+            </span>
+          )
+        )}
+      </a>
+      </WithDelegates>
+      {tasks.map((k, i) => (
+        <AgentLink key={k.task_id} t={k} last={i === agents - 1} onNavigate={onNavigate} />
+      ))}
+    </>
+  );
+}
+
+/**
+ * A thread under its channel. A Conductor thread is one row with the count of the threads it delegated on its right;
+ * those threads get no row of their own (`flush`: the Conductor's rows, which sit almost flush with its name).
+ */
+export function ChannelThreadEntry({ t, active, tasks, handoffs, flush = false, onNavigate }: {
+  t: ThreadStub;
+  active: boolean;
+  tasks: BackgroundTask[];
+  handoffs: ChannelWithRunning['handoffs'];
+  flush?: boolean;
+  onNavigate?: () => void;
+}) {
+  const children = handoffs?.find((g) => g.parent.id === t.id)?.children;
+  const delegates = useRowDelegates(t.id, children, onNavigate);
+  return <ThreadLink t={t} active={active} tasks={tasks} onNavigate={onNavigate} indent={flush ? 'flush' : true} delegates={delegates} />;
+}
+
+/**
+ * A sub-agent running in a thread, nested under it on a tree line from the thread's status dot, like a Claude Desktop
+ * task under its session. It links to the thread that started it. `flush`: under a Running row, whose dot sits nearer
+ * the edge than a channel's thread's.
+ */
+function AgentLink({ t, last, flush = false, onNavigate }: { t: BackgroundTask; last: boolean; flush?: boolean; onNavigate?: () => void }) {
+  const now = useNow(1000);
+  const tip = [t.description, t.tool_uses ? plural(t.tool_uses, 'tool') : null, t.last_tool && `last ${t.last_tool}`].filter(Boolean).join(' · ');
+  return (
+    <a
+      href={href.thread(t.thread_id)}
+      onClick={onNavigate}
+      title={tip}
+      className={`hov relative z-[1] flex h-8 items-center gap-2 rounded-full pr-3 pl-4 text-[12.5px] text-fg-3 transition-colors hover:text-fg md:h-7 md:text-[12px] ${flush ? 'ml-[19px]' : 'ml-[43px]'}`}
+    >
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute top-0 left-0 w-2 border-l border-line-strong ${last ? 'h-1/2 rounded-bl-[6px] border-b' : 'h-full'}`}
+      />
+      <span className="min-w-0 flex-1 truncate">{t.description}</span>
+      <Loader size={10} className="shrink-0 text-live-text" />
+      <span className="shrink-0 font-num text-[11px] text-fg-4 tabular-nums">{duration(Math.max(0, now - toDate(t.started_at).getTime()))}</span>
+    </a>
+  );
+}
+
+/**
+ * A thread in the Running or Pinned section, flush with the channels: its status, its title and its
+ * channel's name. In Pinned the name gives way on hover to the button that unpins it. It opens the thread as its row
+ * under its channel does, and a right-click gives the same menu. `home`: the thread's only row (Running), which wears
+ * the thumb while open and nests its running sub-agents. Otherwise (Pinned), open, it reads bold and the thumb stays
+ * on the thread's own row.
+ */
+export function SectionLink({ t, channel, active, home = false, tasks, unpin, delegates, onNavigate }: { t: ThreadStub; channel: string; active: boolean; home?: boolean; tasks: BackgroundTask[]; unpin?: boolean; delegates?: RowDelegates; onNavigate?: () => void }) {
+  const { setPinned } = useApp();
+  const title = t.title || 'Untitled';
+  const agents = tasks.length;
+  const busy = showsRunning(t) || agents > 0;
+  return (
+    <>
+    <WithDelegates delegates={delegates}>
+    <div className="group/pin flex items-center rounded-full">
+      <a
+        href={href.thread(t.id)}
+        onClick={onNavigate}
+        title={`${title} · ${channel} · ${agents ? plural(agents, 'agent') + ' running' : threadStatusText(t)}`}
+        aria-current={active && home ? 'page' : undefined}
+        data-active={(active && home) || undefined}
+        className={`hov z-[1] flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full px-3 text-[13.5px] transition-colors md:h-8 md:text-[13px] ${
+          active ? 'font-medium text-fg [--hov:transparent]' : 'text-fg-2 hover:text-fg'
+        }`}
+      >
+        <span className="grid w-[15px] shrink-0 place-items-center">
+          {busy ? <Loader size={11} className="text-live-text" /> : t.done_at ? <DoneMark size={7} /> : <StatusDot status={threadGlyph(t)} size={7} />}
+        </span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {/* A delegate count says it is a Conductor job, so the channel's name gives way to it. */}
+        {delegates ? (
+          <span className="-mr-1.5 flex">
+            <DelegateCountSpace summary={delegates.summary} />
+          </span>
+        ) : (
+          <span
+            className={`max-w-[45%] shrink-0 truncate text-[11px] font-normal text-fg-4 ${
+              unpin ? 'mr-6 transition-opacity md:mr-0 md:group-focus-within/pin:opacity-0 md:group-hover/pin:opacity-0' : ''
+            }`}
+          >
+            {channel}
+          </span>
+        )}
+      </a>
+      {unpin && (
+        <button
+          type="button"
+          aria-label={`Unpin ${title}`}
+          title="Unpin"
+          onClick={() => void setPinned(t, false).catch(() => {})}
+          className="hov relative z-[2] -ml-7 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-fg-3 opacity-100 transition-opacity hover:text-fg focus-visible:opacity-100 md:opacity-0 md:group-hover/pin:opacity-100 md:group-focus-within/pin:opacity-100"
+        >
+          <Icon name="pin" size={13} />
+        </button>
+      )}
+    </div>
+    </WithDelegates>
+    {home && tasks.map((k, i) => <AgentLink key={k.task_id} t={k} last={i === agents - 1} flush onNavigate={onNavigate} />)}
+    </>
+  );
+}
+
+/** A section that folds on its own, apart from the channels, remembered on this device under `pref`. */
+export function useSectionFold(pref: string): [closed: boolean, toggle: () => void] {
+  const [closed, setClosed] = useState(() => readPref<boolean>(pref, false));
+  const toggle = () =>
+    setClosed((prev) => {
+      writePref(pref, !prev);
+      return !prev;
+    });
+  return [closed, toggle];
+}
+
+/**
+ * Running or Pinned: a caption that folds its rows away, with the count beside it while folded. The
+ * caller leaves it out when it has nothing to list.
+ */
+export function ThreadSection({ label, closed, onToggle, count, children }: { label: string; closed: boolean; onToggle: () => void; count: number; children: ReactNode }) {
+  const what = label.toLowerCase().replace(/ threads$/, '');
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!closed}
+        title={closed ? `Show ${what} threads` : `Hide ${what} threads`}
+        className="caption flex w-full items-center gap-1 px-3 pt-1 pb-2 text-left transition-colors hover:text-fg-2"
+      >
+        {label}
+        <Icon name={closed ? 'chevronRight' : 'chevronDown'} size={11} className="text-fg-4" />
+        {closed && <span className="ml-auto font-num tabular-nums">{count}</span>}
+      </button>
+      {!closed && <div className="space-y-px">{children}</div>}
+    </div>
+  );
+}

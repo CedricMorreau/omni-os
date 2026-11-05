@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import type { Carryover, ContinueBlock, ContinuePreview } from '@omni/shared/continue.ts';
-import { api, errorText, useApi, type HarnessWithRunning, type Thread } from '../api.ts';
 import {
   attachmentRows,
   attachmentsSummary,
@@ -25,7 +24,8 @@ import {
   type ContinueTargets,
   type PreviewRow,
   type PreviewSection,
-} from '../continue.ts';
+} from '@omni/shared/continue-flow.ts';
+import { api, errorText, useApi, type HarnessWithRunning, type Thread } from '../api.ts';
 import { href, navigate } from '../router.ts';
 import { EffortPicker, ModelPicker } from './ModelPicker.tsx';
 import { Button, Chip, ErrorNote, Icon, IconButton, Label, Loading, Modal, Toggle, type ChipTone } from './ui.tsx';
@@ -95,7 +95,7 @@ export function BlockNote({ block, onRecheck, onCloseTerminal, closing }: { bloc
 
 const OPEN_EVENT = 'omni:continue-thread';
 
-/** Open the sheet that continues `source` on another harness, as the thread actions' item does. */
+/** Open the sheet that continues `source` on another harness, as the reply box's Fork button does. */
 export function openContinue(source: ContinueSource) {
   window.dispatchEvent(new CustomEvent<ContinueSource>(OPEN_EVENT, { detail: source }));
 }
@@ -106,7 +106,7 @@ export function ForkThreadButton({ thread, disabled }: { thread: ContinueSource;
   return <IconButton icon="branch" label="Fork thread" title={refusal ?? 'Fork thread: a new thread, on any harness, that picks up from here'} size={15} disabled={disabled || !!refusal} onClick={() => openContinue(thread)} />;
 }
 
-/** Mounted once in the desktop app, so the thread actions open the sheet for any thread, open or not. */
+/** Mounted once in the desktop app, so the reply box's Fork button opens the sheet. */
 export function ContinueSheetHost() {
   const [source, setSource] = useState<ContinueSource | null>(null);
   useEffect(() => {
@@ -138,7 +138,7 @@ export function ContinueSheet({ source, onClose }: { source: ContinueSource; onC
   );
 }
 
-function ContinueForm({ source, targets, onPickerOpen, onClose }: { source: ContinueSource; targets: ContinueTargets; onPickerOpen: () => void; onClose: () => void }) {
+function ContinueForm({ source, targets, onPickerOpen, onClose }: { source: ContinueSource; targets: ContinueTargets<HarnessWithRunning>; onPickerOpen: () => void; onClose: () => void }) {
   const { s, dispatch, start, recheck, closeTerminal, closing } = useContinue(source, targets.offered, (t) => {
     onClose();
     navigate(href.thread(t.id));

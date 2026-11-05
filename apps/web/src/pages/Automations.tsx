@@ -1,8 +1,14 @@
+import type { Device } from '@omni/shared/handoff.ts';
+import { runOnRows } from '@omni/shared/thread-machine.ts';
+import { runOnOptions } from '../components/RunOnPicker.tsx';
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { api, errorText, useApi, type Automation, type Thread } from '../api.ts';
+import { api, errorText, useApi, type Automation, type Thread, type SyncStatus } from '../api.ts';
 import { DeliveryHistory } from '../components/DeliveryHistory.tsx';
-import { Button, Chip, CopyButton, Empty, ErrorNote, Icon, InlineConfirm, Loading, PageHeader, StatusDot, Toggle } from '../components/ui.tsx';
-import { artifactChannels, describeArtifactSource, describeCron, describeEvent, describeWebhookSource, nextRunLabel, relTime, shortPath } from '../format.ts';
+import { Button, Chip, CopyButton, Empty, ErrorNote, Icon, InlineConfirm, Loading, PageHeader, Picker, StatusDot, Toggle } from '../components/ui.tsx';
+import { describeCron } from '@omni/shared/cron.ts';
+import { relTime } from '@omni/shared/format.ts';
+import { shortPath } from '@omni/shared/short-path.ts';
+import { artifactChannels, describeArtifactSource, describeEvent, describeWebhookSource, nextRunLabel } from '../format.ts';
 import { href, navigate } from '../router.ts';
 import { useApp, useFeed } from '../store.tsx';
 
@@ -77,7 +83,7 @@ function TriggerChips({ a, channelName }: { a: Automation; channelName: (id: str
   );
 }
 
-/** Where GitHub posts, and the signing secret it is checked against. The value goes to this Mac's Keychain and never comes back. */
+/** Where GitHub posts, and the signing secret it is checked against. The value goes to the server's secret store and never comes back. */
 function WebhookPanel({ id, webhook, onChanged }: { id: string; webhook: NonNullable<Automation['webhook']>; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
@@ -128,16 +134,16 @@ function WebhookPanel({ id, webhook, onChanged }: { id: string; webhook: NonNull
           <span className="min-w-0 flex-1 basis-56">
             {webhook.secret_set ? (
               <span className="flex items-center gap-2 text-[12.5px] text-fg-2">
-                <StatusDot status="done" size={7} /> Signing secret set on this Mac
+                <StatusDot status="done" size={7} /> Signing secret set on this machine
               </span>
             ) : (
               <span className="flex items-center gap-2 text-[12.5px] text-warn">
-                <Icon name="alert" size={13} /> No signing secret on this Mac
+                <Icon name="alert" size={13} /> No signing secret on this machine
               </span>
             )}
             {webhook.secret_set ? (
               <span className="mt-0.5 block truncate text-[11.5px] text-fg-4" title={webhook.secret}>
-                Keychain <span className="font-mono">{webhook.secret}</span>
+                Secret <span className="font-mono">{webhook.secret}</span>
               </span>
             ) : (
               <span className="mt-0.5 block text-[11.5px] text-fg-4">GitHub deliveries are refused until you set the same secret you gave the hook on GitHub.</span>
@@ -355,6 +361,45 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
   );
 }
 
+function AutomationMachine({ refreshing }: { refreshing: boolean }) {
+  const status = useApi<SyncStatus>('/sync/status');
+  const devices = useApi<Device[]>('/devices');
+  const reloadStatus = status.reload;
+  const reloadDevices = devices.reload;
+  useEffect(() => {
+    if (refreshing) { reloadStatus(); reloadDevices(); }
+  }, [refreshing, reloadStatus, reloadDevices]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const owner = status.data?.automations;
+  const pick = owner?.isThisMac ? 'here' : owner?.owner ?? 'here';
+  const options = runOnOptions(runOnRows(devices.data ?? [], { asDefault: true }));
+  if (pick !== 'here' && !options.some((o) => o.value === pick)) {
+    options.push({ value: pick, label: pick, sub: 'Machine unavailable', icon: 'monitor', avatar: false, disabled: true });
+  }
+  const save = async (device: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.post('/sync/automations-owner', { device });
+      status.reload();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="relative z-10 rounded-[24px] bg-surface p-4 md:p-5">
+      <div className="mb-2 text-[13px] font-medium">Run automations on</div>
+      <Picker label="Run automations on" value={pick} options={options} onChange={(v) => void save(v)} disabled={saving || !status.data?.machineId || !devices.data} />
+      <p className="mt-2 text-[12.5px] text-fg-3">Scheduled and event-triggered runs use the machine picked here after sync. It must be awake with Omni running. Run now uses the connected machine.</p>
+      {status.data && !status.data.machineId && <p className="mt-2 text-[12.5px] text-fg-3">Sync another machine to choose where automations run.</p>}
+      {(error || status.error || devices.error) && <ErrorNote className="mt-2">{error || status.error || devices.error}</ErrorNote>}
+    </div>
+  );
+}
+
 export function AutomationsPage() {
   const res = useApi<Automation[]>('/automations');
   const { reload } = res;
@@ -382,6 +427,7 @@ export function AutomationsPage() {
         actions={<Button size="sm" variant="ghost" icon="refresh" onClick={reload} busy={res.loading && !!res.data} aria-label="Refresh" />}
       />
       <div className="rise mx-auto max-w-3xl space-y-3 px-4 pt-2 pb-16 md:px-8">
+        <AutomationMachine refreshing={res.loading} />
         {res.error ? (
           <ErrorNote onRetry={reload}>{res.error}</ErrorNote>
         ) : !res.data ? (

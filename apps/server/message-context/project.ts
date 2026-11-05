@@ -9,7 +9,7 @@ import type { MessageContext } from '@omni/shared/message-context.ts';
 import { readContexts, type BodyOf, type ContextReading, type KindName, type KnownContext } from '@omni/shared/message-context-kinds.ts';
 import type { Thread } from '../db.ts';
 import type { Attachment } from '../uploads.ts';
-import { isRemoteHarness, remoteWhere } from '../harness/types.ts';
+import { isProviderHarness, providerWhere } from '../harness/types.ts';
 import { userName, userPossessive } from '../profile.ts';
 import { HISTORY_TOOL, PAGE_ROWS_MAX } from '../thread-history.ts';
 import { defang } from './defang.ts';
@@ -52,7 +52,7 @@ export const CONTEXT_BLOCK_MAX = 40_000;
 const READ_MAX = 1_000_000;
 
 export const placeFor = (t: Pick<Thread, 'harness' | 'cwd'>): Place =>
-  isRemoteHarness(t.harness) ? { remote: true, where: remoteWhere(t.harness) } : { remote: false, read: checkoutReader(t.cwd) };
+  isProviderHarness(t.harness) ? { remote: true, where: providerWhere(t.harness) } : { remote: false, read: checkoutReader(t.cwd) };
 
 /** Reads files that resolve inside `cwd`, symlinks followed, up to READ_MAX bytes, and none with a NUL in its first 8000. */
 export function checkoutReader(cwd: string): Reader {
@@ -95,9 +95,9 @@ const project = <K extends KindName>(k: KnownContext<K>, read: Reader | null): P
 /** The sentence about an item's image: that it came, where, or that it did not. Written here so no kind can promise one a harness cannot open. */
 function imageLine(img: NonNullable<Projection['image']>, place: Place): string {
   const what = `${defang(img.name)}, ${img.width}×${img.height} px`;
-  if (!img.attachment) return `Screenshot: ${what}, is unavailable: its file is no longer saved on ${userPossessive()} Mac. Work from the description above.`;
+  if (!img.attachment) return `Screenshot: ${what}, is unavailable: its file is no longer saved on ${userPossessive()} machine. Work from the description above.`;
   if (place.remote)
-    return `Screenshot: ${what}, is a file on ${userPossessive()} Mac. You run ${place.where} and cannot open it. It comes with this message as an image only where your harness takes images; if there is none, you do not have it.`;
+    return `Screenshot: ${what}, is a file on ${userPossessive()} machine. You run ${place.where} and cannot open it. It comes with this message as an image only where your harness takes images; if there is none, you do not have it.`;
   return `Screenshot: ${what}, is attached to this message: as an image where your harness takes images, and otherwise as the file ${defang(img.attachment.path)}.`;
 }
 
@@ -113,7 +113,7 @@ function item(n: number, r: ContextReading, place: Place): string {
   if (r.as === 'fallback') return [`[${n}] ${defang(r.record.label || r.record.kind || 'Context')}`, ...note, '(Omni could not include its contents.)'].join('\n');
   const p = project(r, place.remote ? null : place.read);
   const lines = [`[${n}] ${p.title}`];
-  if (p.file && place.remote) lines.push(`File: ${defang(p.file)}, in ${userPossessive()} checkout on the Mac. You run ${place.where} and cannot open it; work from the excerpt.`);
+  if (p.file && place.remote) lines.push(`File: ${defang(p.file)}, in ${userPossessive()} checkout on the machine Omni runs on. You run ${place.where} and cannot open it; work from the excerpt.`);
   else if (p.file) lines.push(`File: ${defang(p.file)}, relative to your working directory.`);
   if (p.check && !place.remote) lines.push(`Check: ${p.check.stale ? 'STALE: ' : ''}${p.check.text}.`);
   if (p.image) lines.push(imageLine(p.image, place));

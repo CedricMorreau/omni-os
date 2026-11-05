@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { tokenPath } from './api-token.ts';
+import { chromeBinary } from './browser-page.ts';
 import { userName } from './user-config.ts';
-import { config, paths, threadDir, artifactsDir, browserOutDir, designSystemFile } from './config.ts';
+import { RENDER_SERVER } from '@omni/shared/html-render.ts';
+import { config, paths, threadDir, artifactsDir, browserOutDir, designSystemFile, nodeChildEnv } from './config.ts';
 import type { Channel } from './db.ts';
 import type { CrewRole } from './crew.ts';
 
@@ -136,7 +138,7 @@ async function switchBack(dir: string, branch: string, on: string | null): Promi
  */
 export async function prepareWorktree(repo: string | null, dir: string, branch: string, base?: () => Promise<string>): Promise<void> {
   if (!repo) throw new Error('The channel has no repository set.');
-  if (!existsSync(repo)) throw new Error(`The channel's repository is not on this Mac: ${repo}`);
+  if (!existsSync(repo)) throw new Error(`The channel's repository is not on this machine: ${repo}`);
   if (!(await isGitRepo(repo))) throw new Error(`${repo} is not a git repository. Turn off "Worktree per thread" in the channel's settings to run threads in it directly.`);
   const found = await checkWorktree(repo, dir, branch);
   if (!found) return;
@@ -221,11 +223,13 @@ export const ASK_TIMEOUT_SEC = 86_400;
 /** Per-thread MCP servers, layered on top of the user's normal Claude Code MCP config. Hermes gets none: it runs elsewhere. */
 export function buildMcpConfig(input: McpInput) {
   const servers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
-  const api = { OMNI_URL: input.omniUrl, OMNI_TOKEN_FILE: tokenPath(), OMNI_THREAD_ID: input.threadId, OMNI_USER: userName() };
+  const api = { OMNI_URL: input.omniUrl, OMNI_TOKEN_FILE: tokenPath(), OMNI_THREAD_ID: input.threadId, OMNI_USER: userName(), ...nodeChildEnv };
 
-  servers[ASK_SERVER] = { command: paths.tsx, args: [paths.mcpAsk], env: api };
+  servers[ASK_SERVER] = { command: paths.mcpRunner, args: [paths.mcpAsk], env: api };
+  servers[RENDER_SERVER] = { command: paths.mcpRunner, args: [paths.mcpRender], env: api };
 
-  if (config.browser) {
+  // A delegate-only role hands browser work to a crewmate, so it gets no browser to be tempted by.
+  if (config.browser && !input.role?.delegateOnly) {
     const args = [playwrightMcpBin(), '--output-dir', browserOutDir(input.threadId)];
     // Chrome locks a profile dir, so only one live thread per channel gets the persistent logins.
     if (input.cdpEndpoint && !input.browserBusy) args.push('--cdp-endpoint', input.cdpEndpoint);
@@ -233,16 +237,20 @@ export function buildMcpConfig(input: McpInput) {
       if (input.channel.browser_headless) args.push('--headless');
       if (input.browserBusy) args.push('--isolated');
       else args.push('--user-data-dir', join(paths.browsers, input.channel.id));
+      // Launching its own browser, @playwright/mcp wants Google Chrome at its stock path. Point it at the one Omni
+      // found instead, so a machine with only Chromium (most Linux installs) or Playwright's build still gets a browser.
+      const bin = chromeBinary();
+      if (bin) args.push('--executable-path', bin);
     }
-    servers['omni-browser'] = { command: process.execPath, args };
+    servers['omni-browser'] = { command: process.execPath, args, env: { ...nodeChildEnv } };
   }
 
   if (input.role?.mcp.includes('omni')) {
-    servers['omni'] = { command: paths.tsx, args: [paths.mcpOmni], env: api };
+    servers['omni'] = { command: paths.mcpRunner, args: [paths.mcpOmni], env: api };
   } else {
-    servers[THREADS_SERVER] = { command: paths.tsx, args: [paths.mcpThreads], env: api };
+    servers[THREADS_SERVER] = { command: paths.mcpRunner, args: [paths.mcpThreads], env: api };
   }
-  if (input.role?.mcp.includes('ticket')) servers[TICKET_SERVER] = { command: paths.tsx, args: [paths.mcpTicket], env: api };
+  if (input.role?.mcp.includes('ticket')) servers[TICKET_SERVER] = { command: paths.mcpRunner, args: [paths.mcpTicket], env: api };
   return { mcpServers: servers };
 }
 
@@ -265,6 +273,37 @@ export function writeCursorPlugin(input: McpInput): string {
   mkdirSync(join(dir, '.cursor-plugin'), { recursive: true });
   writeFileSync(join(dir, '.cursor-plugin', 'plugin.json'), JSON.stringify({ name: 'omni-os', version: '0.1.0' }, null, 2));
   writeFileSync(join(dir, '.mcp.json'), JSON.stringify(cfg, null, 2));
+  return dir;
+}
+
+/** The Cursor Agent permission rules a delegate-only role runs under. Deny beats `--force`, and MCP tools stay allowed. */
+export const CURSOR_DELEGATE_ONLY_DENY = ['Shell(*)', 'Write(**)'];
+
+/**
+ * Make dir a delegate-only role's Cursor config folder, for CURSOR_CONFIG_DIR: the user's own folder with `cli-config.json`
+ * copied and its deny list extended, and everything else linked, so the login, chats and sessions stay where they
+ * are. Cursor reads its permissions only from there or from the repo's `.cursor/cli.json`, and Omni writes neither
+ * the repo nor ~/.cursor. Rewritten every spawn, so a change to the user's config reaches the next turn.
+ */
+export function writeCursorDenyConfig(dir: string, userDir: string): string {
+  mkdirSync(dir, { recursive: true });
+  for (const name of existsSync(userDir) ? readdirSync(userDir) : []) {
+    if (name === 'cli-config.json') continue;
+    const link = join(dir, name);
+    try {
+      lstatSync(link);
+    } catch {
+      symlinkSync(join(userDir, name), link);
+    }
+  }
+  let cfg: { permissions?: { allow?: string[]; deny?: string[] }; [k: string]: unknown } = { version: 1 };
+  try {
+    cfg = JSON.parse(readFileSync(join(userDir, 'cli-config.json'), 'utf8'));
+  } catch {
+    // No config of the user's yet: the deny list alone.
+  }
+  const deny = [...new Set([...(cfg.permissions?.deny ?? []), ...CURSOR_DELEGATE_ONLY_DENY])];
+  writeFileSync(join(dir, 'cli-config.json'), JSON.stringify({ ...cfg, permissions: { allow: cfg.permissions?.allow ?? [], deny } }, null, 2));
   return dir;
 }
 

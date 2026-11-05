@@ -9,6 +9,8 @@ export interface ThumbBox {
   y: number;
   w: number;
   h: number;
+  /** The active item's corner radius, so the thumb takes the shape of a pill or a card. */
+  r: string;
   phase: Phase;
 }
 
@@ -23,28 +25,31 @@ export function useSlidingThumb(
 ): ThumbBox | null {
   const [box, setBox] = useState<ThumbBox | null>(null);
   const last = useRef<Omit<ThumbBox, 'phase'> | null>(null);
+  // Owned by the stretch, not by one run of the effect: a key change that doesn't move the item must not cancel it.
+  const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(settle.current), []);
 
   const measure = useCallback(() => {
     const el = track.current?.querySelector<HTMLElement>(selector);
     if (!el) return null;
-    return { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+    return { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight, r: getComputedStyle(el).borderRadius };
   }, [track, selector]);
 
   useLayoutEffect(() => {
     const next = measure();
     const prev = last.current;
     last.current = next;
+    if (prev && next && prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h && prev.r === next.r) return;
+    clearTimeout(settle.current);
     if (!next) return setBox(null);
     if (!prev || reducedMotion()) return setBox({ ...next, phase: 'idle' });
-    if (prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h) return;
     // Stretch to cover old and new along the travel axis, then spring into place.
     const x = vertical ? next.x : Math.min(prev.x, next.x);
     const y = vertical ? Math.min(prev.y, next.y) : next.y;
     const w = vertical ? next.w : Math.max(prev.x + prev.w, next.x + next.w) - x;
     const h = vertical ? Math.max(prev.y + prev.h, next.y + next.h) - y : next.h;
-    setBox({ x, y, w, h, phase: 'stretch' });
-    const t = setTimeout(() => setBox({ ...next, phase: 'settle' }), 150);
-    return () => clearTimeout(t);
+    setBox({ x, y, w, h, r: next.r, phase: 'stretch' });
+    settle.current = setTimeout(() => setBox({ ...next, phase: 'settle' }), 150);
   }, [activeKey, measure, vertical]);
 
   // Fonts loading, lists growing and window resizes move items: follow without animating.
@@ -54,6 +59,7 @@ export function useSlidingThumb(
     const ro = new ResizeObserver(() => {
       const n = measure();
       last.current = n;
+      clearTimeout(settle.current);
       setBox(n ? { ...n, phase: 'idle' } : null);
     });
     ro.observe(el);
@@ -71,7 +77,7 @@ export function Thumb({ box, tone, className = '' }: { box: ThumbBox | null; ton
       className={`seg-thumb ${className}`}
       data-phase={box.phase}
       data-tone={tone}
-      style={{ width: box.w, height: box.h, transform: `translate3d(${box.x}px, ${box.y}px, 0)` }}
+      style={{ width: box.w, height: box.h, borderRadius: box.r, transform: `translate3d(${box.x}px, ${box.y}px, 0)` }}
     />
   );
 }
@@ -122,7 +128,7 @@ export function Segmented<T extends string>({
         } as const;
         const inner = (
           <>
-            {o.icon && <Icon name={o.icon} size={size === 'sm' ? 13 : 14} />}
+            {o.icon && <Icon name={o.icon} size={o.label ? (size === 'sm' ? 13 : 14) : 15} />}
             {o.label}
             {o.badge}
           </>

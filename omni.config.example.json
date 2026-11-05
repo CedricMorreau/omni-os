@@ -15,7 +15,10 @@
   "integrations": {
     "hermesUrl": "",
     "centralBrainDir": "",
-    "tailscaleLogin": "ada@example.com"
+    "tailscaleLogin": "ada@example.com",
+    "mcpPublicUrl": "",
+    "clerkPublishableKey": "",
+    "clerkClientId": ""
   },
   "automations": {
     "weekly-review": { "enabled": true },

@@ -3,8 +3,7 @@
 // harness gets are the same for the same inputs (apps/server/continue.ts captures them; runner/handover.ts delivers the
 // text). Everything taken from the transcript is data: tags that would end the block are neutralised, and paths into
 // the source's checkout read relative to its root.
-import { basename } from 'node:path';
-import { switchText, type RunName, type SwitchP } from '@omni/shared/run-switch.ts';
+import type { RunName } from '@omni/shared/run-switch.ts';
 import {
   CARRYOVER_BUDGET,
   type CarriedStats,
@@ -16,16 +15,12 @@ import {
   type CarryoverOmission,
 } from '@omni/shared/continue.ts';
 import type { EventRow, SkippedFile } from './db.ts';
-import { toolLabel } from './tool-label.ts';
+import { attachmentNames, cut, openTodos, readRows, selectEntries, transcriptEntries as entriesOf, type Row, type TranscriptEntry } from './transcript-select.ts';
 
 const GOAL_MAX = 2_000;
-const MESSAGE_MAX = 4_000;
 /** An earlier Carryover in the transcript: it holds that thread's goal and history, so it keeps more. */
 const CARRIED_MAX = 8_000;
 const CONDENSED_MAX = 200;
-const RESULT_MAX = 600;
-/** The newest tool calls keep their results; older ones only when they failed. */
-const RESULTS_KEPT = 8;
 const FILES_LISTED = 60;
 const CHECKS_KEPT = 6;
 const CHECK_OUTPUT = 300;
@@ -58,9 +53,15 @@ export interface CarryoverInput {
   /**
    * Where the continued thread works. `snapshot`: its own worktree, from the source's own worktree with its
    * uncommitted changes. `head`: its own worktree at the HEAD of the shared checkout the source ran in. `folder`: the
-   * folder the source worked in. `paths` is the source's checkout as stored and resolved, which read as `.`.
+   * folder the source worked in. `branch`: its own worktree at the last commit of the source's branch, whose worktree is
+   * not on this machine. `gone`: a fresh checkout, since neither that worktree nor its branch is here. `paths` is the
+   * source's checkout as stored and resolved, which read as `.`.
    */
-  workspace: { kind: 'snapshot'; paths: string[] } | { kind: 'head'; paths: string[] } | { kind: 'folder'; cwd: string };
+  workspace:
+    | { kind: 'snapshot' | 'head'; paths: string[] }
+    | { kind: 'branch'; branch: string; paths: string[] }
+    | { kind: 'gone'; branch: string }
+    | { kind: 'folder'; cwd: string };
   /** Repo work: every file that differs from `base` (or `head`); the Carryover lists the first ones. */
   files: { base: string | null; head: string; tree: string; changed: CarryoverFile[] } | null;
   /** Untracked files the snapshot left out: binary, too large, or past its limit. */
@@ -76,7 +77,6 @@ export interface CarryoverInput {
   budget?: number;
 }
 
-const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)} (cut)` : s);
 const tail = (s: string, max: number) => (s.length > max ? `…${s.slice(-max)}` : s);
 const named = (r: RunName) => `${r.harnessName} (${r.modelLabel})`;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -94,69 +94,49 @@ const neutral = (s: string) => s.replace(/<(\/?)omni-(carryover|handover)/gi, '�
 
 /** Every string the Carryover takes from the transcript or the checkout goes through this. */
 function cleaner(i: CarryoverInput) {
-  const paths = i.workspace.kind === 'folder' ? [] : [...new Set(i.workspace.paths.filter(Boolean))].sort((a, b) => b.length - a.length);
+  const paths = !('paths' in i.workspace) ? [] : [...new Set(i.workspace.paths.filter(Boolean))].sort((a, b) => b.length - a.length);
   const uploads = [...new Set((i.uploads ?? []).filter(Boolean))].sort((a, b) => b.length - a.length);
   const unreadable = (s: string) => uploads.reduce((t, p) => t.split(p).join(SOURCE_UPLOADS), s);
   return (s: string) => neutral(paths.reduce((t, p) => t.split(p).join('.'), unreadable(s)));
 }
 
-/** What a run of the transcript says, as rows with their payloads read. */
-const read = (events: EventRow[]) => events.map((e) => ({ id: e.id, kind: e.kind, p: JSON.parse(e.payload) }));
-type Row = ReturnType<typeof read>[number];
+/** The Carryover's Workspace constraint: where the continued thread works, and what of the source it has there. */
+function workspaceLine(ws: CarryoverInput['workspace'], head: string): string {
+  switch (ws.kind) {
+    case 'snapshot':
+      return `Workspace: your own worktree, on a new branch at the source's HEAD (${head}), with its uncommitted changes laid in, still uncommitted.`;
+    case 'head':
+      return `Workspace: your own worktree, on a new branch at the source's HEAD (${head}). The source ran in the channel's shared checkout, so its uncommitted changes were not carried.`;
+    case 'branch':
+      return `Workspace: your own worktree, on a new branch at the last commit of the source's branch ${ws.branch} (${head}). The source's worktree is not on this machine, so changes it never committed were not carried.`;
+    case 'gone':
+      return `Workspace: a fresh checkout, as any new thread in this channel gets. The source worked on branch ${ws.branch}, which is not on this machine or its origin, so its files were not carried. If it was merged, its commits are on the default branch.`;
+    case 'folder':
+      return `Workspace: the folder the source worked in, ${ws.cwd}.`;
+  }
+}
 
 /** An earlier Carryover as one history entry: in a handover after a later switch, and in a Carryover of this thread. */
 export function carriedEntry(p: CarryoverP): string {
   return `[Carried over from "${neutral(p.source.title)}" on ${named(p.source.run)}] ${cut(p.text, CARRIED_MAX)}`;
 }
 
-/** One transcript entry before the budget: its text whole (each kind capped), and its last event. */
-interface Raw {
-  id: number;
-  who: CarryoverEntry['who'];
-  text: string;
-}
-
 /**
- * The transcript as entries, oldest first: messages, replies, top-level tool calls (with the result of a failed one or
- * one of the newest), crew reports, errors, run switches and earlier Carryovers. Attachments are named, never their
- * paths. `speaker` is the harness the thread ran on last. The history endpoint (continue.ts) reads the same entries.
- * With `attachments`, each says whether it was carried; without, none was.
+ * The transcript as entries (transcript-select.ts), for a fork: every string cleaned of the source's paths, and each
+ * attachment named, never its path, with whether it was carried. Without `attachments`, none was. `speaker` is the
+ * harness the thread ran on last. The history endpoint (continue.ts) reads the same entries.
  */
-export function transcriptEntries(events: EventRow[], user: string, speaker: string, clean = (s: string) => s, attachments?: CarryoverAttachment[]): Raw[] {
-  const rows = read(events);
-  const results = new Map<string, Row>();
-  for (const r of rows) if (r.kind === 'tool_result') results.set(r.p.tool_use_id, r);
-  const calls = rows.filter((r) => r.kind === 'tool_use' && !r.p.parent);
-  const recent = new Set(calls.slice(-RESULTS_KEPT).map((r) => r.p.id));
-  // Events carry no harness: the one that wrote them is the one the latest switch moved to.
-  let who = (rows.find((r) => r.kind === 'switch')?.p as SwitchP | undefined)?.from.harnessName ?? speaker;
-  const out: Raw[] = [];
-  for (const { id, kind, p } of rows) {
-    if (p?.dropped) continue;
-    if (kind === 'user') {
-      const files = attachments
+export function transcriptEntries(events: EventRow[], user: string, speaker: string, clean = (s: string) => s, attachments?: CarryoverAttachment[]): TranscriptEntry[] {
+  return entriesOf(events, {
+    user,
+    speaker,
+    clean,
+    under: ({ id, p }) =>
+      attachments
         ? attachments.filter((a) => a.event_id === id).map((a) => `  - Attachment: ${clean(a.name)} (${a.carried ? 'carried, listed with the first message' : `not carried: ${attachmentReason(a)}`})`)
-        : attachmentNames(p).map((name) => `  - Attachment: ${clean(name)} (not carried)`);
-      out.push({ id, who: 'user', text: [`[${user}] ${clean(cut(p.text ?? '', MESSAGE_MAX))}`, ...files].join('\n') });
-    } else if (kind === 'assistant_text') {
-      out.push({ id, who: 'agent', text: `[${who}] ${clean(cut(p.text ?? '', MESSAGE_MAX))}` });
-    } else if (kind === 'crew_report') {
-      out.push({ id, who: 'report', text: `[Crew report: ${clean(p.title ?? p.task_id ?? 'task')}, ${p.status}] ${clean(cut(p.text ?? '', MESSAGE_MAX))}` });
-    } else if (kind === 'error') {
-      out.push({ id, who: 'error', text: `[Error] ${clean(cut(p.text ?? '', MESSAGE_MAX))}` });
-    } else if (kind === 'switch') {
-      who = (p as SwitchP).to.harnessName;
-      out.push({ id, who: 'omni', text: `[Omni] ${switchText(p as SwitchP)}` });
-    } else if (kind === 'carryover') {
-      out.push({ id, who: 'omni', text: clean(carriedEntry(p as CarryoverP)) });
-    } else if (kind === 'tool_use' && !p.parent) {
-      const label = toolLabel(p.input);
-      const r = results.get(p.id);
-      const shown = r && (r.p.is_error || recent.has(p.id)) ? `\n    ${r.p.is_error ? 'Failed' : 'Result'}: ${clean(cut(r.p.text ?? '', RESULT_MAX))}` : '';
-      out.push({ id: r?.id ?? id, who: 'tool', text: `  - ${p.name}${label ? `: ${clean(label)}` : ''}${shown}` });
-    }
-  }
-  return out;
+        : attachmentNames(p).map((name) => `  - Attachment: ${clean(name)} (not carried)`),
+    carried: (p) => carriedEntry(p as CarryoverP),
+  });
 }
 
 /** The transcript as the history endpoint serves it: every entry, oldest first. */
@@ -165,14 +145,6 @@ export const historyText = (events: EventRow[], user: string, speaker: string) =
 
 /** Why a file did not go: what is wrong with it, or that Ben did not pick it. */
 const attachmentReason = (a: CarryoverAttachment) => a.reason ?? 'not selected';
-
-function attachmentNames(p: { attachments?: unknown }): string[] {
-  return (Array.isArray(p.attachments) ? p.attachments : []).flatMap((a: { name?: unknown }) => {
-    if (typeof a?.name !== 'string') return [];
-    const name = basename(a.name.replace(/\\/g, '/'));
-    return name && name !== '.' && name !== '..' ? [name] : [];
-  });
-}
 
 /** The task: the source's first message, or the goal its own Carryover carried. */
 function goalOf(rows: Row[]): string {
@@ -191,11 +163,6 @@ function checksOf(rows: Row[], clean: (s: string) => string): CarryoverCheck[] {
     if (!done || !CHECK.test(command) || NOT_CHECK.test(command)) return [];
     return [{ id: done.id, command: clean(cut(command.replace(/\s+/g, ' ').trim(), CHECK_OUTPUT)), ok: !done.p.is_error, output: clean(tail((done.p.text ?? '').trim(), CHECK_OUTPUT)) }];
   });
-}
-
-interface Todo {
-  content?: string;
-  status?: string;
 }
 
 const LETTER: Record<CarryoverFile['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C', type: 'T' };
@@ -225,47 +192,27 @@ export function carryoverText(to: RunName, source: Carryover['source'], user: st
 }
 
 /** The newest entries whole while they fit, older ones cut to their first line, and how many oldest ones are left out. */
-function fit(raw: Raw[], room: number): { kept: CarryoverEntry[]; cut: number } {
-  const kept: CarryoverEntry[] = [];
-  let condensing = false;
-  for (let j = raw.length - 1; j >= 0; j--) {
-    const r = raw[j];
-    if (!condensing && r.text.length + 1 <= room) {
-      room -= r.text.length + 1;
-      kept.push({ ...r, condensed: false });
-      continue;
-    }
-    condensing = true;
-    const line = firstLine(r.text).slice(0, CONDENSED_MAX);
-    const short = line === r.text ? line : `${line} …`;
-    if (short.length + 1 > room) return { kept: kept.reverse(), cut: j + 1 };
-    room -= short.length + 1;
-    kept.push({ ...r, text: short, condensed: short !== r.text });
-  }
-  return { kept: kept.reverse(), cut: 0 };
+function fit(raw: TranscriptEntry[], room: number): { kept: CarryoverEntry[]; cut: number } {
+  const { kept, cutAt } = selectEntries(raw, { room, condense: true });
+  return { kept: kept.map(({ id, who, text, condensed }) => ({ id, who, text, condensed })), cut: cutAt + 1 };
 }
 
 /** The Carryover, and its body: the text without the intro and ending, which the `carryover` event keeps. */
 export function buildCarryover(i: CarryoverInput): { carryover: Carryover; body: string } {
   const budget = i.budget ?? CARRYOVER_BUDGET;
   const clean = cleaner(i);
-  const rows = read(i.events);
+  const rows = readRows(i.events);
   const history = `/api/threads/${i.source.id}/transcript`;
 
   const goal = clean(cut(goalOf(rows), GOAL_MAX));
-  const plan = rows.findLast((r) => r.kind === 'tool_use' && r.p.name === 'TodoWrite')?.p.input?.todos as Todo[] | undefined;
-  const todos = (plan ?? []).filter((t) => t.status !== 'completed' && t.content);
+  const todos = openTodos(rows);
   const ws = i.workspace;
   const head = i.files?.head.slice(0, 7) ?? '';
   const constraints = [
     `Channel: #${i.source.channel}`,
     ...(i.role ? [`Crew role: ${i.role}`] : []),
-    ws.kind === 'snapshot'
-      ? `Workspace: your own worktree, on a new branch at the source's HEAD (${head}), with its uncommitted changes laid in, still uncommitted.`
-      : ws.kind === 'head'
-        ? `Workspace: your own worktree, on a new branch at the source's HEAD (${head}). The source ran in the channel's shared checkout, so its uncommitted changes were not carried.`
-        : `Workspace: the folder the source worked in, ${ws.cwd}.`,
-    ...(ws.kind === 'folder'
+    workspaceLine(ws, head),
+    ...(!('paths' in ws)
       ? []
       : ["Paths from the source's checkout are shown relative to its root. Your working directory is your own checkout of the same repo; never write to the source thread's checkout."]),
     ...(todos.length ? [`Open todos: ${listed(todos.map((t) => `${clean(cut(t.content!, CONDENSED_MAX))} (${t.status ?? 'pending'})`), '; ')}`] : []),

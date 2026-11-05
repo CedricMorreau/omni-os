@@ -1,6 +1,7 @@
 import type { RunName } from '@omni/shared/run-switch.ts';
 import { db, now, tx } from '../connection.ts';
 import { outbox, record } from '../sync.ts';
+import { assignments } from './assignments.ts';
 
 export type ThreadStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'imported';
 /** `team`: a member of a team, run under its lead thread and listed only there. */
@@ -60,6 +61,11 @@ export interface Thread {
   /** Why the worktree could not be prepared, while setup is `failed`. */
   setup_error: string | null;
   /**
+   * Why this machine did not resume the thread's session: the session download before the turn failed or timed out,
+   * so the copy here may lack turns another machine ran (runner/spawn.ts). Null once a turn starts. Local only.
+   */
+  resume_blocked: string | null;
+  /**
    * Its last turn stopped at the harness's usage limit (apps/server/runner/limits.ts). Null once anything moves it on.
    * Synced to every Mac, so each lists it in Needs you; only the Mac that ran the turn resumes it.
    */
@@ -100,6 +106,8 @@ export interface PendingHandover {
   since: number;
   /** The fresh native session exists, so the next spawn resumes it while its history still waits. */
   started?: boolean;
+  /** Ben chose to start with fresh context on the same run, not a switch (runner/fresh-context.ts). */
+  fresh?: true;
 }
 /** How a thread's sessions stand across harness switches (apps/server/runner/switch-plan.ts). Synced, kept out of the API. */
 export interface SessionState {
@@ -111,7 +119,7 @@ export interface SessionState {
 // that has not reached this Mac yet reads as the thread's start: the handover then carries too much, never too little.
 export interface StoredSessionState {
   sessions: Partial<Record<string, { id: string; seen: string }>> | null;
-  handover: { from: RunName; since: string | null; started?: boolean } | null;
+  handover: { from: RunName; since: string | null; started?: boolean; fresh?: true } | null;
 }
 const uidOf = (id: number) => (db.prepare('SELECT uid FROM events WHERE id = ?').get(id) as { uid: string } | undefined)?.uid ?? '';
 const idOf = (uid: string) => (db.prepare('SELECT id FROM events WHERE uid = ?').get(uid) as { id: number } | undefined)?.id ?? 1;
@@ -122,21 +130,32 @@ function storedSessions(s: Sessions | null | undefined): StoredSessionState['ses
   return entries.length ? Object.fromEntries(entries.map(([h, p]) => [h, { id: p.id, seen: uidOf(p.seen) }])) : null;
 }
 const storedHandover = (h: PendingHandover | null | undefined): StoredSessionState['handover'] =>
-  h ? { from: h.from, since: h.since ? uidOf(h.since) : null, ...(h.started && { started: true }) } : null;
+  h ? { from: h.from, since: h.since ? uidOf(h.since) : null, ...(h.started && { started: true }), ...(h.fresh && { fresh: true }) } : null;
 const readSessions = (s: StoredSessionState['sessions']): Sessions =>
   Object.fromEntries(Object.entries(s ?? {}).flatMap(([h, p]) => (p ? [[h, { id: p.id, seen: idOf(p.seen) }]] : [])));
-const readHandover = (h: StoredSessionState['handover']): PendingHandover | null => (h ? { from: h.from, since: h.since ? idOf(h.since) : 0, ...(h.started && { started: true }) } : null);
+const readHandover = (h: StoredSessionState['handover']): PendingHandover | null => (h ? { from: h.from, since: h.since ? idOf(h.since) : 0, ...(h.started && { started: true }), ...(h.fresh && { fresh: true }) } : null);
 const json = (v: object | null) => (v ? JSON.stringify(v) : null);
 
 /** The columns clients read, without sync's run_machine, the limit stop's id and owner, or the session state. */
 export const THREAD_COLUMNS =
-  'id, channel_id, title, status, role, model, harness, effort, auto_reason, queued_harness, queued_model, queued_effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, limit_state, limit_resets_at, limit_elsewhere, continued_from, waiting_on, created_at, updated_at';
+  'id, channel_id, title, status, role, model, harness, effort, auto_reason, queued_harness, queued_model, queued_effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, resume_blocked, limit_state, limit_resets_at, limit_elsewhere, continued_from, waiting_on, created_at, updated_at';
 
-/** Who runs a thread with this status: this machine while it is running or queued here and sync is set up, else nobody. */
+/**
+ * The machine whose status write this is: this one while it is running or queued here and sync is set up, else nobody.
+ * A tag on the row for the status merge (sync/handlers/thread.ts) and the result trigger (db/migrate.ts), not who owns
+ * the thread: that is the assignment (db/repos/assignments.ts), which the same write claims.
+ */
 const runMachine = (status: ThreadStatus) => (status === 'running' || status === 'queued' ? outbox.machineId() : null);
 
 export const threads = {
   get: (id: string) => db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE id = ?`).get(id) as unknown as Thread | undefined,
+  /** Exact branch owners in a GitHub repo, including archived threads and channels sharing that repo. */
+  byRepoBranch: (repo: string, branch: string) =>
+    db
+      .prepare(`SELECT ${THREAD_COLUMNS.split(', ').map((c) => `t.${c}`).join(', ')}
+      FROM threads t JOIN channels c ON c.id = t.channel_id
+      WHERE c.github_repo = ? COLLATE NOCASE AND t.branch = ? ORDER BY t.created_at, t.rowid`)
+      .all(repo, branch) as unknown as Thread[],
   /** A channel's threads, without team members: those are listed under their lead. */
   byChannel: (channelId: string, limit = 200, archived = false) =>
     db
@@ -146,6 +165,42 @@ export const threads = {
     db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE archived = 0 ORDER BY updated_at DESC LIMIT ?`).all(limit) as unknown as Thread[],
   children: (parentId: string) =>
     db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE parent_id = ? ORDER BY created_at`).all(parentId) as unknown as Thread[],
+  /** The threads working on a branch, newest first. Omni names branches per thread, so it is one in practice. */
+  withBranch: (branch: string) =>
+    db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE branch = ? ORDER BY created_at DESC, rowid DESC`).all(branch) as unknown as Thread[],
+  /** Every thread delegated from this one at any depth, team members under their lead included, oldest first. */
+  descendants: (id: string) =>
+    db
+      .prepare(
+        `WITH RECURSIVE under(id) AS (SELECT id FROM threads WHERE parent_id = ? UNION SELECT t.id FROM threads t JOIN under ON t.parent_id = under.id)
+         SELECT ${THREAD_COLUMNS} FROM threads WHERE id IN (SELECT id FROM under) AND id != ? ORDER BY created_at, rowid`,
+      )
+      .all(id, id) as unknown as Thread[],
+  /** The ids of the threads above this one in its delegation chain, without itself. UNION drops a cycle. */
+  ancestors: (id: string) =>
+    (
+      db
+        .prepare(
+          `WITH RECURSIVE up(id) AS (SELECT parent_id FROM threads WHERE id = ? AND parent_id IS NOT NULL
+             UNION SELECT t.parent_id FROM threads t JOIN up ON t.id = up.id WHERE t.parent_id IS NOT NULL)
+           SELECT id FROM up WHERE id != ?`,
+        )
+        .all(id, id) as { id: string }[]
+    ).map((r) => r.id),
+  /**
+   * The top of this thread's delegation chain: the thread Ben delegated from, where its crew's questions wait on him.
+   * Itself when nothing delegated it, and the highest one here when an ancestor has not synced to this Mac.
+   */
+  root: (id: string) =>
+    (
+      db
+        .prepare(
+          `WITH RECURSIVE up(id, parent_id, depth) AS (SELECT id, parent_id, 0 FROM threads WHERE id = ?
+             UNION ALL SELECT t.id, t.parent_id, up.depth + 1 FROM threads t JOIN up ON t.id = up.parent_id WHERE up.depth < 32)
+           SELECT id FROM up ORDER BY depth DESC LIMIT 1`,
+        )
+        .get(id) as { id: string } | undefined
+    )?.id ?? id,
   /** Threads delegated from Conductor jobs, kept visible beside their parent in the originating channel. */
   conductorHandoffChildren: () =>
     db
@@ -189,7 +244,22 @@ export const threads = {
       )
       .all() as unknown as Thread[],
   running: () => db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE status IN ('running','queued')`).all() as unknown as Thread[],
-  /** The machine id of the Mac that runs the thread (sync), or null when none does. */
+  /**
+   * The threads with a delegated thread running or queued below them, at any depth (apps/server/delegating.ts). An
+   * archived thread pins nothing. UNION drops an id met again, so a parent_id cycle ends.
+   */
+  delegating: () =>
+    (
+      db
+        .prepare(
+          `WITH RECURSIVE up(id) AS (
+             SELECT parent_id FROM threads WHERE status IN ('running','queued') AND archived = 0 AND parent_id IS NOT NULL
+             UNION SELECT t.parent_id FROM threads t JOIN up ON t.id = up.id WHERE t.parent_id IS NOT NULL)
+           SELECT id FROM up`,
+        )
+        .all() as { id: string }[]
+    ).map((r) => r.id),
+  /** The machine that wrote the thread's running or queued status (sync), or null. For the status merge; ownership reads the assignment. */
   runMachine: (id: string) =>
     (db.prepare('SELECT run_machine FROM threads WHERE id = ?').get(id) as { run_machine: string | null } | undefined)?.run_machine ?? null,
   list(filter: { channel?: string; status?: string; limit?: number }) {
@@ -205,7 +275,7 @@ export const threads = {
   create(
     t: Omit<
       Thread,
-      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'queued_harness' | 'queued_model' | 'queued_effort' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere' | 'continued_from' | 'waiting_on'
+      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'queued_harness' | 'queued_model' | 'queued_effort' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'resume_blocked' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere' | 'continued_from' | 'waiting_on'
     > & {
       has_run?: number; created_at?: string; harness?: string; effort?: string; auto_reason?: string | null; folder_id?: string | null; setup?: ThreadSetup | null;
     },
@@ -220,6 +290,7 @@ export const threads = {
         t.branch, t.parent_id, t.task_id, t.source, t.automation, runMachine(t.status), t.folder_id ?? null, t.setup ?? null, ts, ts,
       );
       record('thread', t.id);
+      if (runMachine(t.status)) assignments.claim(t.id);
       return threads.get(t.id)!;
     });
   },
@@ -234,7 +305,7 @@ export const threads = {
     return { sessions: parsed(row?.sessions ?? null), handover: parsed(row?.handover ?? null) };
   },
   update(id: string, patch: Partial<Thread> & Partial<SessionState>) {
-    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'auto_reason', 'queued_harness', 'queued_model', 'queued_effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'waiting_on', 'updated_at'] as const;
+    const allowed = ['title', 'status', 'model', 'harness', 'effort', 'auto_reason', 'queued_harness', 'queued_model', 'queued_effort', 'session_id', 'has_run', 'cwd', 'branch', 'last_text', 'archived', 'setup', 'setup_error', 'resume_blocked', 'waiting_on', 'updated_at'] as const;
     const keys = allowed.filter((k) => k in patch);
     const sets = keys.map((k) => `${k} = ?`);
     const vals = keys.map((k) => (patch[k] ?? null) as string | number | null);
@@ -246,7 +317,10 @@ export const threads = {
     // A run starting, or Ben retrying its setup, is news: a thread marked done comes back to Needs you when it ends.
     if (patch.status === 'running' || patch.status === 'queued' || patch.setup === 'preparing') sets.push('done_at = NULL');
     tx(() => {
-      if (db.prepare(`UPDATE threads SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id).changes) record('thread', id);
+      if (!db.prepare(`UPDATE threads SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id).changes) return;
+      record('thread', id);
+      // A turn starting here makes this machine the thread's owner (the same machine again changes nothing).
+      if (patch.status && runMachine(patch.status)) assignments.claim(id);
     });
     return threads.get(id);
   },

@@ -1,9 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, openSSE, errorText, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type NeedsYou, type Profile, type Status, type Thread, type ThreadStub } from './api.ts';
-import { coalesced, withoutResult, withoutThread } from './needs-you.ts';
-import { withPin, type PinnedThread } from './pins.ts';
+import { api, openSSE, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type NeedsYou, type Profile, type Status, type Thread, type ThreadStub } from './api.ts';
+import { type PinnedThread } from './pins.ts';
 import { pageTitle, type Route } from './router.ts';
+import { windowTitle } from './device.ts';
+import { useChannels } from './app/useChannels.ts';
+import { useNeedsYou } from './app/useNeedsYou.ts';
+import { useStatusAndProfile } from './app/useStatusAndProfile.ts';
 import { createSyncNudge } from './sync-nudge.ts';
+import { secretStoreLabel, type SecretStoreKind } from '@omni/shared/secret-store.ts';
 
 interface AppState {
   channels: ChannelWithRunning[];
@@ -19,7 +23,9 @@ interface AppState {
   crew: CrewRole[];
   reloadCrew: () => void;
   usage: HarnessUsage;
-  status: Omit<Status, 'usage'> | null;
+  status: (Omit<Status, 'usage' | 'server'> & { secretStore: SecretStoreKind }) | null;
+  /** Re-read GET /api/status, as after a secret that changes what it reports. */
+  reloadStatus: () => Promise<void>;
   /** The name Omni calls the user by, null until the first status load. Empty when nobody set it yet. */
   profile: Profile | null;
   /** Save profile fields (PUT /api/profile) and show them at once. */
@@ -51,112 +57,16 @@ interface AppState {
 const Ctx = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [channels, setChannels] = useState<ChannelWithRunning[]>([]);
-  const [channelsLoaded, setChannelsLoaded] = useState(false);
-  const [channelsError, setChannelsError] = useState<string | null>(null);
-  const [pinned, setPinnedList] = useState<PinnedThread[]>([]);
   const [crew, setCrew] = useState<CrewRole[]>([]);
-  const [usage, setUsage] = useState<HarnessUsage>({});
-  const [status, setStatus] = useState<Omit<Status, 'usage'> | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [setupWanted, setSetupWanted] = useState(false);
   const [feedLive, setFeedLive] = useState(false);
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
   const [mods, setMods] = useState<ModStatus[]>([]);
   const [openThread, setOpenThread] = useState<ThreadStub | null>(null);
-  const [needsYou, setNeedsYou] = useState<NeedsYou | null>(null);
-  /** Bumps on each read, so an inbox fetched before it cannot put the read result back. */
-  const needsYouEpoch = useRef(0);
+  const { channels, setChannels, channelsLoaded, channelsError, pinned, reloadChannels, setPinned } = useChannels();
+  const { usage, setUsage, status, profile, setupOpen, openSetup, closeSetup, reloadStatus, saveProfile, reloadProfile } = useStatusAndProfile();
+  const { needsYou, reloadNeedsYou, needsYouChanged, readResult, setDone } = useNeedsYou(reloadChannels);
   const listeners = useRef(new Set<(e: FeedEvent) => void>());
   const taskHosts = useRef('');
-
-  const reloadPinned = useCallback(
-    () =>
-      api
-        .get<PinnedThread[]>('/pinned')
-        .then(setPinnedList)
-        .catch(() => {}),
-    [],
-  );
-
-  const reloadChannels = useCallback(async () => {
-    // Pins name threads in any channel, so they change whenever the channels' threads do.
-    const pins = reloadPinned();
-    try {
-      const list = await api.get<ChannelWithRunning[]>('/channels');
-      setChannels(list);
-      setChannelsError(null);
-    } catch (e) {
-      setChannelsError(errorText(e));
-    } finally {
-      setChannelsLoaded(true);
-    }
-    await pins;
-  }, [reloadPinned]);
-
-  const setPinned = useCallback(
-    async (t: ThreadStub, on: boolean) => {
-      setPinnedList((prev) => withPin(prev, t, on));
-      try {
-        return await api.patch<Thread>(`/threads/${encodeURIComponent(t.id)}`, { pinned: on });
-      } finally {
-        // Refused or not, the server's list is the truth.
-        void reloadPinned();
-      }
-    },
-    [reloadPinned],
-  );
-
-  const reloadStatus = useCallback(async () => {
-    try {
-      const s = await api.get<Status>('/status');
-      setStatus({ running: s.running, queued: s.queued, maxConcurrent: s.maxConcurrent, maxUploadMb: s.maxUploadMb, slots: s.slots ?? {} });
-      setProfile(s.profile ?? { name: '' });
-      if (s.usage) setUsage((prev) => ({ ...prev, ...s.usage }));
-    } catch {
-      /* the channel list already surfaces connection errors */
-    }
-  }, []);
-
-  const reloadNeedsYou = useCallback(() => {
-    const epoch = needsYouEpoch.current;
-    return api
-      .get<NeedsYou>('/needs-you')
-      .then((n) => void (epoch === needsYouEpoch.current && setNeedsYou(n)))
-      .catch(() => {});
-  }, []);
-  /** On a `needs_you` event: a read or a result here, on another client or from the other Mac's sync, often in a burst. */
-  const needsYouChanged = useMemo(() => coalesced(reloadNeedsYou), [reloadNeedsYou]);
-
-  const readResult = useCallback(
-    (uid: string) => {
-      needsYouEpoch.current++;
-      setNeedsYou((prev) => (prev ? withoutResult(prev, uid) : prev));
-      // Whatever the answer, the server's inbox is the truth: a newer result may have come in meanwhile.
-      api
-        .post('/needs-you/read', { uid })
-        .catch(() => {})
-        .finally(reloadNeedsYou);
-    },
-    [reloadNeedsYou],
-  );
-
-  const setDone = useCallback(
-    async (threadId: string, on: boolean) => {
-      if (on) {
-        needsYouEpoch.current++;
-        setNeedsYou((prev) => (prev ? withoutThread(prev, threadId) : prev));
-      }
-      try {
-        return await api.patch<Thread>(`/threads/${encodeURIComponent(threadId)}`, { done: on });
-      } finally {
-        // Refused or not, the server's inbox and lists are the truth.
-        void reloadNeedsYou();
-        void reloadChannels();
-      }
-    },
-    [reloadNeedsYou, reloadChannels],
-  );
 
   const reloadCrew = useCallback(() => {
     api
@@ -239,19 +149,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => h.close();
   }, [scheduleRefresh, reloadCrew, reloadTasks, needsYouChanged]);
 
-  const saveProfile = useCallback(async (p: Partial<Profile>) => {
-    const saved = await api.put<Profile>('/profile', p);
-    setProfile(saved);
-    return saved;
-  }, []);
-  const reloadProfile = useCallback(async () => {
-    setProfile(await api.get<Profile>('/profile'));
-  }, []);
-  // An older server sends no `onboarded`: treat it as set up, as before.
-  const setupOpen = setupWanted || (!!profile && profile.onboarded === false);
-  const openSetup = useCallback(() => setSetupWanted(true), []);
-  const closeSetup = useCallback(() => setSetupWanted(false), []);
-
   const subscribe = useCallback((fn: (e: FeedEvent) => void) => {
     listeners.current.add(fn);
     return () => {
@@ -272,6 +169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       reloadCrew,
       usage,
       status,
+      reloadStatus,
       profile,
       saveProfile,
       reloadProfile,
@@ -289,7 +187,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       openThread,
       setOpenThread,
     }),
-    [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, reloadCrew, usage, status, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, setDone, openThread],
+    [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, reloadCrew, usage, status, reloadStatus, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, setDone, openThread],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -299,6 +197,14 @@ export function useApp() {
   const v = useContext(Ctx);
   if (!v) throw new Error('useApp outside AppProvider');
   return v;
+}
+
+/**
+ * The name of the machine Omni runs on (GET /api/status `device`), for the labels that name it. Undefined until the
+ * status loads, or outside the provider; `machineLabel` then says "Unnamed machine".
+ */
+export function useHereName(): string | undefined {
+  return useContext(Ctx)?.status?.device?.name;
 }
 
 /** Subscribe to /feed events for the lifetime of the component. */
@@ -352,13 +258,13 @@ export function useNow(ms = 30_000) {
   return now;
 }
 
-/** The window title: the page's name, or the one given, then Omni. */
+/** The window title: the page's name, or the one given, then Omni, led by the Mac's name when it is not this one. */
 export function usePageTitle(route: Route, name?: string) {
-  const { channel } = useApp();
+  const { channel, status } = useApp();
+  const device = status?.device;
   useEffect(() => {
-    const t = name ?? pageTitle(route, (id) => channel(id)?.name);
-    document.title = t === 'Home' ? 'Omni' : `${t} · Omni`;
-  }, [route, channel, name]);
+    document.title = windowTitle(name ?? pageTitle(route, (id) => channel(id)?.name), device);
+  }, [route, channel, name, device]);
 }
 
 /** Back on the tab: ask the server to sync, so the other Mac's work shows up now rather than on its timer. */
@@ -386,4 +292,9 @@ export function usePageVisible() {
     return () => document.removeEventListener('visibilitychange', on);
   }, []);
   return visible;
+}
+
+/** Where the server keeps secret values, as a sentence names it: "the server Mac's Keychain". */
+export function useSecretStoreLabel(): string {
+  return secretStoreLabel(useApp().status?.secretStore ?? 'keychain');
 }

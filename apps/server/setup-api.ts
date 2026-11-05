@@ -1,18 +1,20 @@
-// /api/setup: the user config behind onboarding and Settings, on web and Mac. `npm run setup`
+// /api/setup: the user config behind onboarding and Settings in the Web UI. `npm run setup`
 // (apps/server/scripts/setup.ts) writes the same file from a terminal.
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { z } from 'zod';
+import type { ServerOptionsState, SetupState } from '@omni/shared/settings.ts';
+import { serverOptions } from './server-options.ts';
 import { getCrew } from './crew.ts';
 import { channels, threads } from './db.ts';
 import { prepareWorkdir } from './sandbox.ts';
 import { addEvent, emitThread } from './runner/state.ts';
 import {
+  checkSettingFields,
   configPath,
   ensureWorkspace,
+  envOverrides,
   fallbacks,
   isOnboarded,
-  isTimezone,
   omniRepo,
   resolved,
   tildify,
@@ -24,7 +26,7 @@ import {
 export const setupApi = new Hono();
 
 /** The saved values (empty strings mean "use the default"), plus what each default resolves to on this machine. */
-export function setupState() {
+export function setupState(): SetupState {
   return {
     onboarded: isOnboarded(),
     path: tildify(configPath()),
@@ -38,25 +40,25 @@ export function setupState() {
     },
     fallbacks: { ...fallbacks(), workspaceRoot: tildify(fallbacks().workspaceRoot), reposDir: tildify(fallbacks().reposDir), home: '~' },
     omniRepo: omniRepo(),
+    env: envOverrides(),
   };
 }
 
-// Automation overrides change through POST /api/automations/:id/enabled, not here.
+// Automation overrides change through POST /api/automations/:id/enabled, not here. Each text field is checked by
+// checkSettingFields, as @omni/shared/settings.ts says.
 const patchInput = userConfigPatch.omit({ automations: true, onboardedAt: true }).superRefine((p, ctx) => {
-  const tz = p.user?.timezone;
-  if (tz && !isTimezone(tz)) ctx.addIssue({ code: 'custom', path: ['user', 'timezone'], message: 'Unknown timezone. Use an IANA name like Europe/Amsterdam.' });
-  const email = p.user?.email;
-  if (email && !z.email().safeParse(email).success) ctx.addIssue({ code: 'custom', path: ['user', 'email'], message: 'Enter a valid email, or leave it empty.' });
-  const owner = p.workspace?.githubOwner;
-  if (owner && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(owner)) ctx.addIssue({ code: 'custom', path: ['workspace', 'githubOwner'], message: 'A GitHub owner is a user or org name, like octocat.' });
-  const hermes = p.integrations?.hermesUrl;
-  if (hermes && !/^https?:\/\/\S+$/.test(hermes)) ctx.addIssue({ code: 'custom', path: ['integrations', 'hermesUrl'], message: 'Hermes needs a URL like http://100.64.0.1:8642.' });
+  checkSettingFields(p, ctx);
+  const device = p.runOn?.device;
+  if (device && !/^[A-Za-z0-9-]{1,100}$/.test(device)) ctx.addIssue({ code: 'custom', path: ['runOn', 'device'], message: 'Pick a synced machine, or this one.' });
 });
 
 setupApi.get('/', (c) => c.json(setupState()));
 
+// The .env options Settings shows read-only beside the config, each with where its value came from.
+setupApi.get('/server', (c) => c.json({ options: serverOptions() } satisfies ServerOptionsState));
+
 // JSON only, as links-api.ts: a page in a browser cannot send that cross-origin without a preflight, so it cannot
-// point the Hermes URL (and with it the Keychain token) or the workspace somewhere else.
+// point the Hermes URL (and with it the secret store token) or the workspace somewhere else.
 setupApi.use('*', async (c, next) => {
   if (c.req.method !== 'GET' && !/^application\/json\b/i.test(c.req.header('content-type') ?? '')) return c.json({ error: 'send JSON' }, 415);
   await next();

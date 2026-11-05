@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../db.ts', () => ({ db: { prepare: vi.fn() } }));
 
 import { GROKBOT_WEBHOOK_AUTH, GROKBOT_WEBHOOK_URL } from '../harness/env-guard.ts';
-import { secretReachesThread, SYNC_SECRETS } from '../secrets.ts';
+import { LEGACY_SYNC_SECRETS, secretReachesThread, SYNC_SECRETS } from '../secrets.ts';
 import { sendToGrokBot, threadGrokText, type GrokBotDeps } from '../grokbot.ts';
 
 const URL = 'https://example.test/hook';
@@ -338,7 +338,7 @@ describe('threadGrokText', () => {
 
 describe('secretReachesThread', () => {
   it('keeps sync credentials and the Grok Bot webhook out of a thread', () => {
-    for (const name of Object.values(SYNC_SECRETS)) expect(secretReachesThread('global', name)).toBe(false);
+    for (const name of [...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS]) expect(secretReachesThread('global', name)).toBe(false);
     expect(secretReachesThread('global', GROKBOT_WEBHOOK_URL)).toBe(false);
     expect(secretReachesThread('global', GROKBOT_WEBHOOK_AUTH)).toBe(false);
     expect(secretReachesThread('channel:acme', GROKBOT_WEBHOOK_AUTH)).toBe(false);

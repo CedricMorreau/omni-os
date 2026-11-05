@@ -9,18 +9,21 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=@omni/server --filter=@omni/web",
     "build": "turbo run build",
     "start": "npm run start --workspace @omni/server",
-    "test": "turbo boundaries && turbo run test",
-    "test:mac": "turbo run test:mac",
-    "test:all": "turbo boundaries && turbo run test test:mac",
+    "test": "turbo boundaries && turbo run test --concurrency=2",
     "typecheck": "turbo run typecheck",
     "import-history": "npm run import-history --workspace @omni/server --",
-    "build:slash": "npm run build:slash --workspace @omni/mac",
+    "desktop:dist": "npm run dist --workspace @omni/desktop --",
+    "build:desktop": "scripts/build-desktop.sh",
     "sync:backfill": "npm run sync:backfill --workspace @omni/server --",
     "brain-export": "npm run brain-export --workspace @omni/server --",
-    "setup": "npm run setup --workspace @omni/server --"
+    "setup": "npm run setup --workspace @omni/server --",
+    "mcp:config": "npm run mcp-config --workspace @omni/server --",
+    "relay:config": "npm run relay-config --workspace @omni/server --",
+    "unused": "knip",
+    "check": "npm run typecheck && npm run unused && npm test"
   },
   "engines": {
     "node": ">=24"
@@ -28,10 +31,11 @@
   "devEngines": {
     "packageManager": {
       "name": "npm",
-      "version": "11.19.0"
+      "version": "^11.19.0"
     }
   },
   "devDependencies": {
+    "knip": "^6.44.0",
     "turbo": "^2.11.9"
   }
 }

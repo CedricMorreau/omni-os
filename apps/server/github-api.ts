@@ -1,8 +1,11 @@
-// /api/channels/:id/prs and /api/threads/:id/pr: pull requests for a channel or a thread's branch.
+// /api/prs, /api/channels/:id/prs and /api/threads/:id/pr: pull requests across channels, for a channel or a thread's branch.
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { ghLogin } from './automation-watch.ts';
+import { crewPRs, prThread } from './crew-prs.ts';
 import { channels, threads } from './db.ts';
-import { branchPRs, getPR, listPRs, mergePR, threadPRMarks } from './github.ts';
+import { allPRs, branchPRs, getPR, listPRs, mergePR, threadPRMarks } from './github.ts';
+import { requestPRReview } from './pr-review.ts';
 import { fetchPRImage, githubImage, proxyPRImages } from './github-images.ts';
 
 export const githubApi = new Hono();
@@ -13,6 +16,13 @@ const repoOf = (channelId: string) => {
   return ch.github_repo;
 };
 
+// Every PR across the channels with a repo set. Channels sharing a repo ask GitHub once. `viewer` is the gh login, which
+// the page groups by ("Authored", "Review requested"), or null when gh cannot say.
+githubApi.get('/prs', async (c) => {
+  const repos = [...new Set(channels.list().flatMap((ch) => (ch.github_repo ? [ch.github_repo] : [])))];
+  const [all, viewer] = await Promise.all([allPRs(repos), ghLogin()]);
+  return c.json({ ...all, viewer });
+});
 githubApi.get('/channels/:id/prs', async (c) => c.json(await listPRs(repoOf(c.req.param('id')), c.req.query('state') ?? 'open')));
 // Branch name to the open or merged PR from it, for marking threads in a list. {} with no repo or when gh fails.
 githubApi.get('/channels/:id/thread-prs', async (c) => {
@@ -20,17 +30,20 @@ githubApi.get('/channels/:id/thread-prs', async (c) => {
   if (!repo) return c.json({});
   return c.json(await threadPRMarks(repo).catch(() => ({})));
 });
-// Bodies come back with GitHub-hosted images pointed at the image route below, so private ones load too.
+// Bodies come back with GitHub-hosted images pointed at the image route below, so private ones load too. `thread`: the
+// Omni thread on its head branch and the thread that delegated it, or null (crew-prs.ts prThread).
 githubApi.get('/channels/:id/prs/:n', async (c) => {
   const id = c.req.param('id');
   const n = Number(c.req.param('n'));
-  const pr = await getPR(repoOf(id), n);
+  const repo = repoOf(id);
+  const pr = await getPR(repo, n);
   const fix = (body: string | null | undefined) => (body ? proxyPRImages(body, `/api/channels/${encodeURIComponent(id)}/prs/${n}/image?src=`) : body);
   return c.json({
     ...pr,
     body: fix(pr.body),
     reviews: pr.reviews?.map((r: { body?: string }) => ({ ...r, body: fix(r.body) })),
     comments: pr.comments?.map((m: { body?: string }) => ({ ...m, body: fix(m.body) })),
+    thread: pr.headRefName ? prThread(repo, pr.headRefName) : null,
   });
 });
 // One image from a PR's conversation, fetched with gh's GitHub login. Only GitHub image URLs are served.
@@ -48,13 +61,15 @@ githubApi.get('/channels/:id/prs/:n/image', async (c) => {
   });
 });
 // The PRs opened from a thread's branch, newest first, and `pr`, the one to show: the open one,
-// else the newest. null and [] when there is none or no repo to ask.
+// else the newest. null and [] when there is none or no repo to ask. `crew`: the PRs of the threads it delegated
+// to, at any depth, less any it lists itself (crew-prs.ts).
 githubApi.get('/threads/:id/pr', async (c) => {
   const t = threads.get(c.req.param('id'));
   if (!t) return c.json({ error: 'not found' }, 404);
   const repo = channels.get(t.channel_id)?.github_repo;
-  if (!t.branch || !repo) return c.json({ pr: null, prs: [] });
-  return c.json(await branchPRs(repo, t.branch));
+  const [own, crew] = await Promise.all([t.branch && repo ? branchPRs(repo, t.branch) : { pr: null, prs: [] }, crewPRs(t.id)]);
+  const mine = new Set(own.prs.map((p: { url: string }) => p.url));
+  return c.json({ ...own, crew: crew.filter((p) => !mine.has(p.url)) });
 });
 githubApi.post('/channels/:id/prs/:n/merge', async (c) => {
   const { method, delete_branch, confirm } = z
@@ -63,4 +78,11 @@ githubApi.post('/channels/:id/prs/:n/merge', async (c) => {
   void confirm;
   const out = await mergePR(repoOf(c.req.param('id')), Number(c.req.param('n')), method, delete_branch);
   return c.json({ ok: true, output: out });
+});
+
+// Resolve the PR's origin on the server so every client delegates to the same parent.
+githubApi.post('/channels/:id/prs/:n/review', async (c) => {
+  const channel = c.req.param('id');
+  const number = z.coerce.number().int().positive().parse(c.req.param('n'));
+  return c.json(await requestPRReview(channel, repoOf(channel), number));
 });

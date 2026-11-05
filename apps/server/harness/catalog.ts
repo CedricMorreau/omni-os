@@ -118,7 +118,7 @@ export function cursorHarness(probe: CursorProbe, cap: number): HarnessInfo {
 
 /** Shown when the capabilities probe cannot reach Hermes or the key is missing. */
 export const HERMES_FIX =
-  'Set the Hermes URL in Settings (or OMNI_HERMES_URL) to its Tailscale address, set HERMES_API_KEY in Secrets, and connect this Mac to Tailscale';
+  'Set the Hermes URL in Settings (or OMNI_HERMES_URL) to its Tailscale address, set HERMES_API_KEY in Secrets, and connect this machine to Tailscale';
 
 const HERMES_NOTE = 'Runs on the Hermes server. Bills the Anthropic API, not your Claude, ChatGPT or Cursor plan.';
 
@@ -144,7 +144,7 @@ export function hermesHarness(probe: HermesProbe, cap: number): HarnessInfo {
 
 // ---------- Cursor Cloud ----------
 
-/** No key in Secrets or the Keychain. Kept apart from the other reasons: a channel key can still fix this one. */
+/** No key in Secrets or the secret store. Kept apart from the other reasons: a channel key can still fix this one. */
 export const CURSOR_CLOUD_FIX = 'Add CURSOR_API_KEY in Secrets, globally or on the channel. Make the key at cursor.com/dashboard under Integrations';
 export const CURSOR_CLOUD_REJECTED = 'Cursor rejected CURSOR_API_KEY. Replace it in Secrets with a key from cursor.com/dashboard under Integrations';
 export const CURSOR_CLOUD_UNREACHABLE = 'Could not reach the Cursor API (api.cursor.com). Check the connection and try again';
@@ -257,7 +257,7 @@ export function validateRun(
 
 /**
  * A short fix is a shell command (`codex login`). A sentence is the instruction itself,
- * which is what Hermes needs (a Keychain secret and a reachable URL, not one command).
+ * which is what Hermes needs (a stored secret and a reachable URL, not one command).
  */
 export function unavailableError(name: string, fix?: string): string {
   const text = (fix ?? '').trim();

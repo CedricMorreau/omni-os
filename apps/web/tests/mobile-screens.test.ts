@@ -10,6 +10,7 @@ describe('the phone layout\'s screens', () => {
     expect(screenOf(route('#/'))).toBe('activity');
     expect(screenOf(route(href.channels()))).toBe('channels');
     expect(screenOf(route(href.artifacts()))).toBe('library');
+    expect(screenOf(route(href.pullRequests()))).toBe('prs');
     expect(screenOf(route(href.channel('volero')))).toBe('channel');
     expect(screenOf(route(href.pr('volero', 812)))).toBe('channel-pr');
     expect(screenOf(route(href.prs('volero')))).toBe('page');
@@ -20,7 +21,9 @@ describe('the phone layout\'s screens', () => {
     expect(screenOf(route(href.threadView('t1', 'terminal')))).toBe('terminal');
     expect(screenOf(route(href.threadView('t1', 'actions')))).toBe('actions');
     expect(screenOf(route(href.settingsPage()))).toBe('settings');
-    expect(screenOf(route(href.workspaceSettings()))).toBe('page');
+    expect(screenOf(route(href.settingsSection('general')))).toBe('page');
+    expect(screenOf(route(href.settingsSection('machines')))).toBe('page');
+    expect(screenOf(route('#/sync'))).toBe('page');
     expect(screenOf(route(href.automations()))).toBe('page');
     expect(screenOf(route('#/nowhere'))).toBe('notfound');
   });
@@ -29,6 +32,7 @@ describe('the phone layout\'s screens', () => {
     expect(keys('#/')).toEqual([]);
     expect(keys('#/channels')).toEqual([]);
     expect(keys('#/artifacts')).toEqual([]);
+    expect(keys('#/prs')).toEqual([]);
   });
 
   it('stacks a screen over its parents, the same however it was reached', () => {
@@ -37,6 +41,7 @@ describe('the phone layout\'s screens', () => {
     expect(keys('#/t/t1?artifact=4')).toEqual(['/t/t1', '/t/t1?artifact=4']);
     expect(keys('#/c/volero/prs/812')).toEqual(['/c/volero', '/c/volero/prs/812']);
     expect(keys('#/automations')).toEqual(['/settings', '/automations']);
+    expect(keys('#/settings/secrets')).toEqual(['/settings', '/settings/secrets']);
   });
 
   it('puts a cold link on the tab its parents lead to', () => {

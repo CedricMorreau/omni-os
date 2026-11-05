@@ -118,6 +118,16 @@ describe('sync worker', () => {
     expect(db.events.since('r-late').map((e) => JSON.parse(e.payload).text)).toEqual(['early bird']);
   });
 
+  it('leaves a still-stuck deferred change unwritten on each retry', async () => {
+    await relay.push([remoteEvent('e-stuck', 'r-never', 'orphan')]);
+    await worker.syncNow();
+    await worker.syncNow();
+    await worker.syncNow();
+    const row = db.db.prepare(`SELECT tries FROM sync_deferred WHERE change LIKE '%e-stuck%'`).get() as { tries: number };
+    expect(row.tries).toBe(1);
+    db.db.prepare(`DELETE FROM sync_deferred WHERE change LIKE '%e-stuck%'`).run();
+  });
+
   it('holds changes for an entity with no handler yet, without blocking the rest', async () => {
     const channel = apply.getHandler('channel')!;
     apply.unregisterHandler('channel');

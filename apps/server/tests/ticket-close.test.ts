@@ -49,6 +49,17 @@ describe('a ticket from the channel composer', () => {
     expect(ticket.body).toMatchObject({ ref: '#555', source: 'productive', stage: 0 });
   });
 
+  it('makes one ticket when the client retries a create with the same id', async () => {
+    const id = '00000000-0000-4000-8000-00000000a001';
+    const body = { id, channel: 'acme', role: 'ticket', prompt: 'fix the Globex footer' };
+    const [first, second] = await Promise.all([call('POST', '/threads', body), call('POST', '/threads', body)]);
+    const third = await call('POST', '/threads', body);
+    expect([first.body.id, second.body.id, third.body.id]).toEqual([id, id, id]);
+    expect((await call('GET', `/tickets/${id}`)).status).toBe(200);
+    const { tickets } = await import('../tickets.ts');
+    expect(tickets.all().filter((t) => t.context === 'fix the Globex footer')).toHaveLength(1);
+  });
+
   it('keeps a thread without the ticket role a plain thread', async () => {
     const made = await call('POST', '/threads', { channel: 'acme', prompt: 'quick question' });
     expect((await call('GET', `/tickets/${made.body.id}`)).status).toBe(404);

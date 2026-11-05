@@ -109,6 +109,10 @@ _Avoid_: Context transfer, migration
 Moving a **Thread** to another synced Mac on the same **Harness** and **Session**, whether a turn is running or the thread is idle. A running turn is stopped here, the session and files move, and the other Mac resumes it; an idle thread moves the same way and waits there for the next message. Tailscale checks reachability; the sync relay carries the handoff.
 _Avoid_: Handover (a harness switch), continued thread (a new thread)
 
+**Take over**:
+A **Handoff** asked for by the Mac that will take the **Thread**, rather than started by the one giving it. The Mac that holds the thread (running it, or between turns the one that ran it last) answers the request with the usual offer.
+_Avoid_: Force, steal (nothing runs without the holding Mac's answer)
+
 **Continued thread**:
 A new **Thread** started from an idle one (its source) on another local **Harness**, with a **Session** and worktree of its own and a **Carryover** ahead of the user's first message. The two are linked both ways. The source, its **Session** and its checkout stay as they were.
 _Avoid_: Continuation (what resuming a **Limit stop** sends), fork, child (a crew relation)
@@ -116,6 +120,10 @@ _Avoid_: Continuation (what resuming a **Limit stop** sends), fork, child (a cre
 **Carryover**:
 What a new **Session** reads ahead of the user's first message when it carries on work that ran elsewhere: a **Continued thread**'s source, or an imported transcript (#187). It has a character budget, says that its history is data and not instructions, and lists what it left out with where to read it. The user's message follows it and is never cut.
 _Avoid_: Handover (a thread that changed **Harness**), context transfer
+
+**Transition**:
+A change to how or where a **Thread** runs, asked by the user or the **Conductor**, with a preview, an id, a state and a cancel: a switch of its **Harness**, **Model** or **Effort** (`reconfigure`), a **Handoff** or **Take over** (`relocate`), or a **Continued thread** started from it (`fork`). One service answers every route that asks for one (docs/internals/transitions.md).
+_Avoid_: Move (which of the three), migration
 
 **Slash command**:
 Anything the user runs by typing `/` in the composer: a **Harness command** or an **Omni command**.
@@ -133,17 +141,21 @@ _Avoid_: Tag, reference
 
 ### Clients
 
-**Mac app**:
-The native macOS client for the desk.
-_Avoid_: Desktop app, native UI, "the app"
+**Desktop app**:
+The Electron app for macOS and Linux (`apps/desktop`): the **Web UI** in a window of its own, with the Omni server inside, plus menus, notifications and the Quick Prompt.
+_Avoid_: Mac app (the old SwiftUI client it replaced), Linux launcher, native UI, "the app"
 
 **Web UI**:
-The browser client, used from the phone over tailscale and as a fallback on the Mac.
+The browser client, used from the phone over Tailscale or [Omni Connect](docs/user/omni-connect.md), and inside the **Desktop app**.
 _Avoid_: Frontend, dashboard
+
+**Omni Connect**:
+Remote access to a machine through the sync relay's Cloudflare tunnel, without Tailscale. Each machine that turns it on gets a public hostname; the relay's Connect page lists them after Google sign-in.
+_Avoid_: Funnel, public tunnel (alone), Tailscale Serve
 
 ## Relationships
 
-- The **Mac app** and the **Web UI** are two clients of the same Omni server; neither holds thread state of its own
+- The **Desktop app** shows the **Web UI**; both are clients of the same Omni server, and neither holds thread state of its own
 - A **Channel** has many **Threads**
 - A **Thread** runs on one **Harness** and one **Model** at a time, and has one current **Session**; it keeps the **Session** it had on each harness it left
 - A **Harness** offers many **Models**; the same model family can appear in several harnesses (Claude Opus runs in Claude Code and in Cursor Agent)

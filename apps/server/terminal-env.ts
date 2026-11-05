@@ -3,9 +3,9 @@
 // key on every harness strip list, Omni's sync credentials, the Grok Bot webhook, and the
 // server's own Node flags.
 import { SERVER_ONLY_VARS, STRIPPED_VARS } from './harness/env-guard.ts';
-import { SYNC_SECRETS } from './secrets.ts';
+import { LEGACY_SYNC_SECRETS, SYNC_SECRETS } from './secrets.ts';
 
-export const STRIPPED = [...Object.values(STRIPPED_VARS).flat(), ...Object.values(SYNC_SECRETS), ...SERVER_ONLY_VARS];
+export const STRIPPED = [...Object.values(STRIPPED_VARS).flat(), ...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS, ...SERVER_ONLY_VARS];
 
 /**
  * Copy `base` (Omni's own environment) and delete the names the terminal must not see.

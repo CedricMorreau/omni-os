@@ -7,13 +7,14 @@ import { OmniMark } from '../components/brand.tsx';
 import { Empty, Segmented, StatusDot, glyphFor } from '../components/ui.tsx';
 import { greeting } from '../greeting.ts';
 import { useApp } from '../store.tsx';
+import { isWorking } from '@omni/shared/delegate-count.ts';
 
 const acceptAll = () => true;
 
 type Filter = 'all' | 'active' | 'failed';
 const FILTERS: Record<Filter, (t: Thread) => boolean> = {
   all: () => true,
-  active: (t) => t.status === 'running' || t.status === 'queued',
+  active: isWorking,
   // A thread Ben marked done has had its look.
   failed: (t) => (t.status === 'failed' || t.status === 'stopped') && !t.done_at,
 };
@@ -55,7 +56,7 @@ export function HomePage() {
         <NewThreadComposer big />
         <NeedsYouSection inbox={needsYou} showChannel />
         <div className="mt-10">
-          <div className="mb-2 flex items-center justify-between gap-3 px-1">
+          <div className="mb-2 flex items-center justify-between gap-3 px-3 md:px-3.5">
             <h2 className="font-display text-[17px]">Recent</h2>
             <Segmented
               size="sm"

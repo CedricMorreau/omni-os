@@ -66,6 +66,40 @@ describe('onboarding', () => {
   });
 });
 
+describe('where a setting comes from', () => {
+  it('names the env var that overrides a field: || ones only when set, ?? ones even empty', async () => {
+    const keep = { tz: process.env.OMNI_TZ, hermes: process.env.OMNI_HERMES_URL, brain: process.env.OMNI_BRAIN_DIR };
+    try {
+      process.env.OMNI_TZ = '';
+      process.env.OMNI_HERMES_URL = '';
+      delete process.env.OMNI_BRAIN_DIR;
+      let env = (await json(await send('GET', '/api/setup'))).env;
+      expect(env['user.timezone']).toBeUndefined();
+      expect(env['integrations.hermesUrl']).toBe('OMNI_HERMES_URL');
+      process.env.OMNI_TZ = 'Asia/Tokyo';
+      process.env.OMNI_BRAIN_DIR = '/tmp/brain';
+      env = (await json(await send('GET', '/api/setup'))).env;
+      expect(env).toMatchObject({ 'user.timezone': 'OMNI_TZ', 'workspace.root': 'OMNI_BRAIN_DIR' });
+    } finally {
+      for (const [k, v] of [['OMNI_TZ', keep.tz], ['OMNI_HERMES_URL', keep.hermes], ['OMNI_BRAIN_DIR', keep.brain]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('lists the .env options with their value and source, and nothing secret', async () => {
+    const { options } = await json(await send('GET', '/api/setup/server'));
+    const keepalive = options.find((o: { env: string }) => o.env === 'OMNI_KEEPALIVE_SECONDS');
+    expect(keepalive).toMatchObject({ section: 'threads', default: '600 s' });
+    expect(['env', 'default']).toContain(keepalive.source);
+    for (const o of options) expect(o.env).not.toMatch(/KEY|TOKEN|SECRET|AUTH|WEBHOOK/);
+    const { serverOptions } = await import('../server-options.ts');
+    expect(serverOptions({ OMNI_PORT: '4799' }).find((o) => o.env === 'OMNI_PORT')?.source).toBe('env');
+    expect(serverOptions({}).every((o) => o.source === 'default')).toBe(true);
+  });
+});
+
 describe('personal overrides', () => {
   it('a charter in data/crew replaces the shared one and placeholders are filled', () => {
     mkdirSync(paths.personalCrew, { recursive: true });

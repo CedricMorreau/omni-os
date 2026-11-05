@@ -1,20 +1,23 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Hono } from 'hono';
-import { annotate, type BrowserCapture, type ElementPick, type PickedElement } from '@omni/shared/message-context-browser.ts';
+import { fixture } from '@omni/test-fixtures';
+import type { BrowserCapture, ElementPick, PickedElement } from '@omni/shared/message-context-browser.ts';
 import { startRunner } from './runner-boot.ts';
-import { macFixture } from './fixture-shape.ts';
+import { wireFixture } from './fixture-shape.ts';
 import type { PageObservation } from '../browser.ts';
-import type { RawPick } from '../browser-pick-script.ts';
-import type { PickSource } from '../browser-pick.ts';
+import type { RawInspect, RawPick } from '@omni/shared/browser-pick-script.ts';
+import type { InspectSource, PickSource } from '../browser-pick.ts';
 
 // Picking an element on a captured page: what the server makes of what the page says, which page it will answer for,
 // and the route. Chrome is a fake that answers observe, shot and pick, so each case sets exactly what the page does. The
-// real page script runs in a real Chrome in browser-pick-cdp.test.ts.
+// real page script runs in a real Chrome in browser-pick-cdp.test.ts, and what is made of its answers is checked in
+// packages/shared/tests/browser-pick-read.test.ts.
 
 process.env.SHELL = '/bin/sh';
+const CORPUS = JSON.parse(readFileSync(fixture('browser-pick.json'), 'utf8')) as { picks: { raw: unknown }[]; inspects: { raw: unknown }[] };
 let H: Awaited<ReturnType<typeof startRunner>>;
 let pick: typeof import('../browser-pick.ts');
 let cap: typeof import('../browser-capture.ts');
@@ -48,19 +51,8 @@ const PAGE: PageObservation = {
   scroll: { x: 0, y: 240 },
 };
 
-/** What the page script answers for a button in the cart. */
-const BUTTON: RawPick = {
-  ok: true,
-  tag: 'button',
-  selector: '#cart > div.summary > button.checkout',
-  text: 'Check out · €48,50',
-  html: '<button id="go" class="checkout" type="submit">Check out · €48,50</button>',
-  ancestors: ['<div class="summary">', '<main id="cart">'],
-  bounds: { x: 320.4, y: 96.2, width: 479.8, height: 159.5 },
-  frames: [],
-  opaque: false,
-  truncated: false,
-};
+/** What the page script answers for a button in the cart (the corpus the shared tests read too). */
+const BUTTON = CORPUS.picks[0].raw as RawPick;
 
 type Fake = PickSource & { page: PageObservation; answer: RawPick | null; asked: { x: number; y: number }[]; during?: (p: PageObservation) => void; fail?: boolean };
 function fakeBrowser(over: { running?: boolean; answer?: RawPick | null; during?: (p: PageObservation) => void } = {}): Fake {
@@ -96,62 +88,48 @@ async function captured(src: Fake, threadId: string) {
   return r.capture;
 }
 const POINT = { x: 400, y: 150 };
-const VIEWPORT = { width: 1280, height: 713 };
 const asElement = (r: ElementPick | 'bad_point') => {
   if (r === 'bad_point' || !('element' in r)) throw new Error(`no element: ${JSON.stringify(r)}`);
   return r.element;
 };
 
-describe('elementFrom', () => {
-  it('makes a record element: whole pixels outward inside the viewport, and a record the route accepts', () => {
-    const e = pick.elementFrom(BUTTON, POINT, VIEWPORT)!;
-    expect(e).toMatchObject({ tag: 'button', bounds: { x: 320, y: 96, width: 481, height: 160 }, point: POINT, opaque_frame: false, truncated: false });
-    const base = { thread: 't', url: PAGE.url, title: '', viewport: { ...VIEWPORT, scale: 2 }, scroll: { x: 0, y: 0 }, captured_at: '2026-10-24T09:30:15.250Z', image: { name: 'annotation-0123456789abcdef.png', mime: 'image/png' as const, width: 2560, height: 1426, bytes: 64 } };
-    expect(annotate(base as BrowserCapture, { x: 320, y: 96, width: 481, height: 160 }, e).ok).toBe(true);
+/** What the inspect script answers over the same button. */
+const HOVER = CORPUS.inspects[0].raw as RawInspect;
+const inspector = (answer: RawInspect | null | (() => never), running = true): InspectSource => ({
+  running,
+  inspect: async () => (typeof answer === 'function' ? answer() : answer),
+});
+
+describe('inspectElement', () => {
+  it('answers with the element under the pointer', async () => {
+    expect(await pick.inspectElement(inspector(HOVER), POINT)).toMatchObject({ element: { tag: 'button', id: 'go' } });
   });
 
-  it('clips a box that runs past the viewport, and refuses one that is not in it', () => {
-    const big = pick.elementFrom({ ...BUTTON, bounds: { x: -50, y: -20, width: 5000, height: 5000 } }, POINT, VIEWPORT)!;
-    expect(big.bounds).toEqual({ x: 0, y: 0, width: 1280, height: 713 });
-    expect(pick.elementFrom({ ...BUTTON, bounds: { x: 2000, y: 0, width: 10, height: 10 } }, POINT, VIEWPORT)).toBeNull();
-    expect(pick.elementFrom({ ...BUTTON, bounds: { x: 0, y: 0, width: 0, height: 0 } }, POINT, VIEWPORT)).toBeNull();
-    expect(pick.elementFrom({ ...BUTTON, bounds: { x: NaN, y: 0, width: 10, height: 10 } }, POINT, VIEWPORT)).toBeNull();
+  it('says why there is none instead of failing: nothing there, a browser that is off, throws or answers nonsense', async () => {
+    expect(await pick.inspectElement(inspector({ ok: false, reason: 'nothing' }), POINT)).toMatchObject({ unavailable: { reason: 'nothing' } });
+    expect(await pick.inspectElement(inspector(HOVER, false), POINT)).toMatchObject({ unavailable: { reason: 'stopped' } });
+    expect(await pick.inspectElement(inspector(() => { throw new Error('Runtime.evaluate timed out'); }), POINT)).toMatchObject({ unavailable: { reason: 'unreadable' } });
+    expect(await pick.inspectElement(inspector({ ok: true, tag: 42 } as RawInspect), POINT)).toMatchObject({ unavailable: { reason: 'unreadable' } });
+  });
+});
+
+describe('the inspect route', () => {
+  const post = (src: InspectSource, body: unknown) =>
+    new Hono().route('/api/channels', pick.inspectApi(() => src)).request('/api/channels/picks/browser/inspect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  it('answers 200 with the element or why there is none, in the shape of its wire fixtures', async () => {
+    const res = await post(inspector(HOVER), POINT);
+    expect(res.status).toBe(200);
+    wireFixture('browser-inspect.json', await res.json());
+    const none = await post(inspector({ ok: false, reason: 'nothing' }), POINT);
+    expect(none.status).toBe(200);
+    wireFixture('browser-inspect-unavailable.json', await none.json());
   });
 
-  it('cuts a page that answers with the whole DOM to the record limits, marking it cut', () => {
-    const dump: RawPick = {
-      ...BUTTON,
-      tag: 'body',
-      selector: 'html > body > div'.repeat(500),
-      text: 'lorem ipsum '.repeat(100_000),
-      html: '<div>'.repeat(200_000),
-      ancestors: Array.from({ length: 100 }, (_, i) => `<div class="level-${i}">`.repeat(40)),
-      frames: Array.from({ length: 50 }, (_, i) => `https://f${i}.example.com/${'a'.repeat(2000)}`),
-    };
-    const e = pick.elementFrom(dump, POINT, VIEWPORT)!;
-    expect(e).not.toBeNull();
-    expect([...e.text]).toHaveLength(600);
-    expect([...e.html]).toHaveLength(2000);
-    expect([...e.selector].length).toBeLessThanOrEqual(300);
-    expect(e.ancestors).toHaveLength(4);
-    expect(e.ancestors.every((a) => [...a].length <= 160)).toBe(true);
-    expect(e.frames).toHaveLength(3);
-    expect(e.frames.every((f) => [...f].length <= 512)).toBe(true);
-    expect(e.truncated).toBe(true);
-    expect(JSON.stringify(e).length).toBeLessThan(6_500);
-  });
-
-  it('drops control characters and collapses whitespace, so a record accepts the page text', () => {
-    const e = pick.elementFrom({ ...BUTTON, text: 'Total\u001b[2J\n\n  €48‮,50\t', html: '<p>\nTotal\u0000</p>' }, POINT, VIEWPORT)!;
-    expect(e.text).toBe('Total [2J €48 ,50');
-    expect(e.html).toBe('<p> Total </p>');
-  });
-
-  it('gives no element for an answer that is not one', () => {
-    for (const raw of [null, { ok: false, reason: 'nothing' }, { ok: true }, { ...BUTTON, tag: '' }, { ...BUTTON, tag: 'Button onclick=' }, { ...BUTTON, html: '' }, { ...BUTTON, bounds: 'x' }, { ...BUTTON, selector: 5 }] as unknown as RawPick[])
-      expect(pick.elementFrom(raw, POINT, VIEWPORT)).toBeNull();
-    // The page is not asked to be well formed past what a record needs.
-    expect(pick.elementFrom({ ...BUTTON, text: undefined, ancestors: 'x', frames: undefined, truncated: 'yes' }, POINT, VIEWPORT)).toMatchObject({ text: '', ancestors: [], frames: [], truncated: false });
+  it('refuses a point that is not whole pixels', async () => {
+    expect((await post(inspector(HOVER), { x: 1.5, y: 2 })).status).toBe(400);
+    expect((await post(inspector(HOVER), { x: -1, y: 2 })).status).toBe(400);
+    expect((await post(inspector(HOVER), 'nope')).status).toBe(400);
   });
 });
 
@@ -270,12 +248,12 @@ describe('the pick route', () => {
     const res = await post(app, 'picks', c.image.name, { thread: t.id, ...POINT });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { element: PickedElement };
-    // The Mac app decodes this (OmniKit's ElementPickReply): the same keys and types as its recorded fixture.
-    macFixture('browser-pick-element.json', body);
+    // The same keys and types as its recorded fixture.
+    wireFixture('browser-pick-element.json', body);
     expect(body.element).toMatchObject({ tag: 'button', point: POINT });
   });
 
-  it('answers 200 with why there is none, for the Mac app to read', T, async () => {
+  it('answers 200 with why there is none, in the shape of its wire fixture', T, async () => {
     const t = await newThread();
     const src = fakeBrowser();
     const app = mount(src);
@@ -285,7 +263,7 @@ describe('the pick route', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ unavailable: { reason: 'stale' } });
-    macFixture('browser-pick-unavailable.json', body);
+    wireFixture('browser-pick-unavailable.json', body);
   });
 
   it('refuses a thread of another channel, an unknown thread and a point that is not whole pixels', T, async () => {
@@ -306,36 +284,5 @@ describe('the pick route', () => {
     await app.request(`/api/channels/picks/browser/capture/${c.image.name}?thread=${t.id}`, { method: 'DELETE' });
     const res = await post(app, 'picks', c.image.name, { thread: t.id, ...POINT });
     expect(await res.json()).toMatchObject({ unavailable: { reason: 'unknown_capture' } });
-  });
-});
-
-describe('the native pick routes', () => {
-  const app = () => new Hono().route('/api/channels', pick.pickApi(() => fakeBrowser()));
-  const native = (a: Hono, name: string, body: unknown) =>
-    a.request(`/api/channels/picks/browser/capture/${name}/element/native`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-
-  it('hands out the page script for a point, the very one the server runs in its own Chrome', T, async () => {
-    const res = await app().request('/api/channels/picks/browser/pick-script?x=400&y=150');
-    expect(res.status).toBe(200);
-    const { script } = (await res.json()) as { script: string };
-    expect(script).toContain('const x = 400, y = 150;');
-    expect((await app().request('/api/channels/picks/browser/pick-script?x=1.5&y=2')).status).toBe(400);
-  });
-
-  it('bounds and checks what the Mac\'s page answered, as it does for the server\'s browser', T, async () => {
-    const t = await newThread();
-    const res = await native(app(), 'annotation-0123456789abcdef.png', { thread: t.id, ...POINT, viewport: VIEWPORT, raw: BUTTON });
-    expect(res.status).toBe(200);
-    expect(asElement((await res.json()) as ElementPick)).toMatchObject({ tag: 'button', bounds: { x: 320, y: 96, width: 481, height: 160 }, point: POINT });
-  });
-
-  it('says why when the page gave nothing usable, and refuses a thread of another channel or a point off the screenshot', T, async () => {
-    const t = await newThread();
-    const a = app();
-    expect(await (await native(a, 'x', { thread: t.id, ...POINT, viewport: VIEWPORT, raw: { ok: false, reason: 'nothing' } })).json()).toMatchObject({ unavailable: { reason: 'nothing' } });
-    expect(await (await native(a, 'x', { thread: t.id, ...POINT, viewport: VIEWPORT, raw: 'not a pick' })).json()).toMatchObject({ unavailable: { reason: 'unreadable' } });
-    const other = await newThread('elsewhere');
-    expect((await native(a, 'x', { thread: other.id, ...POINT, viewport: VIEWPORT, raw: BUTTON })).status).toBe(400);
-    expect((await native(a, 'x', { thread: t.id, x: 5000, y: 3, viewport: VIEWPORT, raw: BUTTON })).status).toBe(400);
   });
 });

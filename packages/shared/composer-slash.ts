@@ -1,7 +1,6 @@
 // What the composers do with a `/`, as pure functions: the Omni commands every thread's menu offers,
 // what Send does with a message that starts with one, and the quiet hints for commands that stay
 // plain text. The new-thread composer offers no Omni commands. The grammar itself is in slash.ts.
-// Shared by the Web UI and the Mac app's slash engine, so it imports nothing from apps/web/ or apps/mac/.
 import { OMNI_COMMANDS, TITLE_MAX, mentionHits, midMessageCommands, resolveSlash, visibleCommands, type CommandList, type SlashCommand } from './slash.ts';
 
 const HARNESS_NAME: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', cursor: 'Cursor Agent', hermes: 'Hermes', 'cursor-cloud': 'Cursor Cloud' };
@@ -22,8 +21,8 @@ export type ReplyAction =
   /** `/clear` or `/new`: a new thread with this one's settings. No prompt opens its composer. */
   | { kind: 'new-thread'; prompt: string }
   | { kind: 'rename'; title: string }
-  /** `/model`, `/effort` or `/fast`: Omni switches these with the composer pills, so Send does nothing. */
-  | { kind: 'fixed' };
+  /** `/model`, `/effort` or `/fast`: Send opens the composer's model pill. Its pick switches the next turn. */
+  | { kind: 'pick-model' };
 
 export interface ReplySlash {
   action: ReplyAction;
@@ -59,7 +58,7 @@ export function replySlash(text: string, list: CommandList | null, harness: stri
         return { action: { kind: 'rename', title }, armed: !!title && !hint, label: 'Rename', hint };
       }
       default:
-        return { action: { kind: 'fixed' }, armed: false, label: null, hint: 'Switch the model and effort with the pills below. The next turn uses them.' };
+        return { action: { kind: 'pick-model' }, armed: true, label: 'Pick model', hint: 'Opens the model pill below. The next turn runs on what you pick.' };
     }
   }
   return { action: { kind: 'send' }, armed: !!text.trim(), label: null, hint: textHint(text, r, list, harness, 'reply') };

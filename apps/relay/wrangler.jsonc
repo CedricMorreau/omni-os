@@ -1,0 +1,17 @@
+// The Omni sync relay (docs/user/sync.md). Deploy with `npx wrangler deploy` from apps/relay; `npm run relay:config`
+// at the repo root prints the one-time steps with this install's Clerk app and user filled in.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "omni-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY", "class_name": "Relay" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "omni-relay" }],
+  // CLERK_ISSUER, CLERK_CLIENT_ID and ALLOWED_USERS are Worker secrets (`wrangler secret bulk`), so a deploy keeps them.
+  // Omni Connect adds four optional ones: CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID and CONNECT_ZONE. Without them the
+  // relay answers 503 connect_not_configured to Connect calls and sync keeps working.
+  "observability": { "enabled": true }
+}

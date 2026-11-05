@@ -322,6 +322,9 @@ export function migrate() {
   // A worktree thread's preparation (apps/server/runner/setup.ts): preparing or failed, with why; null once it is ready. Local, not synced.
   ensureColumn('threads', 'setup', 'TEXT');
   ensureColumn('threads', 'setup_error', 'TEXT');
+  // Why this machine did not resume the thread's session (apps/server/runner/spawn.ts): the other machine's newer
+  // session could not be brought here. Null once a turn starts. Local, not synced: it is about this machine's copy.
+  ensureColumn('threads', 'resume_blocked', 'TEXT');
   // A turn the harness stopped at its usage limit (apps/server/runner/limits.ts): limited, or scheduled to resume at the
   // reset time it reported. limit_id keys the one continuation; limit_machine is the Mac that ran the turn and the
   // only one that resumes it. Synced on its own (apps/server/sync/handlers/limit-stop.ts), never with the thread row;
@@ -351,6 +354,9 @@ export function migrate() {
   // The claude.ai page an artifact was published as (packages/shared/published.ts), and what the publish said it was.
   ensureColumn('artifacts', 'url', 'TEXT');
   ensureColumn('artifacts', 'description', 'TEXT');
+  // The newest file per page and a thread's files in order (db/repos/artifacts.ts ARTIFACT_SQL), without a table scan.
+  db.exec(`CREATE INDEX IF NOT EXISTS artifacts_url ON artifacts(url, updated_at, id) WHERE url IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS artifacts_thread ON artifacts(thread_id, created_at);`);
   // Sync matches these rows on uid, never on the local integer id. Old rows get one once; the index then makes the check free.
   // Queue order for durable requests (db/repos/requests.ts); a row saved before reordering existed keeps its arrival order.
   ensureColumn('message_requests', 'pos', 'INTEGER');
@@ -483,4 +489,100 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS trigger_deliveries_thread ON trigger_deliveries(thread_id) WHERE thread_id IS NOT NULL;`);
   // #228 A retry is the next attempt of the same delivery row: 1 for the first go. Each attempt has its own thread id.
   ensureColumn('trigger_deliveries', 'attempt', 'INTEGER NOT NULL DEFAULT 1');
+  // #398 Commands for a thread that runs on another machine (db/repos/remote-commands.ts): one row per forwarded
+  // message, crew report, limit action and Stop, with the outcome the holder gave it. Synced (sync/handlers/remote-command.ts);
+  // a row's state only moves forward, so the sender's "sent" never undoes the holder's answer.
+  db.exec(`CREATE TABLE IF NOT EXISTS remote_commands (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    target TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    prompt TEXT NOT NULL DEFAULT '',
+    mode TEXT,
+    source TEXT,
+    context TEXT,
+    files TEXT,
+    report_key TEXT,
+    report TEXT,
+    limit_action TEXT,
+    state TEXT NOT NULL,
+    reason TEXT,
+    acked_by TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS remote_commands_thread ON remote_commands(thread_id, created_at);
+  CREATE INDEX IF NOT EXISTS remote_commands_open ON remote_commands(expires_at) WHERE state = 'sent';`);
+  // #399 Who runs a thread (db/repos/assignments.ts): the one record every delivery decision reads. The machine
+  // that holds it and a generation that counts the moves; synced by generation (sync/handlers/assignment.ts).
+  db.exec(`CREATE TABLE IF NOT EXISTS assignments (
+    thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+    machine TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    routed INTEGER NOT NULL DEFAULT 0,
+    at TEXT NOT NULL
+  );`);
+  // #413 This machine's ledger of the transitions it created (db/repos/transitions.ts): a run switch, a handoff or
+  // Take over, or a Continue, each with the id a client reads and cancels it by. Local, never synced: a relocate's
+  // cross-machine state is the handoff kv records, which stay for machines on an older build.
+  db.exec(`CREATE TABLE IF NOT EXISTS transitions (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    request TEXT NOT NULL,
+    result TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS transitions_thread ON transitions(thread_id, created_at);`);
+  // Google sign-in through Clerk (apps/server/google-auth.ts): the one Clerk user who owns this install, and the
+  // sessions it handed to devices that signed in as that user. Local, never synced: each machine links its owner
+  // and issues and revokes its own sessions. A session keeps only its token's SHA-256.
+  db.exec(`CREATE TABLE IF NOT EXISTS auth_owner (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    issuer TEXT NOT NULL,
+    sub TEXT NOT NULL,
+    email TEXT,
+    name TEXT,
+    linked_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS device_sessions (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sub TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT
+  );`);
+  // How a session was granted: 'google' (the owner signed in; ends when the owner changes) or 'pairing' (an app
+  // redeemed a one-time code from an authenticated device; needs no Google owner). Older rows are all Google's.
+  ensureColumn('device_sessions', 'method', `TEXT NOT NULL DEFAULT 'google'`);
+  // The push token an app registered for its session (apps/server/push-tokens.ts). Deleted when the session ends.
+  // Local, never synced: a token belongs to the app's session on this machine.
+  db.exec(`CREATE TABLE IF NOT EXISTS push_tokens (
+    session_id TEXT PRIMARY KEY REFERENCES device_sessions(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    bundle_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );`);
+  // Which alerts a device gets (apps/server/push-preferences.ts). A row exists only once the device changes something:
+  // no row means every kind is on. Deleted when the session ends, like its token.
+  db.exec(`CREATE TABLE IF NOT EXISTS push_preferences (
+    session_id TEXT PRIMARY KEY REFERENCES device_sessions(id) ON DELETE CASCADE,
+    needs_input INTEGER NOT NULL DEFAULT 1,
+    finished INTEGER NOT NULL DEFAULT 1,
+    failed INTEGER NOT NULL DEFAULT 1,
+    crew_report INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+  );`);
 }

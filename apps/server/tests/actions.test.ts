@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -10,7 +10,7 @@ import { startRunner } from './runner-boot.ts';
 // /api/channels/:id/actions and /api/threads/:id/actions: named commands run in a thread's verified checkout.
 
 process.env.SHELL = '/bin/sh';
-const r = await startRunner({ ANTHROPIC_API_KEY: 'sk-billing', SUPABASE_REFRESH_TOKEN: 'sync-token', GROKBOT_WEBHOOK_URL: 'https://hook' });
+const r = await startRunner({ ANTHROPIC_API_KEY: 'sk-billing', OMNI_RELAY_TOKEN: 'sync-token', GROKBOT_WEBHOOK_URL: 'https://hook' });
 const { app } = await import('../app.ts');
 const { PREVIEW_PORTS, stopAllRuns } = await import('../actions.ts');
 const { db } = await import('../db/connection.ts');
@@ -91,7 +91,7 @@ describe('channel action settings', () => {
   });
 
   it('refuses billing, sync and server keys, a repeated name, and a port the command hard-codes', async () => {
-    for (const name of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'SUPABASE_REFRESH_TOKEN', 'GROKBOT_WEBHOOK_URL']) {
+    for (const name of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OMNI_RELAY_TOKEN', 'GROKBOT_WEBHOOK_URL']) {
       const res = await call('POST', '/channels/scratch/actions', { name: 'Leaky', command: 'true', secrets: [name] });
       expect(res.status).toBe(400);
       expect(res.body.error).toContain(name);
@@ -171,7 +171,7 @@ describe('a run', () => {
     const env = Object.fromEntries((await ended(t.id, res.body.id)).output.trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     expect(env.THEME_TOKEN).toBe('shptka_secret_value');
     expect(env.OMNI_THREAD_ID).toBe(t.id);
-    for (const name of ['ANTHROPIC_API_KEY', 'SUPABASE_REFRESH_TOKEN', 'GROKBOT_WEBHOOK_URL', 'NODE_OPTIONS', 'OMNI_PORT']) expect(env[name]).toBeUndefined();
+    for (const name of ['ANTHROPIC_API_KEY', 'OMNI_RELAY_TOKEN', 'GROKBOT_WEBHOOK_URL', 'NODE_OPTIONS', 'OMNI_PORT']) expect(env[name]).toBeUndefined();
     expect(JSON.stringify(db.prepare('SELECT command FROM action_runs').all())).not.toContain('shptka_secret_value');
 
     const missing = await run(t.id, (await action('true', { secrets: ['NOT_SET'] })).id);

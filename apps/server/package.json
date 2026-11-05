@@ -15,14 +15,16 @@
     "sync:backfill": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx scripts/sync-backfill.ts",
     "brain-export": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx scripts/brain-export.ts",
     "setup": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx scripts/setup.ts",
+    "mcp-config": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx scripts/mcp-config.ts",
+    "relay-config": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx scripts/relay-config.ts",
     "route-eval": "tsx scripts/route-eval/route-eval.ts",
     "route-fit": "tsx scripts/route-eval/fit.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@omni/mcp": "*",
     "@omni/shared": "*",
     "@playwright/mcp": "0.0.83",
-    "@supabase/supabase-js": "^2.117.2",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "croner": "^10.0.1",
@@ -35,6 +37,7 @@
   "devDependencies": {
     "@omni/test-fixtures": "*",
     "@omni/typescript-config": "*",
+    "esbuild": "^0.28.2",
     "@types/node": "^26.6.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"

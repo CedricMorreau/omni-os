@@ -90,8 +90,16 @@ export function readReferenced(asker: string, ref: string, q: HistoryQuery = {})
   if (!isReferenced(asker, ref)) {
     return { state: 'unavailable', reason: 'not_referenced', message: 'No message in this thread referenced that thread, so its history is not available here. Ask the user to attach it as a thread reference.' };
   }
+  return readConversation(ref, q) ?? { state: 'unavailable', reason: 'missing', message: 'That thread no longer exists, so its history cannot be read. Work from the title in the reference.' };
+}
+
+/**
+ * One page of `ref`'s conversation, with no reference check: for the API's own clients (GET /api/threads/:id/conversation,
+ * which the external MCP server's read_thread calls). Null for a thread that does not exist.
+ */
+export function readConversation(ref: string, q: HistoryQuery = {}): Extract<HistoryAnswer, { state: 'ok' }> | null {
   const t = threads.get(ref);
-  if (!t) return { state: 'unavailable', reason: 'missing', message: 'That thread no longer exists, so its history cannot be read. Work from the title in the reference.' };
+  if (!t) return null;
   const want = Math.min(Math.max(Math.trunc(q.limit ?? PAGE_ROWS_DEFAULT) || PAGE_ROWS_DEFAULT, 1), PAGE_ROWS_MAX);
   const forward = q.after !== undefined;
   let rows = fetchRows(ref, q, want).map((r): HistoryRow => ({ id: r.id, role: ROLE[r.kind]!, at: r.created_at, text: r.text, ...(r.len > ROW_CHARS_MAX && { cut_from: r.len }) }));

@@ -30,6 +30,8 @@
 //   MOD_CLEAR         before the answer, a ui_status with null text, which clears that mod's status
 //   RUN:<path>        before the answer, run that shell script in the cwd, like a Bash call that edits files or runs git
 //   PUBLISH:<path>    an Artifact tool call that publishes that file, answered "Published <path> at <url>" like the real CLI
+//   RENDER:<title>    before the answer, show inline-page.html (an interactive chart) with Omni's html_render, as the real
+//                     CLI calls an MCP tool: start the omni-render server from --mcp-config and call it. Dashes in the title are spaces
 //   ORPHAN            leave a child behind that holds our stdout until it is killed (two minutes at most), like a
 //                     daemon started without redirecting its output: once we exit, the runner never sees our pipes close
 //   LIMIT[:<epoch>]   the plan's usage limit refuses the turn: a rejected rate_limit_event (with resetsAt when an
@@ -59,6 +61,8 @@
 //   FAKE_CLAUDE_MCP_MS=<ms>       how long after startup the user's MCP servers connect (default 30)
 //   FAKE_CLAUDE_TITLE_ORPHAN=1    text mode (Omni's title call): leave a child behind, as ORPHAN does. Not a directive:
 //                                 the title call's prompt is the thread's first message, and the thread's CLI gets it too
+//   FAKE_CLAUDE_SUGGEST_GATE=<file>  text mode (Omni's reply suggestion): answer only once that file exists, so a test
+//                                 decides when the suggestion lands
 //
 // The initialize control request answers with the commands a real CLI lists: a fixed set of personal,
 // plugin and built-in commands, plus one "(project)" command per .claude/commands/*.md in the cwd.
@@ -68,7 +72,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const VERSION = '2.1.278';
 /** What ASK asks, the shape of Claude Code's AskUserQuestion. */
@@ -384,6 +388,28 @@ async function askUser(t, questions) {
   }
 }
 
+/** One html_render call through the omni-render server Omni configured, like ask_user_question above. */
+async function renderPage(title) {
+  const id = `toolu_fake_${++seq}`;
+  const input = { title, html: readFileSync(new URL('./inline-page.html', import.meta.url), 'utf8') };
+  assistant(`msg_fake_${seq}`, [{ type: 'tool_use', id, name: 'mcp__omni-render__html_render', input }]);
+  const server = mcpEntry('omni-render');
+  if (!server) return toolResult(id, 'No such tool available: mcp__omni-render__html_render', true);
+  let client = null;
+  try {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    client = new Client({ name: 'claude-code', version: VERSION });
+    await client.connect(new StdioClientTransport({ command: server.command, args: server.args ?? [], env: { ...process.env, ...server.env }, stderr: 'ignore' }));
+    const res = await client.callTool({ name: 'html_render', arguments: input });
+    toolResult(id, res.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n'), !!res.isError);
+  } catch (err) {
+    toolResult(id, `MCP error: ${err.message}`, true);
+  } finally {
+    await client?.close().catch(() => {});
+  }
+}
+
 const marker = (text) =>
   emit({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, parent_tool_use_id: null, timestamp: now() });
 
@@ -409,6 +435,7 @@ async function runTurn() {
   let fullMeter = false;
   let ask = null;
   const publishes = [];
+  const renders = [];
   const scripts = [];
   let steps = 0;
 
@@ -447,6 +474,7 @@ async function runTurn() {
       const asks = m.text.match(/\bASK(_ONE)?\b/);
       if (asks) ask = asks[1] ? QUESTIONS.slice(0, 1) : QUESTIONS;
       for (const x of m.text.matchAll(/PUBLISH:(\S+)/g)) publishes.push(x[1]);
+      for (const x of m.text.matchAll(/RENDER:(\S+)/g)) renders.push(x[1].replace(/-/g, ' '));
       for (const x of m.text.matchAll(/RUN:(\S+)/g)) scripts.push(x[1]);
     }
     return true;
@@ -512,6 +540,10 @@ async function runTurn() {
   }
   if (modClear) emit({ type: 'system', subtype: 'ui_status', plugin: 'omni-tool', text: null });
   for (const file of scripts.splice(0)) execFileSync('sh', [file], { cwd: process.cwd(), stdio: 'ignore' });
+  for (const title of renders.splice(0)) {
+    steps++;
+    await renderPage(title);
+  }
   for (const file of publishes.splice(0)) {
     const toolId = `toolu_fake_${++seq}`;
     steps++;
@@ -820,6 +852,9 @@ async function main() {
       // Omni's reply suggestion. The agent's answer echoes the thread's message, so directives reach here too.
       const wait = Number(/SUGGEST:(\d+)/.exec(prompt)?.[1] ?? 0);
       if (wait) await new Promise((r) => setTimeout(r, wait));
+      const gate = process.env.FAKE_CLAUDE_SUGGEST_GATE;
+      // Gives up once the gate's directory is gone: a test that ended never opens it.
+      while (gate && !existsSync(gate) && existsSync(dirname(gate))) await new Promise((r) => setTimeout(r, 20));
       return process.stdout.write(prompt.includes('SUGGEST_NONE') ? 'NONE\n' : 'Yes, open a PR\n');
     }
     if (outFmt === 'text') {

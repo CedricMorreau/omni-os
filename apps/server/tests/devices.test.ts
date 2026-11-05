@@ -63,7 +63,22 @@ describe('synced Macs', () => {
       id: 'elsewhere', channel_id: 'scratch', title: 'elsewhere', status: 'done', role: null, model: null, session_id: 'elsewhere',
       cwd: a.tmp, branch: null, parent_id: null, task_id: null, source: 'manual', automation: null,
     });
+    // Stands in for mac-b's synced writes: the running row, and the assignment its turn claimed.
     a.db.db.prepare(`UPDATE threads SET status = 'running', run_machine = 'mac-b' WHERE id = 'elsewhere'`).run();
+    a.db.assignments.claim('elsewhere', 'mac-b');
     expect((await a.json('/threads/elsewhere')).body.blocked).toBe("This thread is running on Ben's Mac Studio.");
+  });
+});
+
+describe('naming a QA server', () => {
+  it('OMNI_DEVICE_NAME is the name a Mac gives itself when no test set one', async () => {
+    a.devices.configureDevices({ name: undefined });
+    process.env.OMNI_DEVICE_NAME = ' QA Mac A ';
+    try {
+      expect(await a.devices.computerName()).toBe('QA Mac A');
+    } finally {
+      delete process.env.OMNI_DEVICE_NAME;
+      a.devices.configureDevices({ name: "Ben's MacBook Air" });
+    }
   });
 });

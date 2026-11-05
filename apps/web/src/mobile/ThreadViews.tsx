@@ -1,32 +1,42 @@
 // The screens pushed from a thread: its steps, changes and PR, the channel browser, the shell, details and a file.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { turnCount } from '@omni/shared/history.ts';
 import { api, artifactUrl, errorText, useApi, type Artifact, type HarnessWithRunning, type PRDetail } from '../api.ts';
-import { HarnessMark, harnessLabel } from '../components/brand.tsx';
+import { HarnessLogo, HarnessMark, harnessLabel, Loader } from '../components/brand.tsx';
 import { ArtifactBody } from '../components/ArtifactViewer.tsx';
-import { AnnotateLayer, canAnnotate, useAfterAdd } from '../components/BrowserAnnotate.tsx';
+import { AnnotateLayer, canAnnotate, useAfterAdd, type AnnotateFrom } from '../components/BrowserAnnotate.tsx';
+import { LiveAnnotateCard, LiveAnnotateOverlay, useLiveAnnotate } from '../components/BrowserAnnotationOverlay.tsx';
 import { BrowserWatch, displayUrl, useChannelBrowser } from '../components/LiveBrowser.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { modelOf } from '../components/ModelPicker.tsx';
 import { ChangesTab } from '../components/thread/panel/ChangesTab.tsx';
-import { usePRWatch, watchCopy } from '../components/thread/PRWatch.tsx';
+import { usePRWatch } from '../components/thread/PRWatch.tsx';
+import { watchCopy } from '@omni/shared/pr-watch.ts';
 import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
-import { TerminalView } from '../components/TerminalView.tsx';
 import { ThreadIdCtx, ToolOutput } from '../components/thread/ToolOutput.tsx';
-import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, StatusDot } from '../components/ui.tsx';
-import { cloudAgentUrl } from '../cloud-agent.ts';
+import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, STATUS_LABEL, StatusDot } from '../components/ui.tsx';
+import { cloudAgentUrl } from '@omni/shared/cloud-agent.ts';
 import { carriedText } from '@omni/shared/continue.ts';
+import { relTime } from '@omni/shared/format.ts';
 import { linkName } from '../components/ContinueLinks.tsx';
 import { fullDate, plural } from '../format.ts';
-import { checkTone } from '../pages/PRs.tsx';
-import type { Route } from '../router.ts';
+import { runningSubagents, subagentKind } from '../subagents.ts';
+import { href, type Route } from '../router.ts';
+import { mergeNote } from '@omni/shared/pr-merge.ts';
+import { checkTone, STEP_WORKING, stepUnderway } from '@omni/shared/thread-glance.ts';
 import { useApp } from '../store.tsx';
-import { toolLabel, toolSummary, type Item, type ToolCall } from '../transcript/fold.ts';
+import { toolLabel, toolSummary, type Item, type ToolCall } from '@omni/shared/transcript-fold.ts';
+import { CrewFileList } from './CrewFiles.tsx';
+import { CrewPRList } from './CrewPRs.tsx';
 import { MoDiff, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoSection } from './parts.tsx';
 import { useShell, useThread } from './shell.tsx';
-import { threadView } from './thread-view.ts';
+import { threadView } from '@omni/shared/thread-view.ts';
 import { holds } from '../thread-history.ts';
 import { hasLiveOutput, outputTarget } from '../tool-output.ts';
+import { isWorking } from '@omni/shared/delegate-count.ts';
+
+// xterm loads only when the terminal opens, as on desktop (pages/Thread.tsx).
+const TerminalView = lazy(() => import('../components/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
 const SOURCE: Record<string, string> = { manual: 'You', conductor: 'The Conductor', team: 'Its team lead', automation: 'Automation', import: 'Imported', capture: 'Captured' };
 
@@ -137,17 +147,27 @@ export function ChangesScreen() {
   );
 }
 
-/** The thread branch's PR: what it changes, its checks, and a squash merge behind a slide. */
+/**
+ * The thread branch's PR: what it changes, its checks, and a squash merge behind a slide. A thread without a PR of its own
+ * shows its first open delegated PR the same way, and a tap on a delegated PR below shows that one, so a Conductor thread
+ * merges its delegates' work from here.
+ */
 export function PRScreen() {
   const shell = useShell();
-  const { thread, slotBusy, applyThread } = useThread();
+  const { thread, slotBusy, applyThread, events, queued } = useThread();
   const { channel } = useApp();
   const mark = useThreadPR(thread, slotBusy, true);
+  const [asking, setAsking] = useState(false);
+  const opening = asking || stepUnderway(events, queued, slotBusy) === 'open';
   const watch = usePRWatch(thread?.id, mark);
-  const ch = thread ? channel(thread.channel_id) : undefined;
-  const n = mark?.pr?.number;
+  const crew = mark?.crew ?? [];
+  const [picked, setPicked] = useState<string | null>(null);
+  const crewPR = crew.find((p) => p.url === picked) ?? (mark?.pr ? undefined : crew.find((p) => p.state === 'OPEN' && !p.isDraft));
+  const ch = thread ? channel(crewPR?.channel_id ?? thread.channel_id) : undefined;
+  const n = crewPR?.number ?? mark?.pr?.number;
   const q = useApi<PRDetail>(n && ch?.github_repo ? `/channels/${encodeURIComponent(ch.id)}/prs/${n}` : null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const p = q.data;
 
   const merge = async () => {
@@ -161,18 +181,33 @@ export function PRScreen() {
       throw e;
     }
   };
+  const review = async () => {
+    setReviewBusy(true);
+    setError(null);
+    try {
+      const result = await api.post<{ destination_thread_id: string }>(`/channels/${encodeURIComponent(ch!.id)}/prs/${n}/review`, {});
+      shell.open(href.thread(result.destination_thread_id));
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
   const openPR = async () => {
     if (!thread) return;
+    setAsking(true);
     try {
       applyThread(await api.post(`/threads/${encodeURIComponent(thread.id)}/messages`, { prompt: OPEN_PR_PROMPT, mode: slotBusy ? 'queue' : undefined }), true);
       shell.toast('Asked for a PR');
       shell.back();
     } catch (e) {
       shell.toast(errorText(e));
+    } finally {
+      setAsking(false);
     }
   };
 
-  if (!thread || (thread.branch && !mark) || (n && ch?.github_repo && !p && !q.error)) {
+  if (!thread || !mark || (n && ch?.github_repo && !p && !q.error)) {
     return (
       <>
         <MoHeader onBack={shell.back} title="Pull request" />
@@ -183,38 +218,37 @@ export function PRScreen() {
   if (!n || !p) {
     return (
       <>
-        <MoHeader onBack={shell.back} title="Pull request" sub={thread?.branch ?? undefined} />
+        <MoHeader onBack={shell.back} title={thread.branch || !crew.length ? 'Pull request' : 'Delegated PRs'} sub={thread.branch ?? undefined} />
         <Body className="gap-3">
           {q.error ? (
             <ErrorNote onRetry={q.reload}>{q.error}</ErrorNote>
-          ) : (
+          ) : !n && !thread.branch && crew.length ? null : (
             <MoEmpty>
               {n
-                ? `PR #${n} is open. Set this channel's GitHub repo on the Mac to read it here.`
+                ? `PR #${n} is open. Set this channel's GitHub repo on the desktop to read it here.`
                 : thread.branch
-                  ? 'No pull request from this branch yet.'
+                  ? opening
+                    ? 'The agent is committing and pushing this branch. The PR shows here once it opens.'
+                    : 'No pull request from this branch yet.'
                   : 'This thread works without a branch, so it has no pull request.'}
             </MoEmpty>
           )}
           {!n && thread.branch && (
             <div className="px-1">
-              <Button size="lg" icon="pr" onClick={() => void openPR()}>
-                Open PR
+              <Button size="lg" icon="pr" busy={opening} onClick={() => void openPR()}>
+                {opening ? `${STEP_WORKING.open}…` : 'Open PR'}
               </Button>
             </div>
           )}
+          {crew.length > 0 && <CrewPRList crew={crew} onOpen={(p) => setPicked(p.url)} />}
         </Body>
       </>
     );
   }
 
   const open = !p.state || p.state === 'OPEN';
-  const pending = p.checkRuns.filter((c) => checkTone(c.state) === 'running').length;
-  const failing = p.checkRuns.filter((c) => checkTone(c.state) === 'needs').length;
-  const note = [failing && `${plural(failing, 'check')} failing.`, pending && `${plural(pending, 'check')} still running. Merging now skips them.`, p.mergeable === 'CONFLICTING' && 'It conflicts with the base branch.']
-    .filter(Boolean)
-    .join(' ');
-  const canWatch = open || watch.watching;
+  const note = mergeNote(p);
+  const canWatch = !crewPR && (open || watch.watching);
   const { action, line } = watchCopy(watch.watch);
   return (
     <>
@@ -235,7 +269,13 @@ export function PRScreen() {
             {p.headRefName} → {p.baseRefName}
           </span>
         </div>
-        {(canWatch || watch.watch) && (
+        <Button icon="layers" busy={reviewBusy} onClick={() => void review()}>Ask builder to review</Button>
+        {crewPR && (
+          <MoGroup className="shrink-0">
+            <MoListRow icon={<Icon name="message" size={18} />} label={crewPR.thread_title || 'Untitled'} sub="The delegated thread that opened it" onClick={() => shell.open(href.thread(crewPR.thread_id))} last />
+          </MoGroup>
+        )}
+        {!crewPR && (canWatch || watch.watch) && (
           <div className="flex flex-col gap-2">
             <MoGroup>
               <MoListRow
@@ -272,6 +312,7 @@ export function PRScreen() {
             ))}
           </MoGroup>
         </MoSection>
+        {crew.length > 0 && <CrewPRList crew={crew} onOpen={(p) => setPicked(p.url)} />}
       </Body>
       {open && (
         <div className="flex shrink-0 flex-col gap-2 px-4 pt-2" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
@@ -295,18 +336,52 @@ export function BrowserScreen() {
 function BrowserBody({ channelId, threadId, onBack }: { channelId: string; threadId: string; onBack: () => void }) {
   const b = useChannelBrowser(channelId);
   const url = b.state?.url ? displayUrl(b.state.url) : null;
+  const box = useRef<HTMLDivElement>(null);
+  const live = useLiveAnnotate(b, channelId, threadId);
+  // Live Annotate (tap to pick, drag an area), and the screenshot editor a pick goes to with Draw.
   const [annotating, setAnnotating] = useState(false);
-  const close = useCallback(() => setAnnotating(false), []);
-  const added = useAfterAdd(close);
+  const [drawing, setDrawing] = useState<AnnotateFrom | null>(null);
+  const { clear } = live;
+  const stop = useCallback(() => {
+    setAnnotating(false);
+    clear();
+  }, [clear]);
+  const sent = useAfterAdd(stop);
+  const drawn = useAfterAdd(useCallback(() => setDrawing(null), []));
+  const usable = canAnnotate(b.state);
+  useEffect(() => {
+    if (annotating && !usable) stop();
+  }, [annotating, usable, stop]);
+  const on = annotating && !drawing;
   return (
     <>
-      <MoHeader onBack={onBack} title="Browser" sub={[url, 'watch only'].filter(Boolean).join(' · ')} right={<MoRound icon="annotate" label="Annotate this page" disabled={!canAnnotate(b.state)} onClick={() => setAnnotating(true)} />} />
+      <MoHeader
+        onBack={onBack}
+        title="Browser"
+        sub={[url, 'watch only'].filter(Boolean).join(' · ')}
+        right={<MoRound icon="annotate" label={annotating ? 'Stop annotating' : 'Annotate this page'} ink={annotating} disabled={!usable} onClick={() => (annotating ? stop() : setAnnotating(true))} />}
+      />
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 px-3 pt-1" style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-surface">
-          <BrowserWatch b={b} />
-          {annotating && <AnnotateLayer channelId={channelId} threadId={threadId} onClose={close} onAdded={added} />}
+          <BrowserWatch b={b} box={box}>
+            {on && <LiveAnnotateOverlay b={b} box={box} live={live} drive={false} />}
+          </BrowserWatch>
+          {on && (
+            <LiveAnnotateCard
+              live={live}
+              threadId={threadId}
+              phone
+              onDone={stop}
+              onSent={sent}
+              onDraw={() => {
+                const from = live.handOff();
+                if (from) setDrawing(from);
+              }}
+            />
+          )}
+          {drawing && <AnnotateLayer channelId={channelId} threadId={threadId} from={drawing} onClose={() => setDrawing(null)} onAdded={drawn} />}
         </div>
-        <p className="m-0 px-1 text-[13px] leading-[1.5] text-fg-3">The agent drives this browser. Logins and captchas are handled on the Mac.</p>
+        <p className="m-0 px-1 text-[13px] leading-[1.5] text-fg-3">The agent drives this browser. Logins and captchas are handled on the desktop.</p>
       </div>
     </>
   );
@@ -319,7 +394,13 @@ export function TerminalScreen() {
     <>
       <MoHeader onBack={shell.back} title="Terminal" sub="Read only · tap lines to add them to a message" />
       <div className="flex min-h-0 flex-1 flex-col px-3 pt-1" style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
-        {thread ? <TerminalView threadId={thread.id} cwd={thread.cwd} readOnly /> : <MoEmpty>Loading</MoEmpty>}
+        {thread ? (
+          <Suspense fallback={<MoEmpty>Loading</MoEmpty>}>
+            <TerminalView threadId={thread.id} cwd={thread.cwd} readOnly />
+          </Suspense>
+        ) : (
+          <MoEmpty>Loading</MoEmpty>
+        )}
       </div>
     </>
   );
@@ -327,9 +408,56 @@ export function TerminalScreen() {
 
 // ---------- Details ----------
 
+/** A thread's harness logo with its status dot on the corner, as the desktop agents card marks it. */
+function AgentGlyph({ harness, status }: { harness: string; status: string }) {
+  return (
+    <span className="relative grid size-6 place-items-center">
+      <HarnessLogo harness={harness} size={17} title={harnessLabel(harness)} />
+      <StatusDot status={status} size={7} className="absolute -right-0.5 -bottom-0.5 ring-2 ring-surface" />
+    </span>
+  );
+}
+
+/**
+ * Where the thread sits among its agents, the phone's copy of the desktop agents card: where it came from, what it
+ * handed on to, what runs now and the delegations that finished, folded.
+ */
+function AgentsGroup({ open }: { open: (id: string) => void }) {
+  const { thread, parent, children, links } = useThread();
+  const { tasks } = useApp();
+  const [showPrev, setShowPrev] = useState(false);
+  const agents = useMemo(() => (thread ? runningSubagents(tasks, thread.id) : []), [tasks, thread]);
+  const running = children.filter(isWorking);
+  const previous = children.filter((c) => !isWorking(c));
+  type R = { key: string; icon: ReactNode; label: ReactNode; sub?: ReactNode; right?: ReactNode; go?: () => void };
+  const rows: R[] = [];
+  if (parent) rows.push({ key: `p${parent.id}`, icon: 'arrowUpRight', label: parent.title || 'Untitled', sub: `Delegated it · ${STATUS_LABEL[parent.status] ?? parent.status}`, go: () => open(parent.id) });
+  if (links.from) {
+    const f = links.from;
+    rows.push({ key: `f${f.id}`, icon: <AgentGlyph harness={f.harness} status={f.status} />, label: linkName(f), sub: f.carried ? `Continued from · ${carriedText(f.carried)}` : 'Continued from', go: () => open(f.id) });
+  }
+  for (const l of links.into) rows.push({ key: `i${l.id}`, icon: <AgentGlyph harness={l.harness} status={l.status} />, label: linkName(l), sub: 'Continued in', go: () => open(l.id) });
+  for (const c of running) rows.push({ key: `r${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: 'Running', right: relTime(c.updated_at), go: () => open(c.id) });
+  for (const t of agents) rows.push({ key: `a${t.task_id}`, icon: <Loader size={15} className="text-live-text" />, label: t.description, sub: subagentKind(t) ? `Subagent · ${subagentKind(t)}` : 'Subagent' });
+  if (previous.length) {
+    rows.push({ key: 'prev', icon: 'delegate', label: 'Previous agents', right: <span className="flex items-center gap-1.5">{previous.length}<Icon name="chevronDown" size={14} className={showPrev ? '' : '-rotate-90'} /></span>, go: () => setShowPrev((v) => !v) });
+    if (showPrev) for (const c of previous) rows.push({ key: `d${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: STATUS_LABEL[c.status] ?? c.status, right: relTime(c.updated_at), go: () => open(c.id) });
+  }
+  if (!rows.length) return null;
+  return (
+    <MoSection title="Agents" pad={false}>
+      <MoGroup>
+        {rows.map((r, i) => (
+          <MoListRow key={r.key} icon={r.icon} label={r.label} sub={r.sub} right={r.right} chevron={r.key !== 'prev'} onClick={r.go} last={i === rows.length - 1} />
+        ))}
+      </MoGroup>
+    </MoSection>
+  );
+}
+
 export function DetailsScreen() {
   const shell = useShell();
-  const { thread, init, lastResult, links, history } = useThread();
+  const { thread, init, lastResult, history, crew } = useThread();
   const { channel } = useApp();
   const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
   if (!thread) return <MoHeader onBack={shell.back} title="Details" />;
@@ -354,25 +482,6 @@ export function DetailsScreen() {
   ];
   if (thread.task_id) rows.splice(2, 0, ['Task', <span className="font-mono text-[13px]">{thread.task_id}</span>]);
   if (thread.branch) rows.push(['Branch', <span className="font-mono text-[13px]">{thread.branch}</span>]);
-  if (links.from)
-    rows.push([
-      'Continued from',
-      <span className="flex flex-col py-2">
-        <span className="truncate">{linkName(links.from)}</span>
-        {links.from.carried && <span className="text-[12.5px] leading-[1.35] whitespace-normal text-fg-3">{carriedText(links.from.carried)}</span>}
-      </span>,
-    ]);
-  if (links.into.length)
-    rows.push([
-      'Continued in',
-      <span className="flex flex-col py-2">
-        {links.into.map((l) => (
-          <span key={l.id} className="truncate">
-            {linkName(l)}
-          </span>
-        ))}
-      </span>,
-    ]);
   const agentUrl = thread.harness === 'cursor-cloud' ? cloudAgentUrl(thread.session_id) : null;
   if (agentUrl)
     rows.push([
@@ -385,6 +494,8 @@ export function DetailsScreen() {
     <>
       <MoHeader onBack={shell.back} title="Details" sub={thread.title} />
       <Body className="gap-4">
+        <AgentsGroup open={(id) => shell.open(href.thread(id))} />
+        <CrewFileList files={crew.files} shots={crew.shots} onOpen={(a) => shell.open(href.thread(thread.id, a.id))} />
         <MoGroup>
           {rows.map(([k, v], i) => (
             <div key={k} className={`flex min-h-12 items-center px-4 text-[14.5px] ${i ? 'border-t border-line' : ''}`}>
@@ -396,7 +507,7 @@ export function DetailsScreen() {
         <p className="m-0 px-1 text-[13px] leading-[1.5] text-fg-3">
           {thread.harness === 'cursor-cloud'
             ? "This thread runs as a Cursor cloud agent on Cursor's Linux cloud, on its own clone of the channel repo. Another message goes to it as a follow-up."
-            : 'The session id, working directory and resume command are on the Mac, under Details in the thread panel.'}
+            : 'The session id, working directory and resume command are on the desktop, under Details in the thread panel.'}
         </p>
       </Body>
     </>
@@ -408,10 +519,14 @@ export function DetailsScreen() {
 /** One file, full screen. Share hands over the published page, else the file itself. */
 export function ViewerScreen({ route }: { route: Route }) {
   const shell = useShell();
-  const { thread, files } = useThread();
+  const { thread, files, shots, crew } = useThread();
   const { channel } = useApp();
   const id = route.name === 'thread' ? route.artifact : undefined;
-  const a = files.find((f) => f.id === id);
+  // A delegated thread's file or screenshot opens here too, from the Details list.
+  const mine = files.find((f) => f.id === id) ?? shots.find((f) => f.id === id);
+  const theirs = mine ? undefined : (crew.files.find((f) => f.id === id) ?? crew.shots.find((f) => f.id === id));
+  const a = mine ?? theirs;
+  const from = theirs ? theirs.thread_title || 'Untitled' : null;
   const share = async () => {
     if (!a) return;
     try {
@@ -434,7 +549,14 @@ export function ViewerScreen({ route }: { route: Route }) {
       if ((e as Error).name !== 'AbortError') shell.toast(errorText(e));
     }
   };
-  const sub = thread ? [`#${channel(thread.channel_id)?.name ?? thread.channel_id}`, thread.role].filter(Boolean).join(' · ') : undefined;
+  const sub =
+    theirs && from ? (
+      <a href={href.thread(theirs.thread_id)} className="text-fg-2 hover:text-fg" title={`Open thread: ${from}`}>
+        From {from}
+      </a>
+    ) : thread ? (
+      [`#${channel(thread.channel_id)?.name ?? thread.channel_id}`, thread.role].filter(Boolean).join(' · ')
+    ) : undefined;
   return (
     <>
       <MoHeader

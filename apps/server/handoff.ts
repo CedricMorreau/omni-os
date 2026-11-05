@@ -1,38 +1,46 @@
-// Handing a thread, running or idle, to another synced Mac. The records and their phases are in packages/shared/handoff.ts and
-// apps/server/handoff/records.ts; the relay carries everything, and Tailscale only says whether the other Mac is up.
-// The giving Mac stops the turn, uploads the session and packs the worktree, writing each step into its offer. The
-// taking Mac never acts as a change arrives: after every sync it reconciles from the records as they are, so a second
-// run, or one after a crash on either Mac, ends where one clean run would.
+// Handing a thread, running or idle, to another synced Mac, and taking one over from another Mac. The records and their
+// phases are in packages/shared/handoff.ts and apps/server/handoff/records.ts; the relay carries everything, and
+// Tailscale only says whether the other Mac is up. The giving Mac stops the turn, uploads the session and packs the
+// worktree, writing each step into its offer. Take over is a request from the Mac that wants the thread, which the Mac
+// holding it answers as if Ben had handed it off there. No Mac acts as a change arrives: after every sync each
+// reconciles from the records as they are, so a second run, or one after a crash on either Mac, ends where one clean
+// run would.
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { HandoffOffer, HandoffView } from '@omni/shared/handoff.ts';
+import { requestPhase, type HandoffOffer, type HandoffRequest, type HandoffView, type Takeover } from '@omni/shared/handoff.ts';
 import { publishFeed } from './bus.ts';
 import { paths } from './config.ts';
-import { channels, completions, messageRequests, outbox, resultReads, threads, tx, type Thread } from './db.ts';
-import { HARNESS_META, isHarnessId } from './harness/types.ts';
+import { assignments, channels, completions, messageRequests, outbox, resultReads, threads, tx, type Thread } from './db.ts';
+import { holderOf } from './ownership.ts';
+import { HARNESS_META, isHarnessId, isProviderHarness, type HarnessId } from './harness/types.ts';
+import { needsWorktree, plannedWorktree } from './sandbox.ts';
 import { contextBlock, placeFor } from './message-context/project.ts';
-import { handoffView, offerOf, offers, phaseOf, replyOf, writeOffer, writeReply } from './handoff/records.ts';
+import { handoffView, inFlight, moving, offerOf, offers, phaseOf, replyOf, requestOf, requests, writeOffer, writeReply, writeRequest } from './handoff/records.ts';
 import { inOwnWorktree, packWorktree, unpackWorktree, type WorktreeBundle } from './handoff/worktree.ts';
-import { releaseForHandoff, runsHere, saveOwn, wake, type Msg } from './runner.ts';
+import { releaseForHandoff, runsHere, saveOwn, wake, wakePrepared, type Msg } from './runner.ts';
+import { failSetup, setUpThread, START_REQUEST } from './runner/setup.ts';
 import { drop } from './runner/state.ts';
-import { computerName, deviceName, deviceRecord } from './sync/devices.ts';
-import { sessionOnThisMac, uploadNow } from './sync/files.ts';
-import { prepareTurn } from './sync/guard.ts';
+import { computerName, deviceName, deviceRecord, ownName } from './sync/devices.ts';
+import { receiveUploads, sessionOnThisMac, uploadNow, type UploadRef } from './sync/files.ts';
+import type { Attachment } from './uploads.ts';
+import { machineName, prepareTurn } from './sync/guard.ts';
 import { toPortable } from './sync/paths.ts';
-import { activeWorker, onSynced, syncStatus, type SyncWorker } from './sync/worker.ts';
+import { HANDOFF_NEEDS, syncProblem } from './sync/problem.ts';
+import { activeWorker, onSynced, type SyncWorker } from './sync/worker.ts';
 import { reachabilityOf, tailnet } from './tailscale.ts';
 import { withWorkspace } from './workspace.ts';
 
 type Offered = Extract<HandoffOffer, { state: 'offered' }>;
-type Base = Pick<HandoffOffer, 'id' | 'thread' | 'from' | 'to' | 'idle'>;
+type Base = Pick<HandoffOffer, 'id' | 'thread' | 'from' | 'to' | 'idle' | 'request' | 'fresh'>;
+type Mac = HandoffOffer['from'];
 
 const run = promisify(execFile);
 const refused = (message: string, status = 409) => Object.assign(new Error(message), { status });
 const iso = () => new Date().toISOString();
-const base = (o: HandoffOffer): Base => ({ id: o.id, thread: o.thread, from: o.from, to: o.to, idle: o.idle });
+const base = (o: HandoffOffer): Base => ({ id: o.id, thread: o.thread, from: o.from, to: o.to, idle: o.idle, request: o.request, fresh: o.fresh });
 const busy = (t: Pick<Thread, 'status'>) => t.status === 'running' || t.status === 'queued';
 
 /** The answer to a handoff request or a cancel: the thread, and its handoff as this Mac shows it. */
@@ -51,19 +59,27 @@ const logFailure = (threadId: string) => (err: unknown) => console.error(`[hando
 /** Ben cancelled while the offer was still being prepared. */
 class Cancelled extends Error {}
 
-/** Why this Mac cannot tell the other one anything now, said as Settings would. */
-function syncProblem(): string {
-  const status = syncStatus();
-  if (!status.machineId || !status.configured) return 'Sync is not set up on this Mac. Handing a thread off needs sync on both Macs.';
-  if (!status.enabled) return 'Sync is paused on this Mac. Resume it on the Sync page to hand threads off.';
-  return 'Sync is set up on this Mac but not running, so the other Mac cannot be told. Check the Sync page, then try again.';
-}
-
 /** Why the thread's harness could not resume it on another Mac, or null when it can. */
 function notResumable(t: Thread): string | null {
   if ((t.harness !== 'codex' && t.harness !== 'cursor') || t.session_id !== t.id) return null;
   const name = isHarnessId(t.harness) ? HARNESS_META[t.harness].name : t.harness;
-  return `${name} has not reported this thread's session yet, so another Mac could not resume it. Try again once it has replied.`;
+  return `${name} has not reported this thread's session yet, so another machine could not resume it. Try again once it has replied.`;
+}
+
+/**
+ * Why the thread cannot move to another Mac now, or null when it can: the same for Hand off, for a Take over, and for
+ * the holding Mac's answer to one. `where` names the Mac that holds it.
+ */
+function refusal(t: Thread, where: string): string | null {
+  const harness = notResumable(t);
+  if (harness) return harness;
+  // Its report would wake the thread that delegated it on the other Mac, while that one may be running here.
+  if (t.parent_id) return `This thread reports to the thread that delegated it, so it stays on ${where}.`;
+  if (t.archived) return 'This thread is archived. Restore it first.';
+  if (threads.children(t.id).some(busy)) return `Threads this one delegated are still running on ${where}. Try again once they finish.`;
+  // Only the Mac that ran the turn resumes a limit stop, so the resume would run there, not where the thread went.
+  if (t.limit_state) return `This thread is waiting on a usage limit on ${where}. Resume it first.`;
+  return null;
 }
 
 /**
@@ -78,48 +94,124 @@ function textOf(m: Msg, t: Thread) {
   return said ? `${said}\n\n${block}` : block;
 }
 
+/** A Hand off that may go ahead: the thread, both Macs and the worker that carries it. */
+interface HandOffReady {
+  thread: Thread;
+  from: Mac;
+  to: Mac;
+  worker: SyncWorker;
+}
+
 /**
- * Ben's Hand off. Refuses with why, or writes the offer and returns at once: the rest runs in the background and
- * shows in the thread's handoff. `to` is the other Mac's sync id.
+ * Whether Ben's Hand off to `to` (the other Mac's sync id) may go ahead now. Throws the refusal, with why, or answers
+ * with what the handoff needs. Nothing is written. Nothing awaits after the last check, so a caller that writes at
+ * once sees the state it checked.
  */
-export async function handOff(threadId: string, to: string): Promise<HandoffResult> {
+export async function handOffCheck(threadId: string, to: string): Promise<HandOffReady> {
   if (!threads.get(threadId)) throw refused('thread not found', 404);
   const self = outbox.machineId();
   const worker = activeWorker();
-  if (!self || !worker) throw refused(syncProblem());
-  if (to === self) throw refused('That is this Mac. Pick the Mac to hand the thread to.');
+  if (!self || !worker) throw refused(syncProblem(HANDOFF_NEEDS));
+  if (to === self) throw refused('That is this machine. Pick the machine to hand the thread to.');
   const target = deviceRecord(to);
-  if (!target) throw refused('No synced Mac has that id. A Mac shows up once it has synced with this one.');
+  if (!target) throw refused('No synced machine has that id. A machine shows up once it has synced with this one.');
   const [net, name] = await Promise.all([tailnet(), deviceName(self) ?? computerName()]);
   const reach = reachabilityOf(net, target);
   if (reach.reachability === 'offline') {
     throw refused(`${target.name} is offline on Tailscale${reach.lastSeen ? `, last seen ${reach.lastSeen}` : ''}. Wake it, then try again.`);
   }
-  // Nothing awaits from here to the write, so two clicks never start two handoffs.
   const t = threads.get(threadId)!;
-  const why = notResumable(t);
-  if (why) throw refused(why);
-  // Its report would wake the thread that delegated it on the other Mac, while that one may be running here.
-  if (t.parent_id) throw refused('This thread reports to the thread that delegated it, so it stays on this Mac. Hand that thread off instead, once this one is done.');
+  // Another Mac holds what this one has of it, which may be behind: handing that off would undo its turns.
+  const holder = holderOf(threadId);
+  if (holder && holder !== self) throw refused(`This thread is on ${machineName(holder)}. Take it over instead.`);
   // A running turn must be this Mac's to stop; an idle thread has none, so only the Mac that runs it elsewhere is refused.
-  if (busy(t) && !runsHere(threadId)) throw refused('This thread is running on another Mac, so only that Mac can hand it off.');
-  if (t.archived) throw refused('This thread is archived. Restore it, then hand it off.');
-  if (threads.children(threadId).some(busy)) throw refused('Threads this one delegated are still running here. Hand it off once they finish.');
-  const phase = phaseOf(threadId)?.phase;
-  if (phase === 'preparing' || phase === 'offered') throw refused('This thread is already being handed off.');
+  if (busy(t) && !runsHere(threadId)) throw refused('This thread is running on another machine, so only that machine can hand it off.');
+  const why = refusal(t, name);
+  if (why) throw refused(why);
+  if (moving(phaseOf(threadId)?.phase)) throw refused('This thread is already being handed off.');
+  return { thread: t, from: { id: self, name }, to: { id: target.id, name: target.name }, worker };
+}
+
+/**
+ * Ben's Hand off. Refuses with why, or writes the offer and returns at once: the rest runs in the background and
+ * shows in the thread's handoff. `to` is the other Mac's sync id.
+ */
+export async function handOff(threadId: string, to: string): Promise<HandoffResult> {
+  // Nothing awaits from the check to the write, so two clicks never start two handoffs.
+  const ready = await handOffCheck(threadId, to);
+  startGiving(ready.thread, ready.from, ready.to, ready.worker);
+  return result(threadId);
+}
+
+/**
+ * Send a thread that has not run anywhere to another machine, to run there from its first message (run-on.ts): the
+ * offer goes out ready, since there is no turn to stop, session to upload or worktree to pack. That machine cuts the
+ * worktree itself. `to` must be a synced machine; the caller checks it. `files` are in Storage already.
+ */
+export function sendNewThread(threadId: string, prompt: string, from: Mac, to: Mac, files: UploadRef[] = []) {
+  writeOffer({
+    id: randomUUID(), thread: threadId, from, to, at: iso(), idle: true, fresh: true, state: 'offered', queued: [prompt], bundle: null, leftBehind: null,
+    ...(files.length && { files }),
+  });
+  void activeWorker()?.syncNow();
+}
+
+/** Write the offer, then give the thread away in the background. Nothing awaits before the write. */
+function startGiving(t: Thread, from: Mac, to: Mac, worker: SyncWorker, request?: string) {
   const offer: HandoffOffer = {
     id: randomUUID(),
-    thread: threadId,
-    from: { id: self, name },
-    to: { id: target.id, name: target.name },
+    thread: t.id,
+    from,
+    to,
     at: iso(),
     idle: !busy(t),
+    ...(request ? { request } : {}),
     state: 'preparing',
     step: busy(t) ? 'stopping' : 'uploading',
   };
   writeOffer(offer);
-  void giveAway(offer, worker).catch(logFailure(threadId));
+  void giveAway(offer, worker).catch(logFailure(t.id));
+}
+
+/** Another Mac holds the thread, so Ben may take it over here. Null while this Mac holds it, no Mac is known to, or it is on its way. */
+export function takeoverOf(t: Thread): Takeover | null {
+  const self = outbox.machineId();
+  const holder = self && holderOf(t.id);
+  if (!self || !holder || holder === self || inFlight(t.id)) return null;
+  const from = { id: holder, name: machineName(holder) };
+  const to = { id: self, name: ownName(self) };
+  return { from, to, running: busy(t), refused: activeWorker() ? refusal(t, from.name) : syncProblem(HANDOFF_NEEDS) };
+}
+
+/**
+ * Ben's Take over: ask the Mac that holds the thread to hand it here. Refuses with why, or writes the request and returns
+ * at once. That Mac answers on its next sync, as if Ben had handed the thread off there, and the request shows in the
+ * thread's handoff until it does.
+ */
+export async function requestTakeover(threadId: string): Promise<HandoffResult> {
+  // Nothing awaits from the check to the write, so two clicks never send two requests.
+  const { self, name, take, worker } = await takeoverCheck(threadId);
+  writeRequest({ id: randomUUID(), thread: threadId, by: { id: self, name }, from: take.from, at: iso(), after: offerOf(threadId)?.id ?? null, state: 'pending' });
+  void worker.syncNow();
   return result(threadId);
+}
+
+/** Whether Ben's Take over may go ahead now. Throws the refusal, with why, or answers with what the request needs. Nothing is written. */
+export async function takeoverCheck(threadId: string): Promise<{ self: string; name: string; take: Takeover; worker: SyncWorker }> {
+  if (!threads.get(threadId)) throw refused('thread not found', 404);
+  const self = outbox.machineId();
+  const worker = activeWorker();
+  if (!self || !worker) throw refused(syncProblem(HANDOFF_NEEDS));
+  const name = deviceName(self) ?? (await computerName());
+  const t = threads.get(threadId)!;
+  const take = takeoverOf(t);
+  if (!take) {
+    const holder = holderOf(threadId);
+    if (holder === self) throw refused('This thread is on this machine already.');
+    throw refused(holder ? 'This thread is already on its way between machines.' : 'No machine is known to hold this thread yet. Once it runs again, it can be taken over.');
+  }
+  if (take.refused) throw refused(take.refused);
+  return { self, name, take, worker };
 }
 
 /** Move the offer on, unless Ben cancelled it meanwhile. */
@@ -195,11 +287,35 @@ async function giveAway(offer: HandoffOffer, worker: SyncWorker) {
 
 /** A handoff that went out and will not run there: the messages it carried wait here for Resume. Once per offer. */
 function restore(offer: Offered) {
+  if (offer.fresh) return restoreFresh(offer);
   const saved = offer.queued.filter((text, n) => {
     const row = saveOwn(offer.thread, `handoff-back:${offer.id}:${n}`, { prompt: text, kind: 'user', payload: { text, source: 'ben' }, source: 'handoff', mode: 'queue' });
     return row && messageRequests.mark(row.id, 'recovered');
   });
   if (saved.length) publishFeed({ type: 'needs_you', thread_id: offer.thread });
+}
+
+/**
+ * A new thread the other machine could not take or that Ben cancelled: its first prompt waits here, and the thread
+ * shows why. A worktree thread fails its setup, so Retry cuts the worktree here and sends the prompt; any other thread
+ * stops with the prompt kept for Resume.
+ */
+function restoreFresh(offer: Offered) {
+  const t = threads.get(offer.thread);
+  if (!t) return;
+  const reply = replyOf(offer.thread);
+  const why = reply?.offer === offer.id && reply.state === 'failed' ? reply.error : null;
+  const reason = why ? `${offer.to.name} could not start it: ${why}.` : `It was not sent to ${offer.to.name}.`;
+  offer.queued.forEach((text, n) => {
+    const row = saveOwn(offer.thread, `handoff-back:${offer.id}:${n}`, { prompt: text, kind: 'user', payload: { text, source: 'ben' }, source: 'handoff', mode: 'queue' });
+    if (row) messageRequests.park(row.id);
+  });
+  const channel = channels.get(t.channel_id);
+  const worktree = !!t.branch && !!channel && needsWorktree(channel, { remote: isProviderHarness(t.harness as HarnessId) });
+  if (worktree) failSetup(offer.thread, `${reason} Retry runs it on this machine.`);
+  else threads.update(offer.thread, { status: 'stopped', updated_at: t.updated_at });
+  publishFeed({ type: 'needs_you', thread_id: offer.thread });
+  publishFeed({ type: 'thread', thread: threads.get(offer.thread)! });
 }
 
 /**
@@ -220,17 +336,32 @@ function withdraw(offer: HandoffOffer) {
   }
 }
 
-/** Ben's Cancel, on the giving Mac, while the offer is prepared or waits to be picked up. Cancelling twice is a no-op. */
+/**
+ * Ben's Cancel: of this Mac's Take over until it has taken the thread, or of a handoff from this Mac while the offer is
+ * prepared or waits to be picked up. Cancelling twice is a no-op.
+ */
 export function cancelHandoff(threadId: string): HandoffResult {
   if (!threads.get(threadId)) throw refused('thread not found', 404);
+  const self = outbox.machineId();
   const offer = offerOf(threadId);
-  if (!offer || offer.from.id !== outbox.machineId()) throw refused('This thread is not being handed off from this Mac.');
-  const phase = phaseOf(threadId)!.phase;
-  if (phase === 'accepted') throw refused(`${offer.to.name} has already picked this thread up.`);
-  if (phase === 'preparing' || phase === 'offered') {
+  const phase = phaseOf(threadId)?.phase;
+  const asked = requestOf(threadId);
+  const mine = asked?.by.id === self ? asked : null;
+  // Until the thread is here, even once the other Mac has answered: the offer it sends is then refused (stillWanted).
+  if (mine?.state === 'pending' && !(offer?.request === mine.id && phase === 'accepted')) {
+    writeRequest({ ...mine, state: 'cancelled' });
+    void activeWorker()?.syncNow();
+    return result(threadId);
+  }
+  const giving = offer?.from.id === self ? offer : null;
+  // A request of this Mac's that has already ended, and no handoff from here to cancel instead.
+  if (mine && !(giving && moving(phase))) return result(threadId);
+  if (!giving) throw refused('This thread is not being handed off from this machine.');
+  if (phase === 'accepted') throw refused(`${giving.to.name} has already picked this thread up.`);
+  if (moving(phase)) {
     tx(() => {
-      if (offer.state === 'offered') restore(offer);
-      writeOffer({ ...base(offer), at: iso(), state: 'cancelled' });
+      if (giving.state === 'offered') restore(giving);
+      writeOffer({ ...base(giving), at: iso(), state: 'cancelled' });
     });
     void activeWorker()?.syncNow();
   }
@@ -252,17 +383,25 @@ const taking = new Set<string>();
 
 const continuation = (offer: Offered) => ({
   prompt:
-    `This thread was moved from ${offer.from.name} to this Mac (${offer.to.name}) while you were working, and your last turn ` +
+    `This thread was moved from ${offer.from.name} to this machine (${offer.to.name}) while you were working, and your last turn ` +
     `was cut off at the handoff. Continue where you left off.${offer.leftBehind ? ` Note: ${offer.leftBehind}` : ''}`,
   kind: 'user' as const,
-  payload: { text: `Handed off from ${offer.from.name}. Continue where you left off.`, source: 'handoff' },
+  payload: { text: `${offer.request ? 'Taken over' : 'Handed off'} from ${offer.from.name}. Continue where you left off.`, source: 'handoff' },
   source: 'handoff' as const,
 });
 
+/** A thread this Mac asked for and no longer wants: Ben cancelled the request, or it ran out before the answer came. */
+function stillWanted(offer: Offered) {
+  if (!offer.request) return;
+  const asked = requestOf(offer.thread);
+  if (asked?.by.id !== offer.to.id || asked.state === 'pending') return;
+  throw new Error(asked.state === 'cancelled' ? `Cancelled on ${offer.to.name}` : 'The request expired');
+}
+
 /**
  * Pick up a thread offered to this Mac: its worktree laid out from the bundle, its folder checked, then in one write the
- * reply and every message to send (the continuation, then what was queued on the other Mac), and only then are they
- * sent. Anything that stops it is the reply instead.
+ * reply, the holder record and every message to send (the continuation, then what was queued on the other Mac), and
+ * only then are they sent. Anything that stops it, a Take over cancelled here among them, is the reply instead.
  */
 async function take(offer: Offered, worker: SyncWorker) {
   if (taking.has(offer.id)) return;
@@ -273,33 +412,61 @@ async function take(offer: Offered, worker: SyncWorker) {
     return now?.id === offer.id && now.state === 'offered' && replyOf(id)?.offer !== offer.id;
   };
   try {
+    stillWanted(offer);
     const t = threads.get(id);
     // Not here yet, or the giving Mac's stopped row has not arrived: the next sync tries again.
     if (!t || busy(t)) return;
+    // A new thread's first files. One that cannot be fetched yet is tried again on the next sync.
+    let attachments: Attachment[] = [];
+    try {
+      if (offer.fresh) attachments = await receiveUploads(id, offer.files);
+    } catch (err) {
+      console.error(`[handoff] ${id}: its files are not here yet:`, (err as Error).message);
+      return;
+    }
     const { bundle } = offer;
     if (bundle) {
       const repo = channels.get(t.channel_id)?.repo_path;
-      if (!t.branch || !repo || !existsSync(repo)) throw new Error(`the channel's repository is not on this Mac${repo ? `: ${repo}` : ''}`);
+      if (!t.branch || !repo || !existsSync(repo)) throw new Error(`the channel's repository is not on this machine${repo ? `: ${repo}` : ''}`);
       const dir = join(paths.worktrees, id);
       const { branch } = t;
       // Held like a start, so a cleanup never removes the folder while the handoff lays it out (workspace.ts).
       await withWorkspace(dir, () => unpackWorktree({ repo, dir, branch, threadId: id, offerId: offer.id, bundle, transport: worker.transport }));
     }
-    await prepareTurn(threads.get(id)!, false, true);
+    // A new thread's worktree is cut here by its setup, which then sends the first prompt. The hub made none.
+    const channel = channels.get(t.channel_id);
+    const setUp = !!offer.fresh && !!t.branch && !!channel && needsWorktree(channel, { remote: isProviderHarness(t.harness as HarnessId) });
+    // In this machine's own worktrees folder, wherever the hub keeps its data.
+    if (setUp) threads.update(id, { cwd: plannedWorktree(id).cwd, updated_at: t.updated_at });
+    else await prepareTurn(threads.get(id)!, false, true);
     // The download may have taken a while: hear of a Cancel on the other Mac before answering, not after.
     await worker.syncNow();
     const rows = tx(() => {
       if (!unanswered()) return [];
+      stillWanted(offer);
       writeReply(id, { offer: offer.id, at: iso(), state: 'accepted' });
+      // This Mac owns the thread from here: the next generation, so a turn the other Mac still has is stale.
+      assignments.claim(id);
       // Between turns there is nothing to continue: the thread waits for Ben's next message here.
       return [
         ...(offer.idle ? [] : [saveOwn(id, `handoff:${offer.id}`, continuation(offer))]),
         ...offer.queued.map((text, n) =>
-          saveOwn(id, `handoff:${offer.id}:${n}`, { prompt: text, kind: 'user', payload: { text, source: 'ben' }, source: 'handoff', mode: 'queue' }),
+          saveOwn(id, offer.fresh ? START_REQUEST : `handoff:${offer.id}:${n}`, {
+            prompt: text,
+            kind: 'user',
+            payload: offer.fresh ? null : { text, source: 'ben' },
+            source: offer.fresh ? 'ben' : 'handoff',
+            mode: 'queue',
+            ...(offer.fresh && n === 0 && attachments.length && { attachments }),
+          }),
         ),
       ].filter((r) => !!r);
     });
-    for (const r of rows) wake(r);
+    if (setUp) void setUpThread(id);
+    else for (const r of rows) {
+      if (offer.fresh) await wakePrepared(r);
+      else wake(r);
+    }
     void worker.syncNow();
   } catch (err) {
     console.error(`[handoff] ${id}: could not pick it up:`, (err as Error).message);
@@ -313,8 +480,41 @@ async function take(offer: Offered, worker: SyncWorker) {
 }
 
 /**
- * After each sync, from the records as they are now: pick up what was handed to this Mac, and take back the messages of
- * a handoff from this Mac that the other one could not pick up.
+ * The holding Mac's answer to a Take over: as the holder only, and only onto an offer key no handoff is using, so it
+ * never gives away a thread it no longer has, nor writes over one on its way. Nothing awaits from the checks to the
+ * write, and the offer names the request, so a repeated sync never answers twice.
+ */
+function answer(asked: HandoffRequest, worker: SyncWorker) {
+  const t = threads.get(asked.thread)!;
+  if (offerOf(t.id)?.request === asked.id || holderOf(t.id) !== worker.machineId || moving(phaseOf(t.id)?.phase)) return;
+  // Past the hour the asking Mac ends it, unless it sleeps too: then a Mac waking the next morning must not act on it.
+  if (requestPhase(asked, Date.now()).phase === 'expired') return;
+  const from = { id: worker.machineId, name: deviceName(worker.machineId) ?? asked.from.name };
+  const why = refusal(t, from.name);
+  if (!why) return startGiving(t, from, asked.by, worker, asked.id);
+  writeOffer({ id: randomUUID(), thread: t.id, from, to: asked.by, at: iso(), request: asked.id, state: 'declined', error: why });
+  void worker.syncNow();
+}
+
+/**
+ * The asking Mac ends its own request, since only it writes it: once the handoff that answered it is over, when the
+ * thread went to some other Mac meanwhile (or here), or after REQUEST_TTL_MS by its own clock. It keeps its time.
+ */
+function settle(asked: HandoffRequest) {
+  const end = (state: 'cancelled' | 'expired') => writeRequest({ ...asked, state });
+  if (offerOf(asked.thread)?.request === asked.id) {
+    if (!moving(phaseOf(asked.thread)?.phase)) end('cancelled');
+    return;
+  }
+  const holder = holderOf(asked.thread);
+  if (holder && holder !== asked.from.id) end('cancelled');
+  else if (requestPhase(asked, Date.now()).phase === 'expired') end('expired');
+}
+
+/**
+ * After each sync, from the records as they are now: pick up what was handed to this Mac, take back the messages of a
+ * handoff from this Mac that the other one could not pick up, answer a Take over of a thread this Mac holds, and end
+ * this Mac's own requests once they are settled.
  */
 export function reconcileHandoffs(worker: SyncWorker) {
   for (const offer of offers()) {
@@ -329,6 +529,15 @@ export function reconcileHandoffs(worker: SyncWorker) {
       else if (offer.state === 'cancelled' && mine && answer?.state === 'accepted') withdraw(offer);
     } catch (err) {
       logFailure(offer.thread)(err);
+    }
+  }
+  for (const asked of requests()) {
+    try {
+      if (asked.state !== 'pending' || !threads.get(asked.thread)) continue;
+      if (asked.by.id === worker.machineId) settle(asked);
+      else if (asked.from.id === worker.machineId) answer(asked, worker);
+    } catch (err) {
+      logFailure(asked.thread)(err);
     }
   }
 }

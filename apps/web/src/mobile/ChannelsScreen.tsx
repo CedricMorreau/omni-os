@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { ChannelWithRunning, ConductorHandoffGroup, Thread, ThreadStub } from '../api.ts';
+import type { ChannelWithRunning, ConductorHandoffGroup, Thread } from '../api.ts';
 import { OmniMark } from '../components/brand.tsx';
 import { useLiveThreads } from '../components/ThreadList.tsx';
 import { Avatar, Chip, Icon, Segmented, StatusDot } from '../components/ui.tsx';
@@ -9,11 +9,15 @@ import { QuickLinks } from '../components/QuickLinks.tsx';
 import { StagePill } from '../components/StagePill.tsx';
 import { useChannelTickets } from '../components/TicketGroups.tsx';
 import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticket-route.ts';
-import { readPref, useApp, useNow, writePref } from '../store.tsx';
+import { useApp, useNow } from '../store.tsx';
 import { useFolders } from '../folders.tsx';
-import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoRow, MoScroll, MoSection, MoTitle } from './parts.tsx';
+import { delegatesByParent } from '@omni/shared/delegate-count.ts';
+import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoScroll, MoSection, MoTitle } from './parts.tsx';
+import { MoDelegatedRow } from './DelegatedRow.tsx';
+import { HeaderActions } from './HeaderActions.tsx';
 import { rowOf, shortTime, type RowItem } from './rows.ts';
 import { useShell } from './shell.tsx';
+import { isWorking } from '@omni/shared/delegate-count.ts';
 
 const GROUPS: { label: string; kinds: string[] }[] = [
   { label: 'Clients', kinds: ['client'] },
@@ -48,28 +52,24 @@ const MO_PILL = 'hov inline-flex h-8 max-w-full items-center gap-1.5 rounded-ful
 
 export function ChannelsScreen() {
   const shell = useShell();
-  const { channels, needsYou, profile, channel } = useApp();
+  const { channels, needsYou, channel } = useApp();
   const listed = channels.filter((c) => !c.archived && c.id !== 'conductor');
   const conductor = channel('conductor');
   const running = channels.reduce((n, c) => n + (c.running || 0), 0);
   const needsIn = (id: string) => inChannel(needsYou, id)?.items.length ?? 0;
-  const initial = (profile?.name || 'You').trim().slice(0, 1).toUpperCase();
 
   return (
     <>
       <MoHeader
         left={<span className="w-10" />}
-        right={
-          <>
-            <MoRound icon="search" label="Search channels" onClick={() => shell.sheet({ name: 'search' })} />
-            <MoRound label="Settings" onClick={() => shell.open(href.settingsPage())}>
-              <span className="font-rounded text-[14px] leading-none font-semibold">{initial}</span>
-            </MoRound>
-          </>
-        }
+        right={<HeaderActions searchLabel="Search channels" />}
       />
       <MoScroll tabBar>
-        <MoTitle title="Channels" sub={`${listed.length} channels · ${running} ${running === 1 ? 'thread' : 'threads'} running`} />
+        {/* The machine's name lives in Settings, Machines (#405), as on the desktop. */}
+        <MoTitle
+          title="Channels"
+          sub={`${listed.length} channels · ${running} ${running === 1 ? 'thread' : 'threads'} running`}
+        />
         <div className="px-4">
           <MoGroup>
             <MoListRow
@@ -109,7 +109,7 @@ export function ChannelsScreen() {
   );
 }
 
-const busy = (t: Thread) => t.status === 'running' || t.status === 'queued';
+const busy = isWorking;
 
 function MoFolderHeader({ folder, onToggle }: { folder: FolderRows; onToggle: () => void }) {
   return (
@@ -184,7 +184,7 @@ export function ChannelScreen({ id }: { id: string }) {
 
     if (id === 'conductor') {
       for (const group of ch?.handoffs ?? []) {
-        if (!group.children.some((child) => child.status === 'running' || child.status === 'queued')) continue;
+        if (!group.children.some(isWorking)) continue;
         const inActive = activeRows.some((row) => row.id === group.parent.id);
         if (inActive) continue;
         const parent = rowOf(group.parent, info, now);
@@ -329,69 +329,12 @@ function MobileThreadRows({ items, handoffs, onOpen }: {
   handoffs: ConductorHandoffGroup[];
   onOpen: (row: RowItem) => void;
 }) {
-  const groups = new Map(handoffs.map((group) => [group.parent.id, group]));
+  const delegates = delegatesByParent(handoffs);
   return (
     <div className="flex flex-col">
-      {items.map((item, i) => {
-        const group = groups.get(item.id);
-        return group?.children.length ? (
-          <MobileHandoffGroup key={item.id} item={item} group={group} onOpen={onOpen} last={i === items.length - 1} />
-        ) : <MoRow key={item.id} it={item} last={i === items.length - 1} onOpen={() => onOpen(item)} />;
-      })}
-    </div>
-  );
-}
-
-export function MobileHandoffGroup({ item, group, onOpen, last, idPrefix = 'mobile-channel' }: {
-  item: RowItem;
-  group: ConductorHandoffGroup;
-  onOpen: (row: RowItem) => void;
-  last: boolean;
-  idPrefix?: string;
-}) {
-  const { channels } = useApp();
-  const pref = `mobile.handoffs.${group.parent.id}`;
-  const [expanded, setExpanded] = useState(() => readPref(pref, true));
-  const panel = `${idPrefix}-handoffs-${group.parent.id}`;
-  return (
-    <div>
-      <div className="flex items-center gap-1">
-        <MoRow it={item} last={false} onOpen={() => onOpen(item)} />
-        <button
-          type="button"
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} delegated threads for ${group.parent.title || 'Untitled'}`}
-          aria-expanded={expanded}
-          aria-controls={panel}
-          onClick={() => setExpanded((open) => (writePref(pref, !open), !open))}
-          className="mo-press grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface text-fg-3"
-        >
-          <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={15} />
-        </button>
-      </div>
-      <div id={panel} role="group" aria-label={`Threads delegated from ${group.parent.title || 'Untitled'}`} hidden={!expanded} className={`ml-9 border-l border-line-strong pl-3 ${last ? 'pb-2' : ''}`}>
-          {group.children.map((child, i) => {
-            const channel = channels.find((c) => c.id === child.channel_id)?.name ?? child.channel_id;
-            return (
-              <button
-                type="button"
-                key={child.id}
-                aria-label={`${child.title || 'Untitled'}, #${channel}, ${child.status}`}
-                onClick={() => onOpen({
-                  id: child.id, title: child.title || 'Untitled', channel, channelId: child.channel_id,
-                  channelIcon: channels.find((c) => c.id === child.channel_id)?.icon ?? null, role: null,
-                  status: child.status, settled: child.status !== 'running' && child.status !== 'queued',
-                  time: '', meta: null,
-                })}
-                className="mo-press relative flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-[13px] text-fg-2"
-              >
-                <span aria-hidden className={`absolute -left-[13px] top-0 w-3 border-l border-line-strong ${i === group.children.length - 1 ? 'h-1/2 rounded-bl-[6px] border-b' : 'h-full'}`} />
-                <StatusDot status={child.status} size={7} />
-                <span className="min-w-0 flex-1 truncate">{child.title || 'Untitled'}</span>
-                <span className="max-w-[34%] truncate rounded-full bg-surface-2 px-2 py-1 text-[10px] text-fg-3">#{channel}</span>
-              </button>
-            );
-          })}
-      </div>
+      {items.map((item, i) => (
+        <MoDelegatedRow key={item.id} it={item} delegated={delegates.get(item.id)} last={i === items.length - 1} onOpen={() => onOpen(item)} />
+      ))}
     </div>
   );
 }

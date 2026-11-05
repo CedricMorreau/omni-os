@@ -1,9 +1,0 @@
-{
-  "extends": "@omni/typescript-config/base.json",
-  "include": [
-    "slash-engine",
-    "scripts",
-    "tests",
-    "vitest.config.ts"
-  ]
-}

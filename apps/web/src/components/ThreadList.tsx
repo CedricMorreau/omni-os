@@ -1,13 +1,15 @@
+import { relTime } from '@omni/shared/format.ts';
 import { Loader } from './brand.tsx';
 import { useCallback, useEffect, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { api, errorText, useApi, type BranchPRMark, type ChannelWithRunning, type FolderWithThreads, type Thread } from '../api.ts';
 import { folderOf, groupByFolder } from '../folder-groups.ts';
 import { drag, useFolders } from '../folders.tsx';
-import { groupByDay, plural, relTime } from '../format.ts';
+import { groupByDay, plural } from '../format.ts';
 import { href } from '../router.ts';
 import { useApp, useFeed, useNow } from '../store.tsx';
 import { Avatar, Button, Chip, DoneMark, Empty, ErrorNote, Icon, Loading, StatusDot, threadGlyph } from './ui.tsx';
 import { ThreadHandoffs } from './ThreadHandoffs.tsx';
+import { isWorking, showsRunning } from '@omni/shared/delegate-count.ts';
 
 /** Loads a thread list and keeps it current from /feed. With `archived`, the list holds archived threads only. */
 export function useLiveThreads(path: string, accept: (t: Thread) => boolean, limit = 500, archived = false) {
@@ -63,19 +65,19 @@ export function ThreadRow({ t, showChannel, pr }: { t: Thread; showChannel?: boo
   const source = SOURCE_LABEL[t.source];
   // A mod's pinned status, compact beside the running indicator. The newest one when several mods set one.
   const mod = mods.findLast((m) => m.thread_id === t.id);
-  const preview = t.last_text ? t.last_text.replace(/\s+/g, ' ').slice(0, 240) : t.status === 'running' ? 'Working' : t.status === 'queued' ? 'Waiting for a slot' : '';
+  const preview = t.last_text ? t.last_text.replace(/\s+/g, ' ').slice(0, 240) : showsRunning(t) ? 'Working' : t.status === 'queued' ? 'Waiting for a slot' : '';
   return (
-    <a href={href.thread(t.id)} className="hov group flex items-start gap-3 rounded-[18px] px-3 py-3 [--hov:var(--surface)] md:px-3.5">
+    <a href={href.thread(t.id)} className="hov group flex items-start gap-3 rounded-[18px] px-3 py-2.5 [--hov:var(--surface)] md:px-3.5">
       {showChannel ? (
         <span className="relative mt-0.5 shrink-0">
-          <Avatar name={t.channel_id} channelIcon={channels.find((c) => c.id === t.channel_id)?.icon} size={32} />
+          <Avatar name={t.channel_id} omni={t.channel_id === 'conductor'} channelIcon={channels.find((c) => c.id === t.channel_id)?.icon} size={32} />
           <span className="absolute -right-0.5 -bottom-0.5 grid h-3.5 w-3.5 place-items-center rounded-full bg-bg">
             {t.done_at ? <DoneMark size={8} /> : <StatusDot status={threadGlyph(t)} size={8} />}
           </span>
         </span>
       ) : (
         <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-surface transition-colors group-hover:bg-bg">
-          {t.done_at ? <DoneMark /> : <StatusDot status={threadGlyph(t)} />}
+          {t.done_at ? <DoneMark /> : <StatusDot status={threadGlyph(t)} size={10} />}
         </span>
       )}
       <div className="min-w-0 flex-1">
@@ -85,12 +87,12 @@ export function ThreadRow({ t, showChannel, pr }: { t: Thread; showChannel?: boo
           {t.role && <Chip>{t.role}</Chip>}
           {source && <Chip tone="outline">{source}</Chip>}
           {pr && <PRMark pr={pr} />}
-          <span className="ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-4 tabular-nums">{relTime(t.updated_at)}</span>
+          <span className="ml-auto shrink-0 pl-2 font-num text-[12px] text-fg-3 tabular-nums">{relTime(t.updated_at)}</span>
         </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-fg-3">
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-fg-3">
           {showChannel && <span className="shrink-0 text-fg-2">#{t.channel_id}</span>}
           {t.branch && <span className="hidden shrink-0 rounded-full bg-surface-2 px-1.5 font-mono text-[10.5px] leading-[18px] text-fg-3 sm:inline">{t.branch}</span>}
-          {!t.last_text && t.status === 'running' && <Loader size={11} className="shrink-0" />}
+          {!t.last_text && showsRunning(t) && <Loader size={11} className="shrink-0" />}
           {mod && (
             <span className="max-w-[45%] shrink-0 truncate rounded-full bg-surface-2 px-1.5 text-[11px] leading-[18px] text-fg-3" title={`${mod.plugin}: ${mod.text}`}>
               {mod.text}
@@ -136,7 +138,7 @@ export function ThreadGroups({
         <section key={g.label}>
           <h3 className="caption sticky top-0 z-[2] flex items-center gap-2 bg-bg px-3.5 py-2">
             {g.label}
-            <span className="text-fg-4/70">{g.items.length}</span>
+            <span className="text-fg-3">{g.items.length}</span>
           </h3>
           <Rows threads={g.items} showChannel={showChannel} prs={prs} handoffs={handoffs} />
         </section>
@@ -192,7 +194,7 @@ function FolderGroups({ threads, channel, prs, handoffs = [] }: { threads: Threa
     <div className="space-y-4">
       {groups.map((g) => (
         <section key={g.folder.id}>
-          <FolderHeader channel={channel} folder={g.folder} count={g.threads.length} running={g.threads.some((t) => t.status === 'running' || t.status === 'queued')} />
+          <FolderHeader channel={channel} folder={g.folder} count={g.threads.length} running={g.threads.some(isWorking)} />
           {!g.folder.collapsed &&
             (g.threads.length ? (
               <Rows threads={g.threads} prs={prs} draggable handoffs={handoffs} />
@@ -247,14 +249,14 @@ function FolderHeader({ channel, folder, count, running }: { channel: ChannelWit
           <Icon name={folder.collapsed ? 'chevronRight' : 'chevronDown'} size={12} className="-ml-0.5 shrink-0 text-fg-4" />
           <Icon name="folder" size={13} className="shrink-0 text-fg-3" />
           <span className="min-w-0 truncate">{folder.name}</span>
-          <span className="text-fg-4/70">{count}</span>
+          <span className="text-fg-3">{count}</span>
           {running && <Loader size={11} className="shrink-0 text-live-text" />}
         </button>
       ) : (
         <div aria-label={label} className={cls}>
           <span className="w-3 shrink-0" />
           No folder
-          <span className="text-fg-4/70">{count}</span>
+          <span className="text-fg-3">{count}</span>
         </div>
       )}
     </h3>
@@ -283,7 +285,7 @@ export function ArchivedThreads({ channelId }: { channelId: string }) {
           <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} className="-ml-0.5 shrink-0 text-fg-4" />
           <Icon name="archive" size={13} className="shrink-0 text-fg-3" />
           Archived
-          <span className="text-fg-4/70">{count}</span>
+          <span className="text-fg-3">{count}</span>
         </button>
       </h3>
       {open && (

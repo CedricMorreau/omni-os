@@ -1,6 +1,6 @@
 // Continuing an idle thread on another local harness: a new, linked thread with its own Session and worktree, whose
-// first Session reads a Carryover ahead of Ben's first message. Server and web share these shapes; the Mac app mirrors
-// them (OmniKit Continue.swift) and the fixtures in apps/server/tests/mac-fixtures.test.ts hold both to the same JSON.
+// first Session reads a Carryover ahead of Ben's first message. Server and web share these shapes, and the fixtures in
+// apps/server/tests/wire-fixtures.test.ts record their JSON.
 // "Carryover" is the word #187 uses for the same packet when an imported transcript is continued.
 import type { RunName } from './run-switch.ts';
 
@@ -118,8 +118,12 @@ export interface Carryover {
 export interface ContinuePreview {
   carryover: Carryover;
   revision: string;
-  /** `worktree`: a new worktree and branch from a snapshot of the source. `folder`: the channel's folder, as any new thread. */
-  workspace: 'worktree' | 'folder';
+  /**
+   * `worktree`: a new worktree and branch from a snapshot of the source. `branch`: the source's worktree is not on this
+   * machine, so a new worktree and branch from the last commit of its branch. `fresh`: neither its worktree nor its
+   * branch is here or on origin, so the channel's folder, as any new thread. `folder`: the channel's folder, as any new thread.
+   */
+  workspace: 'worktree' | 'branch' | 'fresh' | 'folder';
   blocked: ContinueBlock | null;
 }
 
@@ -168,8 +172,8 @@ export function continueRefusal(harness: string): string | null {
 
 /** Why a thread on this harness cannot be continued, or null when it can. */
 export function continueSourceRefusal(harness: string): string | null {
-  if (harness === 'hermes') return 'This thread runs on the Hermes server, so its files are not on this Mac to continue from.';
-  if (harness === 'cursor-cloud') return "This thread runs on Cursor's machines, so its files are not on this Mac to continue from.";
+  if (harness === 'hermes') return 'This thread runs on the Hermes server, so its files are not on this machine to continue from.';
+  if (harness === 'cursor-cloud') return "This thread runs on Cursor's machines, so its files are not on this machine to continue from.";
   return null;
 }
 

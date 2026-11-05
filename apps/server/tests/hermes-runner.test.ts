@@ -61,7 +61,7 @@ describe('Hermes through the runner', () => {
     expect(h?.available).toBe(true);
     expect(h?.models.map((m) => m.id)).toEqual(['hermes']);
     expect(h?.models[0].efforts).toEqual([]);
-    expect(H.runner.slotsByHarness().hermes.cap).toBe(4);
+    expect(H.runner.slotsByHarness().hermes.cap).toBe(12);
   });
 
   it('accepts a conductor delegate, skips the worktree, and continues the remote session', async () => {
@@ -116,6 +116,17 @@ describe('Hermes through the runner', () => {
     } finally {
       fake.failPosts = 0;
     }
+  });
+
+  it('refuses the delegate-only conductor on Hermes before it makes a thread, and still runs a crew role there', async () => {
+    const before = H.db.threads.list({}).length;
+    await expect(H.runner.createThread({ channel: 'scratch', prompt: 'fix the cart', role: 'conductor', harness: 'hermes', model: 'hermes' })).rejects.toThrow(
+      /Conductor only routes work, with Omni's delegate tools, and a thread that runs on the Hermes server does not get them/,
+    );
+    expect(H.db.threads.list({}).length).toBe(before);
+    const t = await H.runner.createThread({ channel: 'repo', prompt: 'look into it', role: 'researcher', harness: 'hermes', model: 'hermes' });
+    await H.untilResults(t.id, 1);
+    expect(H.thread(t.id).status).toBe('done');
   });
 
   it('rejects an effort Hermes does not have', async () => {

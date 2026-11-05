@@ -17,6 +17,12 @@ prompt: |
 
 `timezone` defaults to your timezone from the config (`OMNI_TZ` wins, else the system's). Both folders are watched; edits apply without a restart. The Mac has to be awake at the scheduled time, unless the automation sets `catchup: true`: then a missed slot runs once Omni is back.
 
+## Choose a machine
+
+In Automations, use "Run automations on" to choose this machine or another synced machine. The choice applies to all scheduled and event-triggered automations and reaches the other machines through sync. The selected machine needs the automation definitions, channel folders and credentials it uses, and must be awake with Omni running. Offline machines can be selected for future runs. This does not move a running thread. "Run now" runs on the connected machine.
+
+The Conductor can make the same choice with `set_automations_machine`, using an id or name from `list_devices`, or `here`.
+
 ## Tool-failure triage
 
 `tool-failure-triage` reviews the tool-failure log (`GET /api/tool-failures`) at 08:30 on weekdays in the `omni-os` channel as a builder:
@@ -102,8 +108,8 @@ prompt: |
   A workflow run finished. If it failed, find the cause on its branch, fix it, verify, push.
 ```
 
-- Each webhook automation has its own endpoint, `POST /api/hooks/github/<id>`, shown on its card in both clients. Set it as the hook's Payload URL on GitHub with content type `application/json`, and choose the events the automation takes.
-- The signing secret lives in this Mac's Keychain as `OMNI_WEBHOOK_<ID>`. Set it with Set secret on the automation's card (Web UI or Mac app), and paste the same value into the hook's Secret on GitHub. The clients only show whether it is set. It never reaches a thread. Each Mac that receives the hook needs its own copy.
+- Each webhook automation has its own endpoint, `POST /api/hooks/github/<id>`, shown on its card. Set it as the hook's Payload URL on GitHub with content type `application/json`, and choose the events the automation takes.
+- The signing secret lives in the server's secret store as `OMNI_WEBHOOK_<ID>`. Set it with Set secret on the automation's card, and paste the same value into the hook's Secret on GitHub. The clients only show whether it is set. It never reaches a thread. Each Mac that receives the hook needs its own copy.
 - That route takes no API token: a request proves itself with its `X-Hub-Signature-256`. A body over 1 MB, a content type other than `application/json`, an event the automation does not take, a missing `X-GitHub-Delivery`, a bad signature or another repo is refused before anything is saved. Without a secret on this Mac the route answers 503. GitHub's `ping` gets a 200 and saves nothing.
 - Only finished workflow runs (`completed`) and submitted reviews count; other actions get a 202 and save nothing. Runs for fork PRs and reviews from outside the repo's owners, members and collaborators are saved as Skipped unless `trust: any`. Reviews by the `gh` account Omni uses are always skipped, so a run that reviews cannot start the next.
 - A valid event is saved as a delivery, keyed by the automation and its `X-GitHub-Delivery` id, before Omni replies (202). GitHub redelivering it, to either Mac, gets the same delivery back (200, `duplicate: true`) and starts nothing more. On a paused automation the Mac that runs automations answers 409 and saves nothing.

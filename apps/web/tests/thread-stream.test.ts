@@ -1,17 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { WIRE_FIXTURES } from '@omni/test-fixtures';
 import { describe, expect, it } from 'vitest';
 import { tailId } from '@omni/shared/history.ts';
 import { classifyStream } from '../src/api.ts';
 
-// The thread stream as the server records it for the Mac app (apps/server/tests/mac-fixtures.test.ts), read the way
+// The thread stream as the server records it (apps/server/tests/wire-fixtures.test.ts), read the way
 // useThreadStream reads it. Each connect ends its catch-up with one sync (#224).
-
-const FIXTURES = join(resolve(import.meta.dirname, '../..'), 'mac', 'OmniKit', 'Tests', 'OmniKitTests', 'Fixtures');
 
 /** The data frames of an SSE file, with their ids. */
 function frames(name: string): { id?: string; data: unknown }[] {
-  return readFileSync(join(FIXTURES, name), 'utf8')
+  return readFileSync(join(WIRE_FIXTURES, name), 'utf8')
     .split('\n\n')
     .map((block) => {
       const lines = block.split('\n');
@@ -56,5 +55,12 @@ describe('thread stream sync', () => {
     expect(classifyStream({ kind: 'sync', catch_up: 'snapshot', thread })).toMatchObject({ type: 'sync', snapshot: false, detail: { events: [] } });
     expect(classifyStream({ kind: 'sync', catch_up: 'replay', thread })).toMatchObject({ type: 'sync', snapshot: false });
     expect(classifyStream({ kind: 'sync', catch_up: 'replay' })).toBeNull();
+  });
+
+  it("reads a delegated thread's new file apart from the thread's own", () => {
+    const artifact = { id: 7, thread_id: 'child', name: 'shot.png', kind: 'screenshot', thread_title: 'Child', channel_id: 'acme' };
+    expect(classifyStream({ kind: 'crew_artifact', artifact })).toEqual({ type: 'crew_artifact', artifact });
+    expect(classifyStream({ kind: 'artifact', artifact })).toEqual({ type: 'artifact', artifact });
+    expect(classifyStream({ kind: 'crew_artifact' })).toBeNull();
   });
 });

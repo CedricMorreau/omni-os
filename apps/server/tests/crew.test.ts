@@ -31,6 +31,7 @@ describe('parseCrewFile', () => {
       skills: [],
       stages: [],
       source: 'shipped',
+      delegateOnly: false,
       charter: 'You write and ship code.\n\n- Keep changes scoped.',
     });
   });
@@ -47,6 +48,7 @@ describe('parseCrewFile', () => {
       skills: [],
       stages: [],
       source: 'shipped',
+      delegateOnly: false,
       charter: 'Just do quick asks.',
     });
   });
@@ -59,6 +61,11 @@ describe('parseCrewFile', () => {
   it('reads the skills and stages of a role', () => {
     const role = parseCrewFile('reviewer', '---\nskills: [ponytail:ponytail-review, code-review]\nstages: [5, "9"]\n---\nReview.', 'yours');
     expect(role).toMatchObject({ skills: ['ponytail:ponytail-review', 'code-review'], stages: [5, 9], source: 'yours' });
+  });
+
+  it('reads delegate_only only when it is exactly true', () => {
+    expect(parseCrewFile('e', '---\ndelegate_only: true\n---\nbody').delegateOnly).toBe(true);
+    expect(parseCrewFile('f', '---\ndelegate_only: "yes"\n---\nbody').delegateOnly).toBe(false);
   });
 
   it('accepts frontmatter with no body', () => {
@@ -77,6 +84,9 @@ describe('parseCrewFile', () => {
     expect(crew.length).toBeGreaterThan(0);
     expect(crew[0].id).toBe('conductor');
     expect(crew.find((r) => r.id === 'conductor')!.mcp).toContain('omni');
+    // The Conductor routes work and never does it; the crew it routes to do the work.
+    expect(crew.find((r) => r.id === 'conductor')!.delegateOnly).toBe(true);
+    expect(crew.filter((r) => r.delegateOnly).map((r) => r.id)).toEqual(['conductor']);
     for (const r of crew) expect(r.charter.length).toBeGreaterThan(0);
   });
 });

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": [
+    "flock",
+    "scutil",
+    "ioreg",
+    "pgrep"
+  ],
+  "ignore": [
+    ".claude/**",
+    ".codex/**",
+    "docs/**",
+    "prototypes/**",
+    "design-system/**",
+    "mods/**",
+    "**/fixtures/**"
+  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/*.{mjs,ts}"
+      ]
+    },
+    "apps/server": {
+      "entry": [
+        "scripts/*.ts",
+        "scripts/route-eval/*.ts",
+        "tests/**/*.test.ts"
+      ],
+      "ignoreDependencies": [
+        "@playwright/mcp"
+      ]
+    },
+    "apps/relay": {
+      "entry": [
+        "tests/**/*.test.ts"
+      ],
+      "ignoreDependencies": [
+        "cloudflare"
+      ]
+    },
+    "apps/mcp": {
+      "entry": [
+        "omni.ts",
+        "ask.ts",
+        "threads.ts",
+        "render.ts",
+        "ticket.ts",
+        "external/stdio.ts"
+      ]
+    },
+    "apps/ios": {
+      "ignoreDependencies": [
+        "@effect/atom-react",
+        "effect",
+        "expo-status-bar",
+        "babel-plugin-react-compiler",
+        "expo-updates",
+        "expo-system-ui"
+      ]
+    },
+    "apps/web": {
+      "entry": [
+        "tests/**/*.test.ts"
+      ]
+    },
+    "apps/desktop": {
+      "entry": [
+        "src/main.ts",
+        "src/preload.ts",
+        "src/pick-preload.ts",
+        "scripts/*.{ts,mjs}",
+        "electron-builder.config.cjs",
+        "tests/**/*.test.ts"
+      ]
+    },
+    "packages/shared": {
+      "entry": [
+        "*.ts",
+        "scripts/*.ts",
+        "tests/**/*.test.ts"
+      ]
+    },
+    "packages/test-fixtures": {
+      "entry": [
+        "*.{mjs,mts,ts}"
+      ]
+    }
+  },
+  "exclude": [
+    "exports",
+    "types",
+    "duplicates"
+  ]
+}

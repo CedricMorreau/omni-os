@@ -2,17 +2,19 @@
 
 ## Using Omni
 
-- [Install and first run](user/install.md), including the step-by-step agent instructions
+- [Install and first run](user/install.md): the desktop app, running from a checkout, and the step-by-step agent instructions
 - [Configuration](user/configuration.md): your config, `.env`, placeholders and secrets
 - [Threads](user/threads.md): Needs you and Mark done, the composer, context chips, history, channel actions, Watch PR and Send to Grok Bot
 - [Harnesses](user/harnesses.md): Claude Code, Codex, Cursor Agent, Hermes and Cursor Cloud
 - [Crew and Conductor](user/crew.md)
 - [Automations](user/automations.md): cron, GitHub PR events, published pages and signed GitHub webhooks
 - [Sync between two Macs](user/sync.md)
-- [Remote access and security](user/remote-access.md), including the phone layout and home-screen setup
+- [Remote access and security](user/remote-access.md), including the phone layout, home-screen setup and pairing the native iOS app
+- [Omni Connect](user/omni-connect.md): open any machine from a phone through your relay, without Tailscale
 - [Link previews](user/link-previews.md)
 - [Mods](user/mods.md)
 - [Other ways in](user/entry-points.md): shell, Quick Prompt, history import, brain export
+- [Omni as an MCP server](user/external-mcp.md): use Omni from Claude Code, Codex, Cursor, Hermes, Claude Desktop, claude.ai, ChatGPT or Grok
 - [Known limits](user/limits.md), including Storage and worktree retention
 - [Forking Omni](../FORKING.md)
 
@@ -20,19 +22,25 @@
 
 Start with [CONTRIBUTING.md](../CONTRIBUTING.md). Agents also read [CLAUDE.md](../CLAUDE.md).
 
-- [Architecture overview](internals/overview.md): how a thread runs, the Web UI and Mac app split, repo layout
+- [Architecture overview](internals/overview.md): how a thread runs, how the clients are kept apart, repo layout
+- [Execution and ownership state](internals/execution-state.md): a thread's process, its messages and its owner machine as state diagrams, who owns each, and how the runner reaches the rest of Omni. Read before touching `apps/server/runner/`
 - [Auto routing](internals/auto-routing.md): how Auto picks a model, and the benchmarks that check it
 - [Thread history](internals/thread-history.md): how a long thread opens on its newest page, the budgets, and what clients hold
 - [Message context](internals/message-context.md): diff lines, terminal excerpts, browser annotations, thread references and how to add a kind
+- [Delivery contract](internals/delivery.md): what an accepted message, wake or Stop is promised on any machine, and the known gaps with their expected-fail tests
+- [Transitions](internals/transitions.md): the one service behind a run switch, a handoff or Take over and a Continue, its four routes, the six older routes that answer through it, and what stays as synced kv for machines on an older build
 - [Glossary](../CONTEXT.md)
-- [Mac app notes](../apps/mac/NOTES.md)
+- [Native app pairing contract](internals/app-pairing.md): session pairing, capabilities, and push token registration
+- [iOS app](../apps/ios/README.md) · [iOS release](../apps/ios/RELEASE.md)
+- [Desktop app](../apps/desktop/README.md): develop against a QA stack, the QA harness (`scripts/qa.ts`), packaging, where data and logs live, and the bridge contract · [Desktop release](../apps/desktop/RELEASE.md): signing, notarization and the release workflow
 - [Prototypes](../prototypes/README.md): standalone experiments outside the apps and packages
 - [Screenshots on PRs](pr-screenshots.md)
-- Decisions: [0001 Codex app-server](adr/0001-codex-app-server.md) · [0002 Mac app is a client](adr/0002-mac-app-is-a-client.md) · [0003 Hermes remote harness](adr/0003-hermes-remote-harness.md) · [0004 Supabase sync](adr/0004-supabase-sync.md)
+- Reviews: [2026-10-31 consolidation release, the KPIs re-measured](reviews/2026-10-31-consolidation-review.md) · [2026-10-22 bloat and dead code](reviews/2026-10-22-thermo-bloat-review.html) · [2026-10-16 thermo](reviews/2026-10-16-thermo-review.html)
+- Decisions: [0001 Codex app-server](adr/0001-codex-app-server.md) · [0002 Mac app is a client](adr/0002-mac-app-is-a-client.md) (superseded by 0010; the app is deleted) · [0003 Hermes remote harness](adr/0003-hermes-remote-harness.md) · [0004 Supabase sync](adr/0004-supabase-sync.md) · [0005 One execution owner](adr/0005-one-execution-owner.md) · [0006 Linux app is a window](adr/0006-linux-app-is-a-window.md) (superseded by 0010; the app is deleted) · [0007 Google sign-in through Clerk](adr/0007-google-sign-in-through-clerk.md) · [0008 Cloudflare relay](adr/0008-cloudflare-relay.md) · [0009 Omni Connect](adr/0009-omni-connect.md) · [0010 Desktop app is Electron](adr/0010-desktop-app-is-electron.md)
 
 ## Where a new doc goes
 
 - `docs/user/`: how to use a feature. What it does, how to start, anything unintuitive, and where its setting lives. Not a tour of every button.
-- `docs/internals/`: decisions, constraints that span the server and both clients, and traps you cannot see from the code. If reading the code answers it, leave it out.
+- `docs/internals/`: decisions, constraints that span the server and the clients, and traps you cannot see from the code. If reading the code answers it, leave it out.
 - `docs/adr/`: one decision with its context and the options turned down.
 - When behaviour changes, rewrite the affected text instead of appending a second account.

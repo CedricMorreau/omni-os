@@ -1,8 +1,8 @@
 // createThread, sendMessage, and postMessage. Slash commands are resolved here, then delivered.
 import { randomUUID } from 'node:crypto';
 import type { MessageContext } from '@omni/shared/message-context.ts';
-import { channels, folders, messageRequests, outbox, threadBasePicks, requestFingerprint, threads, type DeliveryState, type MessageRequest, type Thread, type ThreadSource } from '../db.ts';
-import { getCrew } from '../crew.ts';
+import { channels, folders, messageRequests, outbox, threadBasePicks, requestFingerprint, threads, tx, type DeliveryState, type MessageRequest, type Thread, type ThreadSource } from '../db.ts';
+import { getCrew, remoteDelegateOnlyRefusal } from '../crew.ts';
 import { commandsFolder, needsWorktree, prepareWorkdir } from '../sandbox.ts';
 import { checkBase } from '../worktree-base.ts';
 import type { BasePick } from '@omni/shared/worktree-base.ts';
@@ -10,8 +10,8 @@ import { prepareTurn, turnBlocked } from '../sync/guard.ts';
 import { parseSlash, resolveSlash, slashRecord, type SlashCommand, type SlashRecord } from '@omni/shared/slash.ts';
 import { listCommands, peekCommands } from '../commands.ts';
 import { withMentions } from '../mentions.ts';
-import { saveUploads, type Attachment } from '../uploads.ts';
-import { isRemoteHarness, type HarnessId } from '../harness/types.ts';
+import { fileKind, safeName, saveUploads, type Attachment } from '../uploads.ts';
+import { isProviderHarness, providerWhere, type HarnessId } from '../harness/types.ts';
 import type { Catalog, Resolved } from '../harness/catalog.ts';
 import { profileTask, routeTask } from '../harness/auto.ts';
 import { usageByHarness } from '../usage.ts';
@@ -23,6 +23,9 @@ import { fallbackTitle, generateTitle } from './aux.ts';
 import { addEvent, emitThread, isShuttingDown, refusal, requestMsg, runsHere, threadCommands, type Msg, type SendMode } from './state.ts';
 import { bindResume, retrySetup, saveStart, setUpThread, START_REQUEST } from './setup.ts';
 import { dismissQuestions } from './questions.ts';
+import { runnerPorts } from './ports.ts';
+import { assignRouted, remoteHolder } from '../ownership.ts';
+import { sendUploads } from '../sync/files.ts';
 
 // ---------- slash commands ----------
 
@@ -94,17 +97,22 @@ export interface CreateThreadInput {
   base?: BasePick | null;
   /** Files Ben attached to the first message. Validate them with `checkUploads` before calling. */
   files?: File[];
+  /**
+   * The machine to run it on (run-on.ts): a synced machine's id, or "here". Left out, Settings' default. A thread for
+   * another machine is made here and sent there with its first prompt; nothing runs here.
+   */
+  device?: string | null;
 }
 
 /**
  * Resolve the run, make the workdir and write the row. Nothing is delivered yet. A thread that needs a worktree is
  * written as preparing, with the worktree's planned folder and branch: setUpThread makes them before anything runs.
  */
-async function openThread(input: CreateThreadInput, status: Thread['status'] = 'queued') {
+async function openThread(input: CreateThreadInput, status: Thread['status'] = 'queued', elsewhere = false) {
   const role = getCrew(input.role);
   const channelId = input.channel || role?.channel || 'inbox';
   const channel = channels.get(channelId);
-  if (!channel) throw new Error(`unknown channel "${channelId}"`);
+  if (!channel) throw refusal(`unknown channel "${channelId}"`, 404);
 
   // Resolve harness/model/effort: the thread's own choice, then the role's default, then the channel's, then Auto.
   // On a miss, probe the harnesses that are down and try again: Ben may have just logged in.
@@ -128,11 +136,12 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
   const images = (input.files ?? []).some((f) => f.type.startsWith('image/'));
   const auto = 'auto' in run ? routeTask(profileTask(input.prompt), { catalog: getCatalog(), usage: usageByHarness(), images }) : null;
   const { harness, model, effort } = auto ?? (run as Resolved);
+  if (role?.delegateOnly && isProviderHarness(harness)) throw new Error(remoteDelegateOnlyRefusal(role.name, providerWhere(harness)));
 
   const filedIn = input.folder?.trim() ? (folders.find(channel.id, input.folder) ?? folders.create({ channel_id: channel.id, name: input.folder })) : null;
 
   const id = input.id ?? randomUUID();
-  const remote = isRemoteHarness(harness);
+  const remote = isProviderHarness(harness);
   // Refused before anything is made, so a ref that names nothing leaves the draft where it was typed.
   const pick = input.base ?? (channel.default_base ? { kind: 'ref' as const, ref: channel.default_base } : null);
   const base = await checkBase(channel, pick, { remote });
@@ -155,13 +164,36 @@ async function openThread(input: CreateThreadInput, status: Thread['status'] = '
     source: input.source ?? 'manual',
     automation: input.automation ?? null,
     folder_id: filedIn?.id ?? null,
-    setup: needsWorktree(channel, { remote }) ? 'preparing' : null,
+    // A thread for another machine has its worktree made there (handoff.ts take).
+    setup: !elsewhere && needsWorktree(channel, { remote }) ? 'preparing' : null,
   });
   if (base) threadBasePicks.set(id, base);
   return { thread, channel, harness, folder: commandsFolder(channel) ?? wd.cwd };
 }
 
 export async function createThread(input: CreateThreadInput): Promise<Thread> {
+  // Team members stay with their lead, which runs once with all their replies. A delegated thread may go: its report
+  // comes back to the parent (run-on.ts).
+  const route = input.source === 'team' ? null : await runnerPorts().routing.targetFor(input.device);
+  if (route) {
+    // In Storage before the thread is made, so a failed upload leaves nothing behind and the other machine finds them.
+    const bodies = await Promise.all((input.files ?? []).map(async (f) => new Uint8Array(await f.arrayBuffer())));
+    const sent = await sendUploads((input.files ?? []).map((f, i) => ({ name: safeName(f.name), ...fileKind(safeName(f.name), f.type), body: bodies[i] }))).catch((err) => {
+      throw refusal(`Could not send the files to ${route.to.name}: ${(err as Error).message}`, (err as { status?: number }).status ?? 503);
+    });
+    // Stopped, not queued: no turn runs here, and the other machine must not wait for one to end.
+    const { thread } = await openThread(input, 'stopped', true);
+    // Kept here too, so the hub's transcript can show them. A name taken already is not, in a new thread.
+    const saved = await saveUploads(thread.id, input.files ?? []);
+    const files = sent.map((f, i) => ({ ...f, name: saved[i]?.name ?? f.name }));
+    tx(() => {
+      assignRouted(thread.id, route.to.id);
+      runnerPorts().handoff.sendNewThread(thread.id, input.prompt, route.from, route.to, files);
+    });
+    if (!input.title) void generateTitle(thread.id, input.prompt);
+    emitThread(thread.id);
+    return threads.get(thread.id)!;
+  }
   const { thread, harness, folder } = await openThread(input);
   const saved = await saveUploads(thread.id, input.files ?? []);
   const attachments = saved.length ? saved : undefined;
@@ -376,6 +408,11 @@ async function deliverRequest(r: MessageRequest, undo: () => void) {
   }
 }
 
+/** Prepare a durable incoming message through the same ordered path as a local API reply. */
+export function wakePrepared(r: MessageRequest): Promise<void> {
+  return inOrder(r.thread_id, () => deliverRequest(r, () => messageRequests.park(r.id)));
+}
+
 /**
  * `sendMessage` for the API. The message is saved first (db/repos/requests.ts), so once this returns it survives a
  * restart. A message that names a command then waits, within a bound, for the thread's command list. Messages to
@@ -397,13 +434,21 @@ export async function postMessage(
     const again = acceptedAgain(threadId, opts.requestId, fingerprint);
     if (again) return again;
   }
+  // Ben wrote instead of answering the agent's questions: a call waiting on them returns, so this message is read now.
+  // On a thread that runs elsewhere the dismissal syncs to the machine whose call waits.
+  const dismiss = source === 'ben' && mode !== 'queue';
+  // A thread routed to another machine runs there: the message goes to it (run-on.ts).
+  if (remoteHolder(thread)) {
+    const forwarded = (await runnerPorts().routing.forwardMessage(thread, prompt, { mode, from: source, requestId: opts.requestId, attachments: opts.attachments, context: opts.context })) as PostedThread;
+    if (dismiss) dismissQuestions(threadId);
+    return forwarded;
+  }
   // Refused before anything is saved: the other Mac runs it.
   const blocked = turnBlocked(thread, runsHere(threadId));
   if (blocked) throw refusal(blocked, 409);
   // Ben (or the conductor) wrote in it again, so it is not done: what comes of it shows in Needs you.
   threads.setDone(threadId, false);
-  // Ben wrote instead of answering the agent's questions: a call waiting on them returns, so this message is read now.
-  if (source === 'ben' && mode !== 'queue') dismissQuestions(threadId);
+  if (dismiss) dismissQuestions(threadId);
   const { row, fresh } = messageRequests.accept({
     thread_id: threadId,
     request_id: opts.requestId ?? randomUUID(),
@@ -435,7 +480,7 @@ export async function resumeRequests(threadId: string, ids?: string[]): Promise<
   const chosen = ids ? parked.filter((r) => ids.includes(r.id)) : parked.filter((r) => r.state === 'recovered');
   if (ids && chosen.length !== new Set(ids).size) throw refusal('Some of these messages are no longer waiting to be resumed.', 409);
   const self = outbox.machineId();
-  if (chosen.some((r) => r.machine_id && r.machine_id !== self)) throw refusal('This message was queued on your other Mac. Resume it there.', 409);
+  if (chosen.some((r) => r.machine_id && r.machine_id !== self)) throw refusal('This message was queued on your other machine. Resume it there.', 409);
   const blocked = turnBlocked(thread, runsHere(threadId));
   if (blocked) throw refusal(blocked, 409);
   for (const r of chosen) messageRequests.mark(r.id, 'accepted');

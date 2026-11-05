@@ -1,10 +1,14 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, errorText, useApi, type SyncSetupResult, type SyncStatus } from '../api.ts';
-import { Button, CopyButton, ErrorNote, Icon, InlineConfirm, Label, Loading, PageHeader, Segmented, StatusDot } from '../components/ui.tsx';
-import { plural, relTime } from '../format.ts';
+import { useEffect, useState, type ReactNode } from 'react';
+import { machineLabel } from '@omni/shared/handoff.ts';
+import { relTime } from '@omni/shared/format.ts';
+import { api, errorText, useApi, type SyncSignedIn, type SyncStatus } from '../api.ts';
+import { DeviceCodeSignIn, type FlowStart } from '../components/GoogleSignIn.tsx';
+import { Button, CopyButton, ErrorNote, Icon, InlineConfirm, Label, Loading, StatusDot } from '../components/ui.tsx';
+import { plural } from '../format.ts';
+import { useHereName, useSecretStoreLabel } from '../store.tsx';
 
-// Settings, Sync: sign in to the Supabase relay, see what is waiting, sync now, pause, sign out, and the path map.
-// The Mac app's Sync tab (apps/mac/Omni/SyncSettingsView.swift) shows the same.
+// Settings, Sync: sign in to the Cloudflare relay with Google (through Clerk), see what is waiting, sync now, pause and sign out. The
+// path map sits under Machines' Advanced.
 
 type Status = SyncStatus;
 
@@ -17,9 +21,10 @@ function stateOf(s: Status): { label: string; dot: string } {
   return { label: s.pending ? 'Waiting to push' : 'Up to date', dot: 'done' };
 }
 
-export function SyncPage() {
+export function SyncSection() {
   const res = useApi<Status>('/sync/status');
   const { reload } = res;
+  const store = useSecretStoreLabel();
 
   // The worker runs on its own; poll so the numbers move while the page is open.
   useEffect(() => {
@@ -29,33 +34,29 @@ export function SyncPage() {
 
   const s = res.data;
   return (
-    <div className="scroll-thin h-full overflow-y-auto">
-      <PageHeader width="max-w-2xl" title="Sync" subtitle="History across your Macs, relayed through your own Supabase project." />
-      <div className="mx-auto max-w-2xl space-y-5 px-4 pt-5 pb-16 md:px-8">
-        <div className="flex gap-3 rounded-[20px] bg-surface p-4 text-[12.5px] leading-relaxed text-fg-2">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-bg text-fg-3">
-            <Icon name="refresh" size={15} />
-          </span>
-          <div>
-            Channels, threads, transcripts, artifacts, automation runs and settings go through an append-only change log. Each Mac keeps its own database; Supabase
-            only relays. Secrets, browser profiles, worktrees and logs never leave this Mac. The URL, anon key and sign-in token live in the Keychain; the password is
-            used once and dropped.
-          </div>
+    <>
+      <div className="flex gap-3 rounded-[20px] bg-surface p-4 text-[12.5px] leading-relaxed text-fg-2">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-bg text-fg-3">
+          <Icon name="refresh" size={15} />
+        </span>
+        <div>
+          Channels, threads, transcripts, artifacts, automation runs and settings go through an append-only change log. Each machine keeps its own database; your own
+          Cloudflare relay (a Worker) only carries the changes. Secrets, browser profiles, worktrees and logs never leave this machine. You sign in with the Google
+          account linked above, and the relay URL and this machine&rsquo;s relay token live in {store}.
         </div>
-
-        {res.error ? (
-          <ErrorNote onRetry={reload}>{res.error}</ErrorNote>
-        ) : !s ? (
-          <Loading />
-        ) : (
-          <>
-            {s.configured && <StatusCard s={s} onChange={reload} />}
-            {(!s.configured || s.signedOut) && <SignInForm again={s.configured} onDone={reload} />}
-            <PathMapEditor />
-          </>
-        )}
       </div>
-    </div>
+
+      {res.error ? (
+        <ErrorNote onRetry={reload}>{res.error}</ErrorNote>
+      ) : !s ? (
+        <Loading />
+      ) : (
+        <>
+          {s.configured && <StatusCard s={s} onChange={reload} />}
+          {(!s.configured || s.signedOut) && <SignInForm again={s.configured} legacy={s.legacyRelay} onDone={reload} />}
+        </>
+      )}
+    </>
   );
 }
 
@@ -72,6 +73,8 @@ function StatusCard({ s, onChange }: { s: Status; onChange: () => void }) {
   const [busy, setBusy] = useState<'now' | 'pause' | 'owner' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const state = stateOf(s);
+  const store = useSecretStoreLabel();
+  const hereName = useHereName();
 
   const run = async (what: 'now' | 'pause' | 'owner', fn: () => Promise<unknown>) => {
     setBusy(what);
@@ -125,7 +128,7 @@ function StatusCard({ s, onChange }: { s: Status; onChange: () => void }) {
             <span className="font-num">{plural(s.deferred, 'remote change')}</span> <span className="text-fg-3">retried after each pull</span>
           </Row>
         )}
-        <Row label="This Mac">
+        <Row label="Sync id">
           {s.machineId ? (
             <span className="flex items-center gap-2">
               <span className="min-w-0 truncate font-mono text-[12px]">{s.machineId}</span>
@@ -138,7 +141,7 @@ function StatusCard({ s, onChange }: { s: Status; onChange: () => void }) {
         <Row label="Automations">
           {/* One Mac runs the scheduled ones (server/sync/owner.ts), so a nightly job does not run twice. Manual runs go anywhere. */}
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>Scheduled ones run on {s.automations.isThisMac ? 'this Mac' : 'your other Mac'}</span>
+            <span>Scheduled ones run on {s.automations.isThisMac ? machineLabel(hereName) : 'your other machine'}</span>
             {!s.automations.isThisMac && (
               <Button variant="secondary" size="sm" icon="play" busy={busy === 'owner'} onClick={() => run('owner', () => api.post('/sync/automations-owner'))}>
                 Run them here
@@ -160,7 +163,7 @@ function StatusCard({ s, onChange }: { s: Status; onChange: () => void }) {
       {error && <ErrorNote>{error}</ErrorNote>}
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-        <span className="text-[12px] text-fg-3">Signing out removes the credentials from the Keychain. History stays on this Mac.</span>
+        <span className="text-[12px] text-fg-3">Signing out removes the credentials from {store}. History stays on this machine.</span>
         <InlineConfirm label="Sign out" icon="lock" confirmLabel="Sign out" doneLabel="Signed out" busyLabel="Signing out" onConfirm={async () => {
           await api.post('/sync/disable', { forget: true });
           onChange();
@@ -170,125 +173,53 @@ function StatusCard({ s, onChange }: { s: Status; onChange: () => void }) {
   );
 }
 
-type Method = 'password' | 'code';
-
-function SignInForm({ again, onDone }: { again: boolean; onDone: () => void }) {
+function SignInForm({ again, legacy, onDone }: { again: boolean; legacy: boolean; onDone: () => void }) {
   const [url, setUrl] = useState('');
-  const [anonKey, setAnonKey] = useState('');
-  const [email, setEmail] = useState('');
-  const [method, setMethod] = useState<Method>('password');
-  const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
-  const [sentTo, setSentTo] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const needCode = method === 'code' && !sentTo;
-  const ready = !!url && !!anonKey && !!email && (method === 'password' ? !!password : needCode || !!code);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!ready) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const secret = method === 'password' ? { password } : needCode ? {} : { code };
-      const r = await api.post<SyncSetupResult>('/sync/setup', { url, anonKey, email, ...secret });
-      if (r.state === 'code_sent') {
-        setSentTo(r.email);
-        return;
-      }
-      setPassword('');
-      setCode('');
-      onDone();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
-    <form onSubmit={submit} className="space-y-4 rounded-[24px] p-5 shadow-[inset_0_0_0_1px_var(--line)]" autoComplete="off">
+    <section className="space-y-4 rounded-[24px] p-5 shadow-[inset_0_0_0_1px_var(--line)]">
       <div>
         <h2 className="font-display text-[16px]">{again ? 'Sign in again' : 'Sign in to your relay'}</h2>
         <p className="mt-1 text-[12.5px] text-fg-3">
           {again
-            ? 'The relay no longer takes this Mac’s sign-in. Nothing is lost: changes wait here until you sign in.'
-            : 'The Supabase project and user from the one-time setup in the README. Use the same project and user on every Mac.'}
+            ? 'The relay no longer takes this machine’s sign-in. Nothing is lost: changes wait here until you sign in.'
+            : 'The address of the Worker you deployed from apps/relay. Use the same relay and Google account on every machine.'}
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="sync-url">Project URL</Label>
-          <input id="sync-url" className="field font-mono !text-[13px]" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://abcd.supabase.co" spellCheck={false} />
+      {legacy && !again && (
+        <div className="flex gap-2 rounded-2xl bg-surface p-3 text-[12.5px] leading-relaxed text-fg-2">
+          <Icon name="info" size={15} className="mt-0.5 shrink-0 text-fg-3" />
+          <span>Sync moved from Supabase to a Cloudflare relay. Sign in once on each machine. Its history is queued again, so nothing is lost.</span>
         </div>
-        <div>
-          <Label htmlFor="sync-key">Anon key</Label>
-          <input
-            id="sync-key"
-            type="password"
-            className="field font-mono !text-[13px]"
-            value={anonKey}
-            onChange={(e) => setAnonKey(e.target.value)}
-            placeholder="eyJ… or sb_publishable_…"
-            spellCheck={false}
-            autoComplete="off"
-            data-1p-ignore
-            data-lpignore="true"
-          />
-        </div>
+      )}
+      <div>
+        <Label htmlFor="sync-url">Relay URL</Label>
+        <input
+          id="sync-url"
+          className="field font-mono !text-[13px]"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://omni-relay.<you>.workers.dev"
+          spellCheck={false}
+          autoComplete="off"
+        />
       </div>
-      <div className="grid gap-3 sm:grid-cols-[1.2fr_1fr]">
-        <div>
-          <Label htmlFor="sync-email">Email</Label>
-          <input id="sync-email" type="email" className="field" value={email} onChange={(e) => (setEmail(e.target.value), setSentTo(null))} placeholder="you@example.com" />
-        </div>
-        <div>
-          <Label>Sign in with</Label>
-          <Segmented<Method>
-            radio
-            size="sm"
-            label="Sign in with"
-            value={method}
-            onChange={(m) => (setMethod(m), setError(null))}
-            options={[
-              { id: 'password', label: 'Password' },
-              { id: 'code', label: 'Email code' },
-            ]}
-          />
-        </div>
-      </div>
-      {method === 'password' ? (
-        <div>
-          <Label htmlFor="sync-password" hint="Used once to get a sign-in token. Omni never stores it.">Password</Label>
-          <input id="sync-password" type="password" autoComplete="current-password" className="field" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </div>
-      ) : sentTo ? (
-        <div>
-          <Label htmlFor="sync-code" hint={`Sent to ${sentTo}. The code is in the sign-in email.`}>Code</Label>
-          <input id="sync-code" inputMode="numeric" autoComplete="one-time-code" className="field font-num" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" />
-        </div>
-      ) : null}
-      {error && <ErrorNote>{error}</ErrorNote>}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" variant="primary" icon={needCode ? 'message' : 'lock'} busy={busy} disabled={!ready}>
-          {needCode ? 'Email me a code' : 'Sign in and sync'}
-        </Button>
-        {sentTo && method === 'code' && (
-          <Button variant="ghost" size="sm" onClick={() => (setSentTo(null), setCode(''))}>
-            Send another code
-          </Button>
-        )}
-      </div>
-    </form>
+      <DeviceCodeSignIn<SyncSignedIn>
+        label="Sign in with Google"
+        icon="lock"
+        disabled={!url.trim()}
+        start={() => api.post<FlowStart>('/sync/setup', { url: url.trim() })}
+        pollPath="/sync/setup/poll"
+        onDone={onDone}
+      />
+    </section>
   );
 }
 
 type MapRow = { from: string; to: string };
 
-/** kv sync.path_map: where another Mac's folders live on this one. */
-function PathMapEditor() {
+/** kv sync.path_map: where another Mac's folders live on this one. Under Machines' Advanced since #405. */
+export function PathMapEditor() {
   const res = useApi<{ map: Record<string, string> }>('/sync/path-map');
   const [rows, setRows] = useState<MapRow[] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -324,7 +255,7 @@ function PathMapEditor() {
       <div>
         <h2 className="font-display text-[16px]">Path map</h2>
         <p className="mt-1 text-[12.5px] leading-relaxed text-fg-3">
-          Paths travel with your home folder as <span className="font-mono">~</span>, so the same layout needs nothing here. When the other Mac keeps a folder
+          Paths travel with your home folder as <span className="font-mono">~</span>, so the same layout needs nothing here. When the other machine keeps a folder
           elsewhere, map it: <span className="font-mono">~/work</span> to <span className="font-mono">~/code</span>. A thread whose folder is missing here opens
           read-only.
         </p>
@@ -339,9 +270,9 @@ function PathMapEditor() {
             <ul className="space-y-2">
               {rows.map((r, i) => (
                 <li key={i} className="flex items-center gap-2">
-                  <input aria-label="Path on the other Mac" className="field min-w-0 flex-1 font-mono !text-[12.5px]" value={r.from} onChange={(e) => edit(i, { from: e.target.value })} placeholder="~/work" spellCheck={false} />
+                  <input aria-label="Path on the other machine" className="field min-w-0 flex-1 font-mono !text-[12.5px]" value={r.from} onChange={(e) => edit(i, { from: e.target.value })} placeholder="~/work" spellCheck={false} />
                   <Icon name="arrowRight" size={14} className="shrink-0 text-fg-4" />
-                  <input aria-label="Path on this Mac" className="field min-w-0 flex-1 font-mono !text-[12.5px]" value={r.to} onChange={(e) => edit(i, { to: e.target.value })} placeholder="~/code" spellCheck={false} />
+                  <input aria-label="Path on this machine" className="field min-w-0 flex-1 font-mono !text-[12.5px]" value={r.to} onChange={(e) => edit(i, { to: e.target.value })} placeholder="~/code" spellCheck={false} />
                   <Button variant="ghost" size="sm" icon="trash" aria-label="Remove" onClick={() => (setSaved(false), setRows(rows.filter((_, j) => j !== i)))} />
                 </li>
               ))}

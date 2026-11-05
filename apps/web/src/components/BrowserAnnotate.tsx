@@ -5,39 +5,43 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NOTE_MAX, newContext } from '@omni/shared/message-context.ts';
 import { RECT_MIN, annotate, browserAnnotation, dragToRect, elementRect, type AnnotationImage, type BrowserCapture, type Drag, type ElementPick, type PickedElement, type PixelRect } from '@omni/shared/message-context-browser.ts';
-import {
-  DEFAULT_MARK_COLOR,
-  DEFAULT_MARK_STROKE,
-  MARKS_MAX,
-  MARK_TEXT_MAX,
-  dragToMark,
-  markAt,
-  marksRect,
-  moveMark,
-  strokeToMark,
-  textSize,
-  textToMark,
-  toPage,
-  type Mark,
-  type MarkShape,
-  type MarkStyle,
-} from '@omni/shared/message-context-marks.ts';
+import { MARK_TEXT_MAX, marksRect, textSize } from '@omni/shared/message-context-marks.ts';
 import { ApiError, api, errorText, uploadUrl } from '../api.ts';
 import { addDraftContext } from '../message-context/draft.ts';
 import { PickedElementDetails } from '../message-context/picked-element.tsx';
 import { ShellCtx } from '../mobile/shell.tsx';
-import { MarkToolbar, isShape, type Tool } from './BrowserMarkToolbar.tsx';
-import { drawMarks, renderMarked } from './browser-marks-canvas.ts';
+import { MarkToolbar } from './BrowserMarkToolbar.tsx';
+import { useMarkEditor } from './useMarkEditor.ts';
+import { renderMarked } from './browser-marks-canvas.ts';
 import { Button, ErrorNote, Icon, IconButton } from './ui.tsx';
 
 /** A page the server can capture: the browser is up and shows a web page. */
 export const canAnnotate = (s: { running: boolean; url: string } | null | undefined) => !!s?.running && /^https?:\/\//i.test(s.url);
 
-export function AnnotateButton({ state, onClick }: { state: { running: boolean; url: string } | null | undefined; onClick: () => void }) {
-  return <IconButton icon="annotate" label="Annotate this page" size={15} disabled={!canAnnotate(state)} onClick={onClick} />;
+/** Turns live Annotate on and off (BrowserAnnotationOverlay.tsx). */
+export function AnnotateButton({ state, active, onClick }: { state: { running: boolean; url: string } | null | undefined; active?: boolean; onClick: () => void }) {
+  return (
+    <IconButton
+      icon="annotate"
+      label={active ? 'Stop annotating' : 'Annotate this page'}
+      aria-pressed={!!active}
+      size={15}
+      active={active}
+      disabled={!canAnnotate(state)}
+      onClick={onClick}
+      className={active ? 'bg-surface-3' : ''}
+    />
+  );
 }
 
 type Phase = { at: 'capturing' } | { at: 'draw'; capture: BrowserCapture } | { at: 'failed'; message: string; retryable: boolean };
+
+/** A pick made on the live page (BrowserAnnotationOverlay.tsx), to draw on: its screenshot, which this layer then owns, and what was picked. */
+export interface AnnotateFrom {
+  capture: BrowserCapture;
+  rect: PixelRect;
+  element: PickedElement | null;
+}
 
 /** What the capture route said when it could not: its words, and whether asking again can work. */
 function failure(e: unknown): Phase {
@@ -64,17 +68,21 @@ function useFit(viewport: { width: number; height: number } | null) {
 
 /**
  * Over the browser's page area. It captures when it opens, then shows the screenshot to draw on. Leaving it any way but
- * Add to message deletes the screenshot it made. `onAdded` runs once the record is on the draft.
+ * Add to message deletes the screenshot it made. `onAdded` runs once the record is on the draft. `from` starts it on a
+ * live pick's screenshot instead, with the pick marked.
  */
-export function AnnotateLayer({ channelId, threadId, onClose, onAdded }: { channelId: string; threadId: string; onClose: () => void; onAdded: () => void }) {
-  const [phase, setPhase] = useState<Phase>({ at: 'capturing' });
+export function AnnotateLayer({ channelId, threadId, onClose, onAdded, from }: { channelId: string; threadId: string; onClose: () => void; onAdded: () => void; from?: AnnotateFrom }) {
+  const [phase, setPhase] = useState<Phase>(() => (from ? { at: 'draw', capture: from.capture } : { at: 'capturing' }));
   const [attempt, setAttempt] = useState(0);
   const capture = phase.at === 'draw' ? phase.capture : null;
   const base = `/channels/${encodeURIComponent(channelId)}/browser/capture`;
   const added = useRef(false);
 
   // One capture per attempt. One that lands after the layer closed is discarded, not shown.
+  // A live pick's screenshot is the first attempt's.
+  const given = !!from;
   useEffect(() => {
+    if (given && attempt === 0) return;
     let live = true;
     setPhase({ at: 'capturing' });
     api
@@ -87,7 +95,7 @@ export function AnnotateLayer({ channelId, threadId, onClose, onAdded }: { chann
     return () => {
       live = false;
     };
-  }, [base, threadId, attempt]);
+  }, [base, threadId, attempt, given]);
 
   // Whatever ends the layer, a screenshot nothing was made of goes with it.
   const latest = useRef<BrowserCapture | null>(null);
@@ -143,56 +151,39 @@ export function AnnotateLayer({ channelId, threadId, onClose, onAdded }: { chann
           </span>
         </div>
       ) : (
-        <Draw capture={phase.capture} channelId={channelId} threadId={threadId} onClose={onClose} onAdded={() => ((added.current = true), onAdded())} />
+        <Draw capture={phase.capture} channelId={channelId} threadId={threadId} onAdded={() => ((added.current = true), onAdded())} from={from?.capture === phase.capture ? from : undefined} />
       )}
     </div>
   );
 }
 
-const DRAG_START = 3;
 const NO_ELEMENT = 'Element details are unavailable for this page. Drag over the area instead: the screenshot goes with your message.';
-/** How far from a mark's line, in CSS pixels, a tap still grabs it. */
-const GRAB = 6;
 
-type Gesture =
-  | { kind: 'area'; drag: Drag; moved: boolean }
-  | { kind: 'pen'; path: [number, number][] }
-  | { kind: 'shape'; drag: Drag }
-  | { kind: 'move'; index: number; from: [number, number]; was: Mark };
-
-function Draw({ capture, channelId, threadId, onClose, onAdded }: { capture: BrowserCapture; channelId: string; threadId: string; onClose: () => void; onAdded: () => void }) {
+function Draw({ capture, channelId, threadId, onAdded, from }: { capture: BrowserCapture; channelId: string; threadId: string; onAdded: () => void; from?: AnnotateFrom }) {
   const { viewport } = capture;
   const { box, scale, shown } = useFit(viewport);
-  const stage = useRef<HTMLDivElement>(null);
-  const overlay = useRef<HTMLCanvasElement>(null);
-  const [rect, setRect] = useState<PixelRect | null>(null);
+  const [rect, setRect] = useState<PixelRect | null>(from?.rect ?? null);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   // The element a tap picked, why a tap gave none, and a counter so a slow answer to an earlier tap is dropped.
-  const [element, setElement] = useState<PickedElement | null>(null);
+  const [element, setElement] = useState<PickedElement | null>(from?.element ?? null);
   const [notice, setNotice] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [adding, setAdding] = useState(false);
   const pickId = useRef(0);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
-  // The marks, the tool and its style, the mark selected, the gesture in progress and the text being typed.
-  const [tool, setTool] = useState<Tool>('select');
-  const [shape, setShape] = useState<MarkShape>('rect');
-  const [color, setColor] = useState<string>(DEFAULT_MARK_COLOR);
-  const [stroke, setStroke] = useState<number>(DEFAULT_MARK_STROKE);
-  const [marks, setMarks] = useState<Mark[]>([]);
-  const [selected, setSelected] = useState(-1);
-  const [gesture, setGesture] = useState<Gesture | null>(null);
-  const [typing, setTyping] = useState<{ x: number; y: number; text: string } | null>(null);
-  const style = { color: color as MarkStyle['color'], stroke };
-
-  const at = (e: { clientX: number; clientY: number }): [number, number] => {
-    const r = stage.current!.getBoundingClientRect();
-    return [Math.min(r.width, Math.max(0, e.clientX - r.left)), Math.min(r.height, Math.max(0, e.clientY - r.top))];
-  };
-  const page = (p: readonly [number, number]) => toPage(p[0], p[1], shown, viewport);
-  const asDrag = ([x0, y0]: readonly [number, number], [x1, y1]: readonly [number, number]): Drag => ({ x0, y0, x1, y1 });
+  const editor = useMarkEditor({
+    viewport,
+    shown,
+    scale,
+    adding,
+    setError,
+    focusNote: () => noteRef.current?.focus(),
+    onArea: (d) => finishArea(d),
+    onTap: (p) => pick(p),
+  });
+  const { stage, overlay, tool, shape, setShape, color, stroke, marks, selected, gesture, setGesture, typing, setTyping, pickTool, recolor, restroke, undo, remove, commitText, down, move, up } = editor;
 
   const clearPick = () => {
     pickId.current++;
@@ -242,94 +233,6 @@ function Draw({ capture, channelId, threadId, onClose, onAdded }: { capture: Bro
       });
   };
 
-  const push = (m: Mark) => {
-    if (marks.length >= MARKS_MAX) return setError(`A message holds at most ${MARKS_MAX} marks.`);
-    setMarks([...marks, m]);
-    setSelected(-1);
-    setError(null);
-    requestAnimationFrame(() => noteRef.current?.focus());
-  };
-  const commitText = () => {
-    const t = typing;
-    setTyping(null);
-    if (!t || !t.text.trim()) return;
-    const m = textToMark(t.text, t, shown, viewport, style);
-    if (m.ok) push(m.value);
-    else setError(m.error);
-  };
-  const pickTool = (t: Tool) => {
-    commitText();
-    setTool(t);
-    if (t !== 'select') setSelected(-1);
-  };
-  const remove = (i: number) => {
-    setMarks(marks.filter((_, j) => j !== i));
-    setSelected(-1);
-  };
-  const undo = () => remove(marks.length - 1);
-  const recolor = (hex: string) => {
-    setColor(hex);
-    if (selected >= 0) setMarks(marks.map((m, i) => (i === selected ? { ...m, color: hex as Mark['color'] } : m)));
-  };
-  const restroke = (n: number) => {
-    setStroke(n);
-    if (selected >= 0) setMarks(marks.map((m, i) => (i === selected ? { ...m, stroke: n } : m)));
-  };
-
-  const down = (e: React.PointerEvent) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    if (adding) return;
-    const p = at(e);
-    setError(null);
-    if (tool === 'text') {
-      commitText();
-      setTyping({ x: p[0], y: p[1], text: '' });
-      return;
-    }
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (tool === 'pen') return setGesture({ kind: 'pen', path: [p] });
-    if (isShape(tool)) return setGesture({ kind: 'shape', drag: asDrag(p, p) });
-    const [px, py] = page(p);
-    const hit = markAt(marks, px, py, GRAB);
-    if (hit >= 0) {
-      setSelected(hit);
-      setColor(marks[hit].color);
-      setStroke(marks[hit].stroke);
-      return setGesture({ kind: 'move', index: hit, from: [px, py], was: marks[hit] });
-    }
-    setSelected(-1);
-    setGesture({ kind: 'area', drag: asDrag(p, p), moved: false });
-  };
-  const move = (e: React.PointerEvent) => {
-    if (!gesture) return;
-    const p = at(e);
-    if (gesture.kind === 'pen') return setGesture({ ...gesture, path: [...gesture.path, p] });
-    if (gesture.kind === 'shape') return setGesture({ ...gesture, drag: { ...gesture.drag, x1: p[0], y1: p[1] } });
-    if (gesture.kind === 'move') {
-      const [px, py] = page(p);
-      setMarks(marks.map((m, i) => (i === gesture.index ? moveMark(gesture.was, px - gesture.from[0], py - gesture.from[1], viewport) : m)));
-      return;
-    }
-    const d = { ...gesture.drag, x1: p[0], y1: p[1] };
-    setGesture({ kind: 'area', drag: d, moved: gesture.moved || Math.abs(p[0] - d.x0) + Math.abs(p[1] - d.y0) > DRAG_START });
-  };
-  const up = (e: React.PointerEvent) => {
-    const g = gesture;
-    setGesture(null);
-    if (!g) return;
-    if (g.kind === 'pen') {
-      const m = strokeToMark(g.path, shown, viewport, style);
-      if (m.ok) push(m.value);
-      else setError(m.error);
-    } else if (g.kind === 'shape') {
-      const m = dragToMark(tool as MarkShape, g.drag, shown, viewport, style);
-      if (m.ok) push(m.value);
-      else setError(m.error);
-    } else if (g.kind === 'area') {
-      if (g.moved) finishArea(g.drag);
-      else pick(at(e));
-    }
-  };
 
   const add = async () => {
     if (adding) return;
@@ -356,37 +259,6 @@ function Draw({ capture, channelId, threadId, onClose, onAdded }: { capture: Bro
       setAdding(false);
     }
   };
-
-  // Redraw the marks over the screenshot whenever they, the one selected or the stroke being drawn change.
-  useLayoutEffect(() => {
-    const c = overlay.current;
-    if (!c || !scale) return;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = Math.round(shown.width * dpr);
-    c.height = Math.round(shown.height * dpr);
-    const ctx = c.getContext('2d')!;
-    drawMarks(ctx, marks, scale * dpr, selected);
-    if (gesture?.kind === 'pen' && gesture.path.length > 1) {
-      const m = strokeToMark(gesture.path, shown, viewport, style);
-      if (m.ok) drawMarks(ctx, [m.value], scale * dpr);
-    } else if (gesture?.kind === 'shape') {
-      const m = dragToMark(tool as MarkShape, gesture.drag, shown, viewport, style);
-      if (m.ok) drawMarks(ctx, [m.value], scale * dpr);
-    }
-  }, [marks, selected, gesture, scale, shown, viewport, tool, color, stroke]);
-
-  // Delete removes the selected mark, unless Ben is typing somewhere.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.key !== 'Delete' && e.key !== 'Backspace') || selected < 0) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
-      e.preventDefault();
-      remove(selected);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
 
   // The area outline: the drag in progress, else the rectangle in page pixels.
   const outline =

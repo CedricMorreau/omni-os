@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
-import { relTime } from '../format.ts';
+import { relTime } from '@omni/shared/format.ts';
 import { href } from '../router.ts';
 import { useNow } from '../store.tsx';
 import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticket-route.ts';

@@ -2,12 +2,13 @@
 // the only navigation state, so a reload, a notification or a link lands on the same stack.
 import { parseHash, type Route, type ThreadView } from '../router.ts';
 
-export type Tab = 'activity' | 'channels' | 'library';
+export type Tab = 'activity' | 'channels' | 'library' | 'prs';
 
 export type ScreenKey =
   | 'activity'
   | 'channels'
   | 'library'
+  | 'prs'
   | 'channel'
   | 'channel-pr'
   | 'thread'
@@ -15,12 +16,12 @@ export type ScreenKey =
   | 'viewer'
   | 'settings'
   | 'search'
-  /** A desktop page the phone has no screen of its own for (automations, secrets, sync, channel setup), under a back bar. */
+  /** A desktop page the phone has no screen of its own for (a Settings section, automations, channel setup), under a back bar. */
   | 'page'
   | 'notfound';
 
 interface ScreenSpec {
-  /** Set on the three tab roots: the tab bar floats over them and they have no back button. */
+  /** Set on the tab roots: the tab bar floats over them and they have no back button. */
   root?: Tab;
   /** The tab the screen belongs to. Unset, it stays on the tab it was opened from. */
   tab?: Tab;
@@ -38,6 +39,7 @@ export const SCREENS: Record<ScreenKey, ScreenSpec> = {
   activity: { root: 'activity', tab: 'activity', parent: () => null },
   channels: { root: 'channels', tab: 'channels', parent: () => null },
   library: { root: 'library', tab: 'library', parent: () => null },
+  prs: { root: 'prs', tab: 'prs', parent: () => null },
   channel: { tab: 'channels', parent: () => '/channels' },
   'channel-pr': { tab: 'channels', parent: (r) => (r.name === 'channel' ? `/c/${encodeURIComponent(r.id)}` : '/channels') },
   thread: { parent: () => '/', thread: true },
@@ -65,22 +67,22 @@ export function screenOf(r: Route): ScreenKey {
       return 'channels';
     case 'artifacts':
       return 'library';
+    case 'prs':
+      return 'prs';
     case 'channel':
       if (r.tab === 'threads') return 'channel';
       return r.tab === 'prs' && r.pr ? 'channel-pr' : 'page';
     case 'thread':
       return r.artifact ? 'viewer' : (r.view ?? 'thread');
     case 'settings':
-      return r.page ? 'page' : 'settings';
+      return r.section ? 'page' : 'settings';
     case 'search':
       return 'search';
     case 'automations':
-    case 'secrets':
     case 'roles':
-    case 'sync':
-    case 'storage':
     case 'new-channel':
       return 'page';
+    case 'quick-prompt':
     case 'notfound':
       return 'notfound';
   }
@@ -88,8 +90,6 @@ export function screenOf(r: Route): ScreenKey {
 
 export const specOf = (r: Route) => SCREENS[screenOf(r)];
 
-/** A route's path, its key as a layer. */
-export const pathOf = (hash: string) => hash.replace(/^#/, '').split('?')[0] || '/';
 
 /**
  * The pushed screens a route shows, bottom first, ending with the route itself; empty for a tab root. Each one under

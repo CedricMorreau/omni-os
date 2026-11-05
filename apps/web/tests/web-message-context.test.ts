@@ -1,32 +1,32 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fixture } from '@omni/test-fixtures';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fixture, WIRE_FIXTURES } from '@omni/test-fixtures';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { diffSelection, type DiffSelection } from '@omni/shared/message-context-diff.ts';
 import { CONTEXT_KINDS, readContexts } from '@omni/shared/message-context-kinds.ts';
 import { CONTEXT_MAX, newContext, type MessageContext } from '@omni/shared/message-context.ts';
+import { requestIdFor } from '@omni/shared/request-id.ts';
 import type { ThreadDetail } from '../src/api.ts';
 import { DiffFile } from '../src/components/DiffViewer.tsx';
-import { pressLine, type LinePick } from '../src/components/thread/panel/LineSelection.tsx';
-import { parseDiff, type DiffLine } from '../src/diff.ts';
-import { parsePayload } from '../src/format.ts';
+import { pressLine, type LinePick } from '@omni/shared/diff-pick.ts';
+import { parseDiff, type DiffLine } from '@omni/shared/diff.ts';
+import { parsePayload } from '@omni/shared/transcript-fold.ts';
 import { cantShowText, ContextChips, ContextInspector, NEWER_LABEL } from '../src/message-context/ContextChips.tsx';
 import { rangeText, sourceText } from '../src/message-context/diff-selection.tsx';
 import { CONTEXT_VIEWS } from '../src/message-context/kinds.ts';
 import { addDraftContext, draftContext, removeDraftContext, settleDraftContext } from '../src/message-context/draft.ts';
-import { requestIdFor, sendKey } from '../src/requests.ts';
-import type { UserP } from '../src/transcript/fold.ts';
+import { sendKey } from '../src/requests.ts';
+import type { UserP } from '@omni/shared/transcript-fold.ts';
 
-// The Web UI's half of message context (apps/web/src/message-context/), on the corpus the shared and Swift tests read
-// (packages/test-fixtures/message-context.json) and the thread the Mac app's fixtures record.
+// The Web UI's half of message context (apps/web/src/message-context/), on the corpus the shared tests read
+// (packages/test-fixtures/message-context.json) and the thread apps/server/tests/wire-fixtures.test.ts records.
 
 const corpus = JSON.parse(readFileSync(fixture('message-context.json'), 'utf8')) as {
   records: { name: string; raw: unknown; expect: { as: 'known' | 'fallback'; why?: string; id: string; label: string; note: string } }[];
 };
-const MAC_FIXTURES = join(resolve(import.meta.dirname, '../..'), 'mac', 'OmniKit', 'Tests', 'OmniKitTests', 'Fixtures');
-const THREAD_CONTEXT = join(MAC_FIXTURES, 'thread-context.json');
+const THREAD_CONTEXT = join(WIRE_FIXTURES, 'thread-context.json');
 
 /** What a screen shows: the markup's text with React's escapes undone. */
 const textOf = (html: string) =>
@@ -153,7 +153,7 @@ describe('context chips', () => {
 });
 
 describe('the recorded thread', () => {
-  it.skipIf(!existsSync(THREAD_CONTEXT))('shows the context on its user message as the Mac app does', () => {
+  it('shows the context on its user message', () => {
     const d = JSON.parse(readFileSync(THREAD_CONTEXT, 'utf8')) as ThreadDetail;
     const user = d.events.map((e) => (e.kind === 'user' ? parsePayload<UserP>(e) : null)).find((p) => p?.context);
     const [r] = readContexts(user?.context);

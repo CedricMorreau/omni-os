@@ -1,14 +1,15 @@
 // /api/sync: the sync status, a manual sync, and sign-in from Settings. Its own app so tests can call it without starting the server.
 import { Hono, type Context } from 'hono';
-import { kv } from './db.ts';
-import { claimAutomations } from './sync/owner.ts';
+import { kv, outbox } from './db.ts';
+import { claimAutomations, OWNER_KEY } from './sync/owner.ts';
+import { deviceRecord } from './sync/devices.ts';
 import { pathMap } from './sync/paths.ts';
-import { checkPathMap, checkSetup, defaultSetupDeps, disableSync, enableSync, SetupError, setupSync, type SetupDeps } from './sync/setup.ts';
+import { checkPathMap, checkRelayUrl, defaultSetupDeps, disableSync, enableSync, pollRelaySignIn, SetupError, startRelaySignIn, type SetupDeps } from './sync/setup.ts';
 import { syncNow, syncStatus } from './sync/worker.ts';
 
 const body = async (c: Context): Promise<unknown> => c.req.json().catch(() => ({}));
 
-/** The routes, with the Keychain, Supabase Auth and the worker start swappable for tests. */
+/** The routes, with the secret store, the relay, Clerk and the worker start swappable for tests. */
 export function createSyncApi(deps: SetupDeps = defaultSetupDeps) {
   const app = new Hono();
 
@@ -30,15 +31,25 @@ export function createSyncApi(deps: SetupDeps = defaultSetupDeps) {
   });
 
   /**
-   * Sign in and turn sync on: {url, anonKey, email} plus a password, or a code from the email that a first call
-   * with neither sends. The password and code are never stored or logged. 401 for a refused sign-in.
+   * Start signing in to the relay at {url} with Google: checks the relay trusts this install's Clerk app, then
+   * answers the code to show and the page to approve it on, like /api/auth/google/start.
    */
-  app.post('/setup', async (c) => {
-    const result = await setupSync(checkSetup(await body(c)), deps);
-    return c.json(result.state === 'signed_in' ? { ...result, status: syncStatus() } : result);
+  app.post('/setup', async (c) => c.json(await startRelaySignIn(checkRelayUrl(await body(c)), deps)));
+
+  /**
+   * One poll of that sign-in, {flow, secret}. Once Clerk approves, this machine gets its relay token and sync turns
+   * on: {state: 'signed_in', email, relayChanged, status}. Else pending, refused (with why), denied or expired.
+   */
+  app.post('/setup/poll', async (c) => {
+    const b = (await body(c)) as { flow?: unknown; secret?: unknown };
+    if (typeof b?.flow !== 'string' || typeof b.secret !== 'string') return c.json({ error: 'Send {flow, secret}' }, 400);
+    const r = await pollRelaySignIn(b.flow, b.secret, deps);
+    if (r.state === 'relay_signed_in') return c.json({ state: 'signed_in', email: r.email, relayChanged: r.relayChanged, status: syncStatus() });
+    if (r.state === 'signed_in' || r.state === 'linked') return c.json({ error: 'Not a relay sign-in' }, 400);
+    return c.json(r);
   });
 
-  /** Pause syncing. {forget: true} also removes the credentials from the Keychain. */
+  /** Pause syncing. {forget: true} also removes the credentials from the secret store. */
   app.post('/disable', async (c) => {
     const b = (await body(c)) as { forget?: unknown };
     await disableSync({ forget: b?.forget === true }, deps);
@@ -51,9 +62,21 @@ export function createSyncApi(deps: SetupDeps = defaultSetupDeps) {
     return c.json({ ok: true, status: syncStatus() });
   });
 
-  /** Run the scheduled automations on this Mac from now on, and not on the other. 409 before sync is set up here. */
-  app.post('/automations-owner', (c) => {
-    if (!claimAutomations()) return c.json({ error: 'Sync is not set up on this Mac' }, 409);
+  /** Choose the synced execution owner. An empty body keeps the legacy claim-this-machine action. */
+  app.post('/automations-owner', async (c) => {
+    const raw = await body(c);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return c.json({ error: 'Expected an object' }, 400);
+    const b = raw as { device?: unknown };
+    if (b.device !== undefined && (typeof b.device !== 'string' || !b.device.trim()))
+      return c.json({ error: 'device must be a machine id or here' }, 400);
+    const target = b.device;
+    if (target && target !== 'here' && target !== outbox.machineId()) {
+      if (!outbox.machineId()) return c.json({ error: 'Sync is not set up on this machine' }, 409);
+      if (!deviceRecord(target)) return c.json({ error: 'Unknown synced machine' }, 400);
+      kv.set(OWNER_KEY, target);
+      return c.json({ ok: true, status: syncStatus() });
+    }
+    if (!claimAutomations()) return c.json({ error: 'Sync is not set up on this machine' }, 409);
     return c.json({ ok: true, status: syncStatus() });
   });
 

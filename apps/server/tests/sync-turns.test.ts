@@ -57,10 +57,10 @@ describe('with sync on', () => {
     expect(r.db.outbox.machineId()).toBe('mac-a');
   });
 
-  it('a thread whose folder is not on this Mac is read-only, with the reason', async () => {
+  it('a thread whose folder is not on this machine is read-only, with the reason', async () => {
     thread('missing');
     const d = await detail('missing');
-    expect(d.blocked).toMatch(/not on this Mac/);
+    expect(d.blocked).toMatch(/not on this machine/);
     expect(d.blocked).toContain('/nowhere/omni-test');
     const res = await post('missing');
     expect(res.status).toBe(409);
@@ -71,14 +71,16 @@ describe('with sync on', () => {
 
   it('a thread running on the other Mac takes no turn here', async () => {
     thread('elsewhere', { cwd: r.tmp });
+    // Stands in for mac-b's synced writes: the running row, and the assignment its turn claimed.
     r.db.db.prepare(`UPDATE threads SET status = 'running', run_machine = 'mac-b' WHERE id = 'elsewhere'`).run();
+    r.db.assignments.claim('elsewhere', 'mac-b');
     const d = await detail('elsewhere');
-    expect(d.blocked).toMatch(/running on your other Mac/);
+    expect(d.blocked).toMatch(/running on your other machine/);
     const res = await post('elsewhere');
     expect(res.status).toBe(409);
     expect(res.body.error).toBe(d.blocked);
     expect(r.events('elsewhere')).toEqual([]);
-    expect(() => r.runner.sendMessage('elsewhere', 'direct')).toThrow(/running on your other Mac/);
+    expect(() => r.runner.sendMessage('elsewhere', 'direct')).toThrow(/running on your other machine/);
     // An open thread hears it on its stream when the thread changes.
     const ctl = new AbortController();
     const res2 = await app.request('/api/threads/elsewhere/stream', { signal: ctl.signal });
@@ -93,6 +95,28 @@ describe('with sync on', () => {
     // Once it finishes there, it is free here.
     r.db.db.prepare(`UPDATE threads SET status = 'done', run_machine = NULL WHERE id = 'elsewhere'`).run();
     expect(await detail('elsewhere')).not.toHaveProperty('blocked');
+  });
+
+  it('forks a folder thread whose folder is not on this machine, but not one running on the other Mac', async () => {
+    const run = { harness: 'claude-code', model: 'sonnet', effort: 'high' };
+    const fork = (id: string, body: object) =>
+      app.request(`/api/threads/${id}/continue${'text' in body ? '' : '/preview'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...run, ...body }) });
+    thread('fork-missing');
+    r.db.events.add('fork-missing', 'user', { text: 'reconstruct my day' });
+    expect((await detail('fork-missing')).blocked, 'no turn here').toMatch(/not on this machine/);
+    const p = (await (await fork('fork-missing', {})).json()) as any;
+    expect(p).toMatchObject({ workspace: 'folder', blocked: null });
+    const res = await fork('fork-missing', { text: 'carry on', request_id: 'fork-missing-1', revision: p.revision });
+    expect(res.status).toBe(200);
+    const made = ((await res.json()) as any).thread;
+    expect(existsSync(made.cwd), 'the fork has a folder of its own here').toBe(true);
+    await r.untilResults(made.id, 1);
+
+    thread('fork-elsewhere', { cwd: r.tmp });
+    r.db.events.add('fork-elsewhere', 'user', { text: 'work' });
+    r.db.db.prepare(`UPDATE threads SET status = 'running', run_machine = 'mac-b' WHERE id = 'fork-elsewhere'`).run();
+    r.db.assignments.claim('fork-elsewhere', 'mac-b');
+    expect(((await (await fork('fork-elsewhere', {})).json()) as any).blocked).toMatchObject({ code: 'elsewhere', message: expect.stringMatching(/running on your other machine/) });
   });
 
   it('a thread running here is not running elsewhere, even when the other Mac wrote to it last', async () => {

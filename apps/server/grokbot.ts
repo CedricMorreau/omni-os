@@ -1,11 +1,11 @@
 // Sends one request to Ben's Grok Bot webhook. The URL and Authorization value come from the
-// Keychain (global secrets GROKBOT_WEBHOOK_URL and GROKBOT_WEBHOOK_AUTH) and fall back to the
+// secret store (global secrets GROKBOT_WEBHOOK_URL and GROKBOT_WEBHOOK_AUTH) and fall back to the
 // process environment. A bare key is sent as "Bearer <key>". Callers get a result. This function does not throw.
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { events, threads } from './db.ts';
 import { GROKBOT_WEBHOOK_AUTH, GROKBOT_WEBHOOK_URL } from './harness/env-guard.ts';
-import { globalSecret } from './secrets.ts';
+import { globalSecret, hasSecret } from './secrets.ts';
 
 const SOURCE = 'omni-os';
 const TIMEOUT_MS = 15_000;
@@ -24,7 +24,7 @@ export interface GrokBotInput {
 
 export interface GrokBotDeps {
   fetch?: typeof fetch;
-  /** Keychain read. Defaults to the global secret of that name. */
+  /** Secret store read. Defaults to the global secret of that name. */
   secret?: (name: string) => Promise<string | null>;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -47,6 +47,14 @@ function speaker(kind: string): string {
       return unreachable;
     }
   }
+}
+
+/**
+ * Whether this machine has a Grok Bot webhook URL: a global secret or the environment. GET /api/status reports it
+ * as `grokBot`, and the clients hide Send to Grok Bot without it. Reads the names table, never the secret store.
+ */
+export function grokBotConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return hasSecret('global', GROKBOT_WEBHOOK_URL) || !!env[GROKBOT_WEBHOOK_URL]?.trim();
 }
 
 /** Title plus the thread's messages. Null when there is nothing to send. Tool calls stay out. */
@@ -140,7 +148,7 @@ function webhookUrl(raw: string): URL | null {
 
 /**
  * POST `{ request, source: "omni-os", context? }` to the webhook.
- * Keychain wins over the environment. A bare key is sent as `Bearer <key>`. A value that
+ * The secret store wins over the environment. A bare key is sent as `Bearer <key>`. A value that
  * already starts with `Bearer ` (any case) is sent unchanged, after trimming. A redirect is
  * an error: following it would send the Authorization value to another host.
  */

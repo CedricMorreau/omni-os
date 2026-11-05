@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, networkInterfaces, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { startRunner } from './runner-boot.ts';
 
@@ -34,6 +34,8 @@ describe('GET /api/status', () => {
     expect(res.status).toBe(200);
     const body = JSON.parse(res.text);
     expect(body).toMatchObject({ usage: expect.any(Object), slots: expect.any(Object), running: 0, queued: 0, maxConcurrent: 8, maxUploadMb: 25 });
+    // After startRunner, so config.ts sees its data dir.
+    const { pickSecretStore } = await import('../secret-store.ts');
     expect(body.server).toEqual({
       version: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version,
       pid: process.pid,
@@ -42,9 +44,22 @@ describe('GET /api/status', () => {
       gitHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
       startedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/),
       port: r.config.port,
+      name: hostname(),
+      secretStore: pickSecretStore(),
     });
     expect(Date.parse(body.server.startedAt)).toBeLessThanOrEqual(Date.now());
     expect(JSON.parse((await call('/api/status')).text).server).toEqual(body.server);
+  });
+
+  it('names this Mac, and says whether the browser sits at it or reaches it through tailscale serve', async () => {
+    const device = async (headers: Record<string, string>) => JSON.parse((await call('/api/status', { headers })).text).device;
+    const lan = Object.values(networkInterfaces()).flat().find((a) => a && a.family === 'IPv4' && !a.internal)?.address ?? '127.0.0.1';
+    expect(await device({})).toEqual({ name: hostname(), here: true });
+    expect(await device({ host: 'bens-mac.tail1234.ts.net' })).toEqual({ name: hostname(), here: false });
+    expect(await device({ host: 'bens-mac.tail1234.ts.net', 'x-forwarded-for': '100.101.102.103' })).toMatchObject({ here: false });
+    expect(await device({ host: '127.0.0.1:4747', 'x-forwarded-for': '100.101.102.103' })).toMatchObject({ here: false });
+    expect(await device({ host: 'bens-mac.tail1234.ts.net', 'x-forwarded-for': lan })).toMatchObject({ here: true });
+    expect(await device({ host: 'bens-mac.tail1234.ts.net', 'x-forwarded-for': '127.0.0.1' })).toMatchObject({ here: true });
   });
 
   it('has no commit when git cannot tell', () => {
@@ -106,6 +121,13 @@ describe('the Web UI', () => {
     expect(await call('/apiary')).toMatchObject({ status: 200, text: INDEX });
   });
 
+  it('makes the browser revalidate index.html, so a rebuild shows on the next load', async () => {
+    for (const path of ['/', '/index.html', '/c/inbox']) {
+      expect((await app.request(path)).headers.get('cache-control'), path).toBe('no-cache');
+    }
+    expect((await app.request('/assets/app.js')).headers.get('cache-control')).toBeNull();
+  });
+
   it('needs no token, and never sets or carries one', async () => {
     const TOKEN = process.env.OMNI_TOKEN!;
     for (const path of ['/', '/assets/app.js', '/c/inbox']) {
@@ -134,6 +156,23 @@ describe('/api/auth', () => {
     // The cookie alone is enough after that, for GET /api/auth and everything else.
     const after = await app.request('/api/auth', { headers: { authorization: '', cookie: `${cookieName()}=${TOKEN}` } });
     expect(after.status).toBe(200);
+  });
+
+  it('pairs the desktop app window from this machine, with the token only in the cookie', async () => {
+    const res = await app.request('/api/auth/desktop-pair', { headers: { authorization: '' } });
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get('location') ?? '', 'http://127.0.0.1').pathname).toBe('/');
+    const cookie = res.headers.get('set-cookie') ?? '';
+    expect(cookie).toContain(`${cookieName()}=${TOKEN}`);
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+    expect(cookie).not.toContain('Secure');
+    expect(await res.text()).not.toContain(TOKEN);
+    const proxied = await app.request('/api/auth/desktop-pair', {
+      headers: { authorization: '', 'x-forwarded-host': 'box.tail1234.ts.net', 'x-forwarded-for': '100.64.0.2' },
+    });
+    expect(proxied.status).toBe(403);
+    expect(proxied.headers.get('set-cookie')).toBeNull();
   });
 
   it('will not pair without the token', async () => {

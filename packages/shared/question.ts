@@ -1,6 +1,5 @@
 // Questions an agent asks the user with Omni's ask_user_question tool (apps/mcp/ask.ts), the same shape as Claude
 // Code's AskUserQuestion. Pure: the server parses a call and an answer with these, and formats what the agent gets back.
-// apps/mac/OmniKit/Sources/OmniKit/Question.swift ports the client half (the draft and the answers it sends).
 
 export interface QuestionOption {
   /** 1 to 5 words, shown bold. */
@@ -141,6 +140,18 @@ export interface ThreadQuestion {
   questions: Question[];
   state: QuestionState;
   answers: Answer[] | null;
+}
+
+/**
+ * A question a thread delegated from this one waits on (GET /threads/:id/crew-questions), so Ben answers it where he
+ * works: the card posts to `thread_id`, the thread that asked. Only pending ones: once answered anywhere it is gone.
+ */
+export interface CrewQuestion {
+  thread_id: string;
+  thread_title: string;
+  task_id: string | null;
+  channel_id: string;
+  question: ThreadQuestion;
 }
 
 type EventLike = { id: number; kind: string; payload: string | object };

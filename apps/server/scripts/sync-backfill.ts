@@ -1,8 +1,8 @@
-// Queues every existing row (channels, threads, events, artifacts, automation runs, kv) for the sync relay.
+// Queues every existing row (channels, threads, events, artifacts, automation runs, remote commands, kv) for the sync relay.
 //
 //   npm run sync:backfill
 //
-// For after moving to a new Supabase project, or when the relay lost history. The first sync on a machine already
+// For after moving to a new relay, or when the relay lost history. The first sync on a machine already
 // sends everything, so a normal setup never needs this. Idempotent: a row already waiting is not queued twice.
 // Only queues; the running server pushes on its next sync (within a minute), or press Sync now in Settings.
 
@@ -19,6 +19,8 @@ const LABEL: Record<BackfillCount['entity'], string> = {
   result_read: 'read results (Needs you)',
   limit_stop: 'usage limit stops',
   trigger_delivery: 'event automation deliveries',
+  remote_command: 'commands for threads on other machines',
+  assignment: 'which machine runs each thread',
   kv: 'settings (kv)',
 };
 
@@ -31,7 +33,7 @@ try {
   const report = backfill({
     onProgress: (c) => {
       const parts = [`${c.queued} queued`, `${c.alreadyQueued} already queued`];
-      if (c.elsewhere) parts.push(`${c.elsewhere} last written on another Mac`);
+      if (c.elsewhere) parts.push(`${c.elsewhere} last written on another machine`);
       console.log(`${LABEL[c.entity].padEnd(16)} ${parts.join(', ')} (of ${c.total})`);
     },
   });

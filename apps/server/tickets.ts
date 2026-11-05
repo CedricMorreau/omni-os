@@ -246,6 +246,7 @@ export function listTickets(opts: { channel?: string; closed?: boolean } = {}) {
 }
 
 export interface NewTicket {
+  id?: string;
   channel: string;
   source: Source;
   link?: string | null;
@@ -269,7 +270,7 @@ export async function createTicket(input: NewTicket, start: (thread: { id: strin
   if (input.source !== 'local' && !input.link?.trim()) throw new TicketError(`a ${input.source} ticket needs its link`);
   const link = input.source === 'local' ? null : input.link!.trim();
   const ref = input.ref?.trim().match(/^#?\d+$/) ? `#${input.ref.trim().replace(/^#/, '')}` : ticketRef(input.source, link);
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   tickets.insert({ thread_id: id, channel_id: input.channel, ref, source: input.source, link, context: input.context?.trim() || null });
   try {
     await start({ id, prompt: ticketBrief(ref, input) });

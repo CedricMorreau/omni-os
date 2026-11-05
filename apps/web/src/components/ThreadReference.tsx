@@ -2,12 +2,11 @@
 // titles and channels, scoped to this channel unless Ben switches it to All channels. A pick adds a chip to the draft;
 // nothing is sent to, started in or changed on the picked thread. The `@` menu for files is untouched.
 import { useEffect, useId, useRef, useState } from 'react';
+import { relTime } from '@omni/shared/format.ts';
 import { api, errorText, type Thread } from '../api.ts';
-import { relTime } from '../format.ts';
 import { attachReference, isAttached, searchPath, type ReferenceCandidate, type ReferenceScope } from '../message-context/thread-picker.ts';
 import { useDraftContext } from '../message-context/draft.ts';
-import { Icon, IconButton, StatusDot } from './ui.tsx';
-import { useDismissable } from './ui/use-dismissable.ts';
+import { Icon, StatusDot } from './ui.tsx';
 
 const SCOPES: { value: ReferenceScope; label: string }[] = [
   { value: 'channel', label: 'This channel' },
@@ -131,27 +130,6 @@ export function ThreadReferencePanel({ thread, onPicked, touch }: { thread: Thre
       <p className="m-0 border-t border-line px-4 py-2.5 text-[11.5px] leading-snug text-fg-3">
         Attaches a reference, not the thread's messages. The agent reads it only when it needs to, and the thread itself is not touched.
       </p>
-    </div>
-  );
-}
-
-/** The thread header's button for it: opens the picker under the header, its right edge on the button's. */
-export function ThreadReferenceButton({ thread, disabled }: { thread: Thread; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-  useDismissable(open, () => setOpen(false), { root: wrap });
-  return (
-    <div ref={wrap} className="relative">
-      <IconButton icon="message" label="Reference another thread" size={15} disabled={disabled} active={open} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((o) => !o)} />
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Reference another thread"
-          className="fade-in absolute top-full right-0 z-30 mt-2 w-[min(23rem,calc(100vw-2rem))] rounded-[22px] bg-elev shadow-[var(--shadow-menu)]"
-        >
-          <ThreadReferencePanel thread={thread} onPicked={() => setOpen(false)} />
-        </div>
-      )}
     </div>
   );
 }

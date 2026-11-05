@@ -8,26 +8,27 @@
 // checks that nothing new ran in it and writes the new thread. Git gets the snapshot's ref, the branch and the worktree
 // only after that, from the new thread's setup (continue-carry.ts), so a start that loses a race leaves nothing behind.
 import { createHash, randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { continueRefusal, continueSourceRefusal, type CarriedStats, type CarryoverFile, type ContinueBlock, type ContinueBody, type ContinueLink, type ContinuePreview } from '@omni/shared/continue.ts';
 import type { Run, RunName } from '@omni/shared/run-switch.ts';
 import { channels, continuations, events, messageRequests, threadBases, threads, tx, type SkippedFile, type Thread, type ThreadBase } from './db.ts';
 import { buildCarryover, carriedStats, historyText, type CarryoverP } from './carryover.ts';
 import { copyAttachments, planAttachments, planSignature, type AttachmentPlan } from './continue-attachments.ts';
-import { changesCheckout, git, gitOr, parseNameStatus, real, threadBase } from './changes.ts';
+import { changesCheckout, defaultBranch, git, gitOr, parseNameStatus, real, threadBase } from './changes.ts';
 import { threadDir, uploadsDir } from './config.ts';
 import { asksAuto } from './harness/auto.ts';
 import { freshCatalog, getCatalog } from './harness/catalog-service.ts';
-import { isHarnessId, isRemoteHarness, remoteWhere } from './harness/types.ts';
+import { isHarnessId, isProviderHarness, providerWhere } from './harness/types.ts';
 import { userName } from './profile.ts';
 import { resumeRequests } from './runner/api.ts';
 import { saveStart, setUpThread } from './runner/setup.ts';
 import { emitThread, hasBackground, lives, refusal, runsHere, waiting } from './runner/state.ts';
 import { invalid, runName } from './runner/switch.ts';
 import { plannedWorktree, prepareWorkdir } from './sandbox.ts';
-import { turnBlocked } from './sync/guard.ts';
+import { elsewhereBlocked } from './sync/guard.ts';
 import { getTerminal } from './terminal.ts';
-import { checkoutTree } from './turns.ts';
+import { captureTree } from './checkpoint.ts';
+import { keptRef } from './workspace.ts';
 
 /** Tests reach in here: `captured` runs between the capture and the final check, with the new thread's id. */
 export const continueHooks = { captured: async (_threadId: string) => {} };
@@ -53,10 +54,12 @@ const runOf = (t: Thread): Run => ({ harness: t.harness, model: t.model ?? '', e
  */
 export function sourceBlock(t: Thread): ContinueBlock | null {
   const block = (code: ContinueBlock['code'], message: string): ContinueBlock => ({ code, message });
-  if (isRemoteHarness(t.harness)) return block('remote', continueSourceRefusal(t.harness) ?? `This thread runs ${remoteWhere(t.harness)}, so its files are not on this Mac.`);
+  if (isProviderHarness(t.harness)) return block('remote', continueSourceRefusal(t.harness) ?? `This thread runs ${providerWhere(t.harness)}, so its files are not on this machine.`);
   if (t.setup === 'preparing') return block('setup', "Omni is still preparing this thread's worktree.");
   if (t.setup === 'failed') return block('setup', "This thread's worktree could not be prepared. Retry it first.");
-  const elsewhere = turnBlocked(t, runsHere(t.id));
+  // Folder work forks into a folder of its own, and repo work reads the source's checkout, which readCheckout refuses
+  // when it is not here. So only a run on, or a handoff to, another machine blocks a fork here.
+  const elsewhere = elsewhereBlocked(t, runsHere(t.id));
   if (elsewhere) return block('elsewhere', elsewhere);
   const live = lives.get(t.id);
   if (running(t) || waiting.includes(t.id) || t.queued_harness || (live && (live.turn || live.inflight.length || live.held.length || hasBackground(live)))) {
@@ -96,32 +99,75 @@ async function diffFiles(dir: string, from: string, to: string): Promise<Carryov
 /** The source's checkout as a continued thread would start from it. */
 type Checkout =
   | { kind: 'folder' }
+  /** Its worktree is not on this machine, and neither is its branch, here or on origin: it starts as any new thread. */
+  | { kind: 'gone'; branch: string }
   | {
-      kind: 'snapshot' | 'head';
+      /** `branch`: its worktree is not on this machine, so it starts from the last commit of its branch. */
+      kind: 'snapshot' | 'head' | 'branch';
       dir: string;
       head: string;
-      /** The tree the continued thread starts from: the snapshot's for `snapshot`, HEAD's for `head`. */
+      /** The tree the continued thread starts from: the snapshot's for `snapshot`, HEAD's otherwise. */
       tree: string;
-      base: ThreadBase;
+      base: Pick<ThreadBase, 'sha' | 'ref' | 'how'>;
       changed: CarryoverFile[];
       skipped: SkippedFile[];
       uncommitted: string[];
     };
 
+type RepoCheckout = Extract<Checkout, { dir: string }>;
+const repoOf = (c: Checkout): RepoCheckout | null => ('dir' in c ? c : null);
+
+/**
+ * The last commit of a branch whose worktree is not on this machine (made on the other one, or removed by a cleanup):
+ * this repo's branch, else the commit a cleanup kept, taking origin's instead when it is further along. Fetches only
+ * that branch, and never touches a worktree.
+ */
+async function branchTip(repo: string, threadId: string, branch: string): Promise<string | null> {
+  const commit = (ref: string) => gitOr(repo, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+  await git(repo, ['fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`]).catch(() => {});
+  const origin = await commit(`refs/remotes/origin/${branch}`);
+  const here = (await commit(`refs/heads/${branch}`)) ?? (await commit(keptRef(threadId)));
+  if (!here || !origin) return here ?? origin;
+  return (await gitOr(repo, ['merge-base', '--is-ancestor', here, origin])) === null ? here : origin;
+}
+
+/** The source as its branch has it, for a worktree that is not on this machine. Its uncommitted changes stay behind. */
+async function readBranch(t: Thread, repo: string, branch: string): Promise<Checkout> {
+  const head = await branchTip(repo, t.id, branch);
+  if (!head) return { kind: 'gone', branch };
+  const tree = (await gitOr(repo, ['rev-parse', `${head}^{tree}`])) ?? '';
+  const had = threadBases.get(t.id);
+  let base: RepoCheckout['base'];
+  if (had && (await gitOr(repo, ['cat-file', '-e', `${had.sha}^{commit}`])) !== null) base = had;
+  else {
+    const ref = await defaultBranch(repo);
+    base = { sha: (ref && (await gitOr(repo, ['merge-base', head, ref]))) || head, ref: ref ?? 'HEAD', how: 'merge-base' };
+  }
+  return { kind: 'branch', dir: repo, head, tree, base, changed: await diffFiles(repo, base.sha, tree), skipped: [], uncommitted: [] };
+}
+
 /**
  * Read the source's checkout. Its own worktree (checked to be on its branch, like #208's turn snapshots) is snapshotted
- * whole; a shared checkout (worktrees off) gives only its HEAD, since its uncommitted changes may be anyone's; a thread
- * with no repo is folder work. Writes only git objects and a temporary index.
+ * whole, or read from its branch when the worktree is not on this machine; a shared checkout (worktrees off) gives only
+ * its HEAD, since its uncommitted changes may be anyone's; a thread with no repo is folder work. Writes only git
+ * objects, a temporary index and origin's copy of the source's branch.
  */
 async function readCheckout(t: Thread): Promise<Checkout | ContinueBlock> {
-  if (isRemoteHarness(t.harness)) return { kind: 'folder' };
+  if (isProviderHarness(t.harness)) return { kind: 'folder' };
   const repo = channels.get(t.channel_id)?.repo_path;
   const shared = !t.branch && !!repo && real(t.cwd) === real(repo);
   if (!t.branch && !shared) return { kind: 'folder' };
+  if (t.branch && repo && existsSync(repo) && !existsSync(plannedWorktree(t.id).cwd)) {
+    try {
+      return await readBranch(t, repo, t.branch);
+    } catch (err) {
+      return { code: 'checkout', message: `Omni could not read this thread's branch ${t.branch}: ${(err as Error).message}` };
+    }
+  }
   const at = await changesCheckout(t);
   if ('reason' in at) return { code: 'checkout', message: at.reason };
   try {
-    const snap = await checkoutTree(at.dir);
+    const snap = await captureTree(at.dir, 'text');
     const base = await threadBase(t.id, at.dir);
     if (t.branch) {
       const changed = await diffFiles(at.dir, base.sha, snap.tree);
@@ -147,6 +193,8 @@ interface Captured {
   plan: AttachmentPlan;
 }
 
+const WORKSPACE: Record<Checkout['kind'], ContinuePreview['workspace']> = { snapshot: 'worktree', head: 'worktree', branch: 'branch', gone: 'fresh', folder: 'folder' };
+
 /** The source as the continued thread would start from it now, and the preview of that. */
 async function capture(sourceId: string, to: RunName, picked: readonly string[]): Promise<Captured> {
   const source = threads.get(sourceId);
@@ -156,7 +204,7 @@ async function capture(sourceId: string, to: RunName, picked: readonly string[])
   const guard = events.lastId(sourceId);
   const read = await readCheckout(source);
   const checkout: Checkout = 'code' in read ? { kind: 'folder' } : read;
-  const repo = checkout.kind === 'folder' ? null : checkout;
+  const repo = repoOf(checkout);
   const seen = events.since(sourceId).filter((e) => e.id <= guard);
   const uid = (id: number) => events.uidOf(id) ?? String(id);
   const plan = planAttachments(sourceId, seen, uid, picked, to.harness);
@@ -167,7 +215,14 @@ async function capture(sourceId: string, to: RunName, picked: readonly string[])
     role: source.role,
     events: seen,
     uid,
-    workspace: repo ? { kind: repo.kind, paths: [source.cwd, real(source.cwd), repo.dir, real(repo.dir)] } : { kind: 'folder', cwd: source.cwd },
+    workspace:
+      checkout.kind === 'gone'
+        ? { kind: 'gone', branch: checkout.branch }
+        : checkout.kind === 'branch'
+          ? { kind: 'branch', branch: source.branch ?? '', paths: [source.cwd, real(source.cwd)] }
+          : repo && repo.kind !== 'branch'
+            ? { kind: repo.kind, paths: [source.cwd, real(source.cwd), repo.dir, real(repo.dir)] }
+            : { kind: 'folder', cwd: source.cwd },
     files: repo && { base: repo.base.sha, head: repo.head, tree: repo.tree, changed: repo.changed },
     skipped: repo?.skipped ?? [],
     uncommitted: repo?.uncommitted ?? [],
@@ -180,7 +235,7 @@ async function capture(sourceId: string, to: RunName, picked: readonly string[])
     .digest('hex')
     .slice(0, 16);
   return {
-    preview: { carryover, revision, workspace: repo ? 'worktree' : 'folder', blocked: blocked ?? ('code' in read ? read : null) },
+    preview: { carryover, revision, workspace: WORKSPACE[checkout.kind], blocked: blocked ?? ('code' in read ? read : null) },
     body,
     guard,
     checkout,
@@ -231,7 +286,7 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
   const channel = channels.get((threads.get(sourceId) ?? first).channel_id)!;
   const id = randomUUID();
   const wd = await prepareWorkdir(channel, id);
-  const repo = cap.checkout.kind === 'folder' ? null : cap.checkout;
+  const repo = repoOf(cap.checkout);
   const at = repo ? plannedWorktree(id) : wd;
   const discard = () => rmSync(threadDir(id), { recursive: true, force: true });
   let made: Thread | undefined;

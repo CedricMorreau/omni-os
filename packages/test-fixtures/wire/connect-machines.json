@@ -1,0 +1,22 @@
+{
+  "machines": [
+    {
+      "id": "mac-a",
+      "name": "Ben's Mac",
+      "hostname": "bens-mac-a1b2c3.omni-os.app",
+      "url": "https://bens-mac-a1b2c3.omni-os.app",
+      "online": true,
+      "problem": null,
+      "current": true
+    },
+    {
+      "id": "mac-b",
+      "name": "Studio",
+      "hostname": "studio-ffffff.omni-os.app",
+      "url": "https://studio-ffffff.omni-os.app",
+      "online": false,
+      "problem": "The tunnel has no connector running",
+      "current": false
+    }
+  ]
+}

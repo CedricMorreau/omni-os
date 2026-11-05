@@ -210,7 +210,7 @@ const slack: Resolver = async (ref, _url, d) => {
 };
 
 /** The store's Admin API with SHOPIFY_ACCESS_TOKEN (the channel's store). A token for another store just fails. */
-const shopify: Resolver = async (ref, url, d) => {
+const shopify: Resolver = async (ref, _url, d) => {
   const { store, id, type } = ref.params;
   // The store names the API host the token goes to: one DNS label, nothing else.
   if (store && id && type && /^[a-z0-9][a-z0-9-]{0,62}$/i.test(store) && /^\d+$/.test(id)) {
@@ -475,7 +475,7 @@ export function isApiHost(host: string, extra?: string) {
 }
 
 const secretCache = new Map<string, { at: number; env: Promise<Record<string, string>> }>();
-/** A channel's secrets (global overridden by its own), read from the Keychain at most once a minute. */
+/** A channel's secrets (global overridden by its own), read from the secret store at most once a minute. */
 function channelSecrets(channelId: string | undefined) {
   const key = channelId ?? '';
   const hit = secretCache.get(key);

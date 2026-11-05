@@ -1,5 +1,6 @@
+import { toDate } from '@omni/shared/format.ts';
 import type { BackgroundTask } from '../../../api.ts';
-import { duration, toDate } from '../../../format.ts';
+import { duration } from '../../../format.ts';
 import { useNow } from '../../../store.tsx';
 import { subagentKind, subagentTip } from '../../../subagents.ts';
 import { Loader } from '../../brand.tsx';
@@ -24,23 +25,5 @@ export function SubagentRow({ t, onJump }: { t: BackgroundTask; onJump: (eventId
       {kind && <span className="max-w-[40%] shrink-0 truncate font-mono text-[11px] text-fg-4">{kind}</span>}
       <span className="shrink-0 font-num text-[11px] text-fg-3 tabular-nums">{duration(Math.max(0, now - toDate(t.started_at).getTime()))}</span>
     </button>
-  );
-}
-
-/** The thread's running sub-agents, under the Details tab's resume command. Nothing when none run. */
-export function RunningSubagents({ agents, onJump }: { agents: BackgroundTask[]; onJump: (eventId: number) => void }) {
-  if (!agents.length) return null;
-  return (
-    <section aria-label="Running subagents" className="mt-4">
-      <div className="mb-1.5 flex items-center px-2">
-        <span className="caption">Running subagents</span>
-        <span className="ml-auto font-num text-[11px] text-fg-3">{agents.length}</span>
-      </div>
-      <div className="rounded-[20px] bg-bg p-1">
-        {agents.map((t) => (
-          <SubagentRow key={t.task_id} t={t} onJump={onJump} />
-        ))}
-      </div>
-    </section>
   );
 }

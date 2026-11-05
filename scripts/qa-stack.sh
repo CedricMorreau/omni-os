@@ -10,7 +10,8 @@
 #   scripts/qa-stack.sh logs            tail the server and vite logs
 #
 # QA_SERVER_PORT (default 4757) and QA_WEB_PORT (default 4768) move the ports, QA_DIR the state dir
-# (default $TMPDIR/omni-qa-<server port>). QA_CLAUDE_BIN, QA_CODEX_BIN and QA_CURSOR_BIN swap a fake CLI for a real one
+# (default $TMPDIR/omni-qa-<server port>). QA_NO_WEB=1 starts no vite, for a client that only needs the API
+# (scripts/qa-handoff-stack.sh runs two servers that way). QA_CLAUDE_BIN, QA_CODEX_BIN and QA_CURSOR_BIN swap a fake CLI for a real one
 # (a live turn spends that plan). QA_BROWSER=1 turns the channel browser on, so a thread's Browser tab launches a real
 # headless Chrome on the stack's own profile dir. Otherwise threads run on fake-claude, so a prompt with directives such as
 # RICH, TOOL:<ms> or LIMIT drives a turn without spending a plan (see packages/test-fixtures/fake-claude.mjs).
@@ -39,7 +40,8 @@ tok() { tr -d '[:space:]' <"$DIR/data/api-token" 2>/dev/null || true; }
 api() { local p="$1"; shift; curl -fsS -H "Authorization: Bearer $(tok)" "$@" "$API$p"; }
 # up starts every process from $ROOT, so a recorded PID whose working dir is elsewhere belongs to another checkout's
 # stack on the same port (or is a reused PID), and down must leave it alone.
-cwd_of() { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'; }
+# Linux boxes often have no lsof; /proc has the same answer there.
+cwd_of() { if command -v lsof >/dev/null; then lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'; else readlink "/proc/$1/cwd" 2>/dev/null; fi; }
 
 [ "$SERVER_PORT" != 4747 ] || die "refusing port 4747, that is the live server"
 
@@ -71,21 +73,23 @@ SH
   # OMNI_TOKEN cleared: an agent's shell carries the live server's, and this stack makes its own.
   OMNI_TOKEN= OMNI_PORT="$SERVER_PORT" OMNI_DATA_DIR="$DIR/data" OMNI_BRAIN_DIR="$DIR/brain" \
     OMNI_CLAUDE_BIN="${QA_CLAUDE_BIN:-$fx/fake-claude.mjs}" OMNI_CODEX_BIN="${QA_CODEX_BIN:-$fx/fake-codex.mjs}" OMNI_CURSOR_BIN="${QA_CURSOR_BIN:-$fx/fake-cursor.mjs}" \
-    OMNI_BROWSER="${QA_BROWSER:-0}" OMNI_SUGGESTIONS=0 OMNI_HERMES_URL= OMNI_AUTOMATIONS_DIR="$DIR/automations" \
+    OMNI_BROWSER="${QA_BROWSER:-0}" OMNI_SUGGESTIONS=0 OMNI_UPDATE_CHECK=0 OMNI_CAFFEINATE=0 OMNI_HERMES_URL= OMNI_AUTOMATIONS_DIR="$DIR/automations" \
     OMNI_CURSOR_API_URL="$cursor_api" OMNI_CURSOR_CLOUD_POLL_MS=1500 PATH="$DIR/bin:$PATH" \
     NODE_OPTIONS=--disable-warning=ExperimentalWarning \
     detach npx tsx apps/server/index.ts >"$DIR/server.log" 2>&1 &
   echo $! >"$DIR/server.pid"
-  OMNI_PORT="$SERVER_PORT" detach npx vite --config apps/web/vite.config.ts --port "$WEB_PORT" --strictPort >"$DIR/web.log" 2>&1 &
-  echo $! >"$DIR/web.pid"
+  if [ "${QA_NO_WEB:-0}" != 1 ]; then
+    OMNI_PORT="$SERVER_PORT" detach npx vite --config apps/web/vite.config.ts --port "$WEB_PORT" --strictPort >"$DIR/web.log" 2>&1 &
+    echo $! >"$DIR/web.pid"
+  fi
 
   for _ in $(seq 1 60); do
-    api /channels >/dev/null 2>&1 && curl -fsS "$WEB" >/dev/null 2>&1 && break
+    api /channels >/dev/null 2>&1 && { [ "${QA_NO_WEB:-0}" = 1 ] || curl -fsS "$WEB" >/dev/null 2>&1; } && break
     alive server || { tail -20 "$DIR/server.log" >&2; die "server exited, log above"; }
     sleep 0.5
   done
   api /channels >/dev/null 2>&1 || { tail -20 "$DIR/server.log" >&2; die "server not healthy after 30s"; }
-  curl -fsS "$WEB" >/dev/null 2>&1 || { tail -20 "$DIR/web.log" >&2; die "vite not up after 30s"; }
+  [ "${QA_NO_WEB:-0}" = 1 ] || curl -fsS "$WEB" >/dev/null 2>&1 || { tail -20 "$DIR/web.log" >&2; die "vite not up after 30s"; }
 
   for ((i = 1; i <= seed; i++)); do
     local prompt="Sample thread $i"
@@ -127,12 +131,12 @@ down() {
 
 status() {
   echo "server  $API  $(alive server && echo up || echo down)"
-  echo "web     $WEB  $(alive web && echo up || echo down)"
+  [ "${QA_NO_WEB:-0}" = 1 ] || echo "web     $WEB  $(alive web && echo up || echo down)"
   echo "data    $DIR"
   if alive server; then
     echo "token   $(tok)"
-    echo "pair    $WEB/#/?pair=$(tok)"
-    api /threads 2>/dev/null | node -e '
+    [ "${QA_NO_WEB:-0}" = 1 ] || echo "pair    $WEB/#/?pair=$(tok)"
+    [ "${QA_NO_WEB:-0}" = 1 ] || api /threads 2>/dev/null | node -e '
       let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
         for (const t of JSON.parse(s)) console.log(`thread  ${process.argv[1]}/#/t/${t.id}?pair=${process.argv[2]}  ${t.status}  ${t.title ?? ""}`);
       });' "$WEB" "$(tok)" || true

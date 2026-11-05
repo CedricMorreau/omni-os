@@ -47,7 +47,7 @@ describe('sync backfill', () => {
 
     const seen: string[] = [];
     const report = backfill.backfill({ onProgress: (r) => seen.push(r.entity) });
-    expect(seen).toEqual(['channel', 'folder', 'thread', 'event', 'artifact', 'automation_run', 'completion', 'result_read', 'limit_stop', 'trigger_delivery', 'kv']);
+    expect(seen).toEqual(['channel', 'folder', 'thread', 'event', 'artifact', 'automation_run', 'completion', 'result_read', 'limit_stop', 'trigger_delivery', 'remote_command', 'assignment', 'kv']);
     const by = Object.fromEntries(report.map((r) => [r.entity, r]));
     expect(by.channel).toMatchObject({ queued: 3, alreadyQueued: 0, elsewhere: 0 });
     expect(by.thread).toMatchObject({ queued: 1, elsewhere: 1 });
@@ -72,7 +72,7 @@ describe('sync backfill', () => {
       encoding: 'utf8',
     });
     expect(out).toMatch(/channels\s+0 queued, 3 already queued/);
-    expect(out).toMatch(/threads\s+0 queued, 1 already queued, 1 last written on another Mac/);
+    expect(out).toMatch(/threads\s+0 queued, 1 already queued, 1 last written on another machine/);
     expect(out).toMatch(/Nothing new to queue/);
   });
 });

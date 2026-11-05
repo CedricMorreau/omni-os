@@ -1,42 +1,31 @@
 import { createHash } from 'node:crypto';
+import { clerkConfig, type ClerkConfig } from '../clerk.ts';
+import { forgetConnect } from '../connect/service.ts';
 import { db, kv, outbox } from '../db.ts';
-import { deleteSecret, setSecret, SYNC_SECRETS } from '../secrets.ts';
+import { pollFlow, SignInError, startFlow, type FlowDeps, type FlowOutcome, type FlowStart, type PollResult } from '../google-auth.ts';
+import { deleteSecret, globalSecret, LEGACY_SYNC_SECRETS, setSecret, SYNC_SECRETS } from '../secrets.ts';
 import { backfill } from './backfill.ts';
+import { computerName } from './devices.ts';
 import type { PathMap } from './paths.ts';
+import { relayAuth, RelayRefusedError, type RelayAuth } from './transport.ts';
 import { setActiveWorker, startSync, syncConfigured, type SyncWorker } from './worker.ts';
 
-// Turning sync on and off from Settings. Sign-in is Ben's one Supabase user, by password or by an emailed code.
-// Only the project URL, the anon key and the refresh token are kept, all three in the Keychain. The password
-// and the code are used once and dropped: they never reach the db, a log or the Keychain.
-
-export interface SetupRequest {
-  url: string;
-  anonKey: string;
-  email: string;
-  password?: string;
-  /** The code from the sign-in email. Neither a password nor a code: send that email. */
-  code?: string;
-}
-
-export interface SyncSession {
-  refreshToken: string;
-  userId: string;
-  email: string | null;
-}
-
-/** Supabase Auth, as setup uses it. The real one is supabaseAuth; tests pass a fake. */
-export interface SyncAuth {
-  signInWithPassword(email: string, password: string): Promise<SyncSession>;
-  sendCode(email: string): Promise<void>;
-  verifyCode(email: string, code: string): Promise<SyncSession>;
-  /** After a sign-in: throws when the project lacks the `changes` table or the `omni` bucket. */
-  probe(): Promise<void>;
-}
+// Turning sync on and off from Settings. Sign-in is Google through Clerk, the same device grant that signs in a new
+// device (google-auth.ts): Omni shows a code, the person approves it on Clerk's page, and Omni hands the ID token it
+// gets to the relay (apps/relay), which checks it and its ALLOWED_USERS and answers with this machine's own token.
+// Only the relay URL and that token are kept, both in the secret store. The ID token is used once and dropped.
 
 export interface SetupDeps {
-  auth: (url: string, anonKey: string) => SyncAuth;
-  /** A global secret into the Keychain. */
+  relay: RelayAuth;
+  /** This install's Clerk app: the relay has to trust the same one. */
+  clerk: () => ClerkConfig | null;
+  /** How the relay lists this machine's token. */
+  machineName: () => Promise<string>;
+  /** Clerk, for the sign-in flow. Unset: the install's. */
+  flows?: FlowDeps;
+  /** A global secret in the secret store. */
   storeSecret: (name: string, value: string) => Promise<void>;
+  readSecret: (name: string) => Promise<string | null>;
   deleteSecret: (name: string) => Promise<void>;
   /** Start the server's worker from the stored credentials, or null when sync is off. */
   start: () => Promise<SyncWorker | null>;
@@ -46,74 +35,69 @@ export interface SetupDeps {
 export class SetupError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 401 | 409 | 502,
+    readonly status: 400 | 404 | 409 | 429 | 502,
   ) {
     super(message);
   }
 }
 
-export type SetupResult = { state: 'code_sent'; email: string } | { state: 'signed_in'; email: string; relayChanged: boolean };
-
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
-/** The role a legacy JWT key claims, or null for a key that is not one. */
-function jwtRole(key: string): string | null {
-  const part = key.split('.')[1];
-  if (!part) return null;
-  try {
-    return (JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as { role?: string }).role ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** Check and tidy a setup body. Throws SetupError(400) with what to fix. */
-export function checkSetup(body: unknown): SetupRequest {
-  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+/** The relay URL from a setup body: https, or http on this machine for a relay under `wrangler dev`. Throws SetupError(400). */
+export function checkRelayUrl(body: unknown): string {
+  const raw = str((body as { url?: unknown } | null)?.url);
   let url: URL;
   try {
-    url = new URL(str(b.url));
+    url = new URL(raw);
   } catch {
-    throw new SetupError('Paste the Supabase URL, like https://<project>.supabase.co', 400);
+    throw new SetupError('Paste the relay URL, like https://omni-relay.<you>.workers.dev', 400);
   }
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) throw new SetupError('The Supabase URL must use https', 400);
-  const anonKey = str(b.anonKey);
-  if (!anonKey || /\s/.test(anonKey)) throw new SetupError('Paste the anon key (or the publishable key), one line', 400);
-  if (anonKey.startsWith('sb_secret_') || jwtRole(anonKey) === 'service_role')
-    throw new SetupError('That is a service-role (secret) key. Use the anon or publishable key: Omni never takes a service-role key', 400);
-  const email = str(b.email);
-  if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new SetupError('Enter the email of your Supabase user', 400);
-  const password = typeof b.password === 'string' && b.password ? b.password : undefined;
-  const code = str(b.code) || undefined;
-  if (password && code) throw new SetupError('Send a password or a code, not both', 400);
-  return { url: url.origin + url.pathname.replace(/\/+$/, ''), anonKey, email, password, code };
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) throw new SetupError('The relay URL must use https', 400);
+  return url.origin + url.pathname.replace(/\/+$/, '');
 }
 
 /** Which relay and user this machine syncs with, hashed: the cursor only means something for that pair. */
 const relayId = (url: string, userId: string) => createHash('sha256').update(`${url}\n${userId}`).digest('hex').slice(0, 16);
 
+const flowError = (err: unknown): never => {
+  if (err instanceof SignInError) throw new SetupError(err.message, err.status);
+  throw err;
+};
+
 /**
- * Sign in and turn sync on. Without a password or code this only sends the sign-in email.
- * Moving to another relay or user starts over there: the cursor goes back to 0, parked remote changes go, and
- * this machine's history is queued again.
+ * Check the relay trusts this install's Clerk app, then start the Google sign-in. The flow's poll
+ * (pollRelaySignIn) trades the ID token for a relay token and turns sync on.
  */
-export async function setupSync(input: SetupRequest, deps: SetupDeps): Promise<SetupResult> {
-  const auth = deps.auth(input.url, input.anonKey);
-  if (!input.password && !input.code) {
-    await auth.sendCode(input.email).catch(authFailed);
-    return { state: 'code_sent', email: input.email };
-  }
-  const session = await (input.password ? auth.signInWithPassword(input.email, input.password) : auth.verifyCode(input.email, input.code!)).catch(authFailed);
-  await auth.probe().catch((err: Error) => {
-    throw new SetupError(`Signed in, but the relay is not set up: ${err.message}. Run the one-time Supabase setup in README.md`, 502);
+export async function startRelaySignIn(url: string, deps: SetupDeps): Promise<FlowStart> {
+  const info = await deps.relay.info(url).catch((err: Error) => {
+    throw new SetupError(err.message, err instanceof RelayRefusedError ? 400 : 502);
   });
+  const local = deps.clerk();
+  if (!local) throw new SetupError('Google sign-in is not set up on this Omni. Set the Clerk app in Settings, Sharing & access first', 409);
+  if (!info.issuer || !info.clientId) throw new SetupError('The relay has no Clerk app yet. Run npm run relay:config and set the secrets it prints', 409);
+  if (info.issuer !== local.issuer || info.clientId !== local.clientId)
+    throw new SetupError(`The relay trusts another Clerk app (${info.issuer}, ${info.clientId}) than this Omni (${local.issuer}, ${local.clientId})`, 409);
+  const name = await deps.machineName();
+  return startFlow('relay', { name, kind: 'app', finish: (_who, idToken) => finishRelaySignIn(url, idToken, name, deps) }, deps.flows).catch(flowError);
+}
 
-  await deps.storeSecret(SYNC_SECRETS.url, input.url);
-  await deps.storeSecret(SYNC_SECRETS.anonKey, input.anonKey);
-  await deps.storeSecret(SYNC_SECRETS.refreshToken, session.refreshToken);
+export async function pollRelaySignIn(flow: string, secret: string, deps: SetupDeps): Promise<PollResult> {
+  return pollFlow(flow, secret, deps.flows, true).catch(flowError);
+}
 
-  const relay = relayId(input.url, session.userId);
+/**
+ * Trade the ID token for this machine's relay token and turn sync on. Moving to another relay or user (the
+ * Supabase relay included) starts over there: the cursor goes back to 0, parked remote changes go, and this
+ * machine's history is queued again.
+ */
+async function finishRelaySignIn(url: string, idToken: string, machine: string, deps: SetupDeps): Promise<FlowOutcome> {
+  const { token, user } = await deps.relay.exchange(url, idToken, machine);
+  await deps.storeSecret(SYNC_SECRETS.url, url);
+  await deps.storeSecret(SYNC_SECRETS.token, token);
+  for (const name of LEGACY_SYNC_SECRETS) await deps.deleteSecret(name).catch(() => {});
+
+  const relay = relayId(url, user.id);
   const before = kv.get<string>('sync.relay');
   const relayChanged = !!before && before !== relay;
   if (relayChanged) {
@@ -127,20 +111,20 @@ export async function setupSync(input: SetupRequest, deps: SetupDeps): Promise<S
   kv.set('sync.relay', relay);
   kv.set('sync.enabled', true);
   await deps.start();
-  return { state: 'signed_in', email: session.email ?? input.email, relayChanged };
+  return { state: 'relay_signed_in', email: user.email, relayChanged };
 }
 
-function authFailed(err: unknown): never {
-  const e = err as { message?: string; status?: number; name?: string };
-  const refused = !!e.status && e.status >= 400 && e.status < 500;
-  throw new SetupError(e.message || 'sign-in failed', refused ? 401 : 502);
-}
-
-/** Stop syncing. With forget, also remove the credentials from the Keychain, so it takes a new sign-in. */
+/** Stop syncing. With forget, also end this machine's token on the relay and remove the credentials, so it takes a new sign-in. */
 export async function disableSync(opts: { forget?: boolean }, deps: SetupDeps) {
   await setActiveWorker(null);
   kv.set('sync.enabled', false);
-  if (opts.forget) for (const name of Object.values(SYNC_SECRETS)) await deps.deleteSecret(name);
+  if (!opts.forget) return;
+  const [url, token] = await Promise.all([deps.readSecret(SYNC_SECRETS.url), deps.readSecret(SYNC_SECRETS.token)]);
+  // Offline, or the relay is gone: the token stays valid there until it is taken off ALLOWED_USERS, but this machine forgets it.
+  if (url && token) await deps.relay.revoke(url, token).catch((err: Error) => console.warn(`[sync] could not sign out on the relay: ${err.message}`));
+  // Omni Connect rides on this sign-in, and the relay drops the machine's tunnel with its token.
+  await forgetConnect();
+  for (const name of [...Object.values(SYNC_SECRETS), ...LEGACY_SYNC_SECRETS]) await deps.deleteSecret(name);
 }
 
 /** Resume with the stored credentials. */
@@ -168,46 +152,12 @@ export function checkPathMap(body: unknown): PathMap {
 
 // ---------- the real dependencies ----------
 
-/** Supabase Auth over @supabase/supabase-js. The client keeps its session in memory only and never refreshes it itself. */
-export function supabaseAuth(url: string, anonKey: string): SyncAuth {
-  const client = import('@supabase/supabase-js').then(({ createClient }) =>
-    createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }),
-  );
-  let userId: string | null = null;
-  const session = (data: { session: { refresh_token: string } | null; user: { id: string; email?: string } | null }): SyncSession => {
-    if (!data.session || !data.user) throw new Error('no session');
-    userId = data.user.id;
-    return { refreshToken: data.session.refresh_token, userId: data.user.id, email: data.user.email ?? null };
-  };
-  return {
-    async signInWithPassword(email, password) {
-      const { data, error } = await (await client).auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      return session(data);
-    },
-    async sendCode(email) {
-      // shouldCreateUser: false, so a typo never makes a second user.
-      const { error } = await (await client).auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
-      if (error) throw error;
-    },
-    async verifyCode(email, code) {
-      const { data, error } = await (await client).auth.verifyOtp({ email, token: code, type: 'email' });
-      if (error) throw error;
-      return session(data);
-    },
-    async probe() {
-      const c = await client;
-      const changes = await c.from('changes').select('seq').limit(1);
-      if (changes.error) throw new Error(`no changes table (${changes.error.message})`);
-      const bucket = await c.storage.from('omni').list(userId ?? '', { limit: 1 });
-      if (bucket.error) throw new Error(`no omni bucket (${bucket.error.message})`);
-    },
-  };
-}
-
 export const defaultSetupDeps: SetupDeps = {
-  auth: supabaseAuth,
+  relay: relayAuth(),
+  clerk: clerkConfig,
+  machineName: computerName,
   storeSecret: (name, value) => setSecret('global', name, value),
+  readSecret: globalSecret,
   deleteSecret: (name) => deleteSecret('global', name),
   start: startSync,
 };

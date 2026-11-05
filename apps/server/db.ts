@@ -19,7 +19,7 @@ export type { EventRow } from './db/repos/events.ts';
 export { EVENT_COLUMNS, indexEvent, events } from './db/repos/events.ts';
 export type { SearchHit } from './db/repos/search.ts';
 export { search } from './db/repos/search.ts';
-export type { Artifact } from './db/repos/artifacts.ts';
+export type { Artifact, ArtifactWithThread } from './db/repos/artifacts.ts';
 export { ARTIFACT_COLUMNS, artifacts } from './db/repos/artifacts.ts';
 export { automationRuns } from './db/repos/automation-runs.ts';
 export { kv } from './db/repos/kv.ts';
@@ -34,5 +34,9 @@ export { actionRuns, channelActions, threadSetupRuns } from './db/repos/channel-
 export type { SkippedFile, TurnSnapshot, TurnSnapshotState } from './db/repos/turn-snapshots.ts';
 export { turnSnapshots } from './db/repos/turn-snapshots.ts';
 export { continuations, type Continuation } from './db/repos/continuations.ts';
+export type { RemoteCommand, RemoteCommandKind, RemoteCommandState } from './db/repos/remote-commands.ts';
+export { isCommandAhead, remoteCommands } from './db/repos/remote-commands.ts';
+export { assignments, type Assignment } from './db/repos/assignments.ts';
+export { transitions, type TransitionRow } from './db/repos/transitions.ts';
 export type { SyncEntity, SyncOp, OutboxRow } from './db/sync.ts';
 export { SEED_TS, outbox, syncMeta } from './db/sync.ts';

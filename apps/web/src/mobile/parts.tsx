@@ -2,6 +2,7 @@
 // Metrics are the design's, in CSS pixels on a 390-wide phone.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CrewMark, isCrewRole } from '../components/brand.tsx';
+import { Folded } from '../components/Folded.tsx';
 import { Avatar, Icon, StatusDot, type Glyph, type IconName } from '../components/ui.tsx';
 import type { RowItem } from './rows.ts';
 
@@ -112,7 +113,7 @@ export function MoAvatar({ role, channel, channelIcon, state, size = 36 }: { rol
           <CrewMark role={role} size={Math.round(size * 0.46)} />
         </span>
       ) : (
-        <Avatar name={channel ?? '?'} channelIcon={channelIcon} icon={channel === 'conductor' ? 'target' : undefined} size={size} />
+        <Avatar name={channel ?? '?'} channelIcon={channelIcon} omni={channel === 'conductor'} size={size} />
       )}
       {state && (
         <span className="absolute -right-px -bottom-px grid h-3.5 w-3.5 place-items-center rounded-full bg-bg">
@@ -131,10 +132,11 @@ export function MoDiff({ add, del }: { add: number; del: number }) {
   );
 }
 
-/** One thread in a list: Activity, a channel, search. */
-export function MoRow({ it, onOpen, last }: { it: RowItem; onOpen: () => void; last?: boolean }) {
+/** One thread in a list: a channel, search. */
+/** `trailing`: room at the end of the second line, for a control laid over the row (MoDelegatedRow's count). */
+export function MoRow({ it, onOpen, last, trailing }: { it: RowItem; onOpen: () => void; last?: boolean; trailing?: ReactNode }) {
   return (
-    <button type="button" onClick={onOpen} className="mo-row flex w-full items-center gap-3 px-1 py-2.5 text-left">
+    <button type="button" onClick={onOpen} className="mo-row flex min-w-0 w-full items-center gap-3 px-1 py-2.5 text-left">
       <MoAvatar role={it.role} channel={it.channelId} channelIcon={it.channelIcon} state={it.status} />
       <span className={`-mb-2.5 flex min-w-0 flex-1 flex-col gap-0.5 pb-2.5 ${last ? '' : 'border-b border-line'}`}>
         <span className="flex items-baseline gap-2">
@@ -143,6 +145,7 @@ export function MoRow({ it, onOpen, last }: { it: RowItem; onOpen: () => void; l
         </span>
         <span className="flex items-center gap-2 text-[12.5px] leading-[1.35] text-fg-3">
           <span className="min-w-0 flex-1 truncate">{[`#${it.channel}`, it.meta].filter(Boolean).join(' · ')}</span>
+          {trailing}
         </span>
       </span>
     </button>
@@ -217,14 +220,19 @@ export function MoListRow({
   );
 }
 
-/** Ben's message. `above` sits over the bubble (the context he attached); without `children` there is no bubble. */
-export function MoBubble({ children, caption, above }: { children: ReactNode; caption?: ReactNode; above?: ReactNode }) {
+/**
+ * Ben's message. `above` sits over the bubble (the context he attached); without `children` there is no bubble.
+ * `fold` keeps a long message to its first lines, faded, with Show more under it.
+ */
+export function MoBubble({ children, caption, above, fold }: { children: ReactNode; caption?: ReactNode; above?: ReactNode; fold?: boolean }) {
   return (
     <div className="flex flex-col items-end gap-1">
       {caption && <span className="text-[12px] leading-[1.3] text-fg-3">{caption}</span>}
       {above}
       {children != null && (
-        <div className="max-w-[86%] rounded-[20px] bg-bubble px-3.5 py-2.5 text-[15px] leading-[1.45] break-words whitespace-pre-wrap text-pretty">{children}</div>
+        <div className="max-w-[86%] rounded-[20px] bg-bubble px-3.5 py-2.5 text-[15px] leading-[1.45] break-words whitespace-pre-wrap text-pretty">
+          {fold ? <Folded>{children}</Folded> : children}
+        </div>
       )}
     </div>
   );

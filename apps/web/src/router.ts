@@ -1,7 +1,14 @@
 import { useSyncExternalStore } from 'react';
+import { SETTINGS_SECTION_DEFS, SETTINGS_SECTION_IDS, settingsSectionNamed, type SettingsSectionId } from '@omni/shared/settings-catalog.ts';
 import type { NewThreadPreset } from './new-thread-preset.ts';
 
 export type ChannelTab = 'threads' | 'prs' | 'settings';
+
+/** The Settings sections, the same on desktop and phone (@omni/shared/settings-catalog.ts). Automations stays a page of its own. */
+export const SETTINGS_SECTIONS = SETTINGS_SECTION_IDS;
+export type SettingsSection = SettingsSectionId;
+/** The pages Settings replaced (#404). Their hashes still work and land on the section that holds them now. */
+const LEGACY_SETTINGS: Record<string, SettingsSection> = { secrets: 'secrets', sync: 'sync', storage: 'worktrees' };
 
 /** What a thread link can open on its own screen in the phone layout. The desktop shows the thread itself. */
 export const THREAD_VIEWS = ['steps', 'changes', 'pr', 'browser', 'terminal', 'actions', 'details'] as const;
@@ -17,14 +24,18 @@ export type Route =
   | { name: 'thread'; id: string; artifact?: number; view?: ThreadView; turn?: number; at?: number }
   | { name: 'search'; q: string }
   | { name: 'automations' }
-  | { name: 'secrets' }
   | { name: 'roles' }
-  | { name: 'sync' }
-  | { name: 'storage' }
-  /** `workspace`: the full workspace settings, which the phone layout keeps behind its own Settings screen. */
-  | { name: 'settings'; page?: 'workspace' }
+  /**
+   * No section is the Settings hub: General on the desktop, the list of sections on a phone. `focus`: a search
+   * result's entry (@omni/shared/settings-catalog.ts) to scroll to.
+   */
+  | { name: 'settings'; section?: SettingsSection; focus?: string }
   | { name: 'artifacts' }
+  /** Every channel's pull requests in one list: the phone's PRs tab, a Workspace page on the desktop. */
+  | { name: 'prs' }
   | { name: 'new-channel' }
+  /** The desktop app's Quick Prompt panel (apps/desktop/src/quick-prompt.ts). A page of its own, with no sidebar. */
+  | { name: 'quick-prompt' }
   | { name: 'notfound'; path: string };
 
 export function parseHash(hash: string): Route {
@@ -65,14 +76,18 @@ export function parseHash(hash: string): Route {
   if (a === 'channels' && !b) return { name: 'channels' };
   if (a === 'search') return { name: 'search', q: q.get('q') ?? '' };
   if (a === 'automations' && !b) return { name: 'automations' };
-  if (a === 'secrets' && !b) return { name: 'secrets' };
   if (a === 'roles' && !b) return { name: 'roles' };
-  if (a === 'sync' && !b) return { name: 'sync' };
-  if (a === 'storage' && !b) return { name: 'storage' };
+  if (Object.hasOwn(LEGACY_SETTINGS, a) && !b) return { name: 'settings', section: LEGACY_SETTINGS[a] };
   if (a === 'settings' && !b) return { name: 'settings' };
-  if (a === 'settings' && b === 'workspace' && !c) return { name: 'settings', page: 'workspace' };
+  if (a === 'settings' && b && !c) {
+    // An old section name (from before this layout) opens the section that holds it now.
+    const section = settingsSectionNamed(b);
+    if (section) return { name: 'settings', section, focus: q.get('focus') || undefined };
+  }
   if (a === 'artifacts' && !b) return { name: 'artifacts' };
+  if (a === 'prs' && !b) return { name: 'prs' };
   if (a === 'new-channel' && !b) return { name: 'new-channel' };
+  if (a === 'quick-prompt' && !b) return { name: 'quick-prompt' };
   return { name: 'notfound', path: pathPart };
 }
 
@@ -91,24 +106,26 @@ export function pageTitle(route: Route, channelName: (id: string) => string | un
       return 'Search';
     case 'automations':
       return 'Automations';
-    case 'secrets':
-      return 'Secrets';
     case 'roles':
       return 'Roles';
-    case 'sync':
-      return 'Sync';
-    case 'storage':
-      return 'Storage';
     case 'settings':
-      return 'Settings';
+      return route.section ? SETTINGS_LABEL[route.section] : 'Settings';
     case 'artifacts':
       return 'Artifacts';
+    case 'prs':
+      return 'Pull requests';
     case 'new-channel':
       return 'New channel';
     default:
       return 'Omni';
   }
 }
+
+export const SETTINGS_LABEL = Object.fromEntries(SETTINGS_SECTION_DEFS.map((s) => [s.id, s.title])) as Record<SettingsSection, string>;
+
+/** The one hash for a settings route, so a legacy `#/sync` can be replaced with it. `focus`: an entry to scroll to. */
+export const settingsHash = (section?: SettingsSection, focus?: string) =>
+  section ? `#/settings/${section}${focus ? `?focus=${encodeURIComponent(focus)}` : ''}` : '#/settings';
 
 const subscribe = (cb: () => void) => {
   window.addEventListener('hashchange', cb);
@@ -150,14 +167,14 @@ export const href = {
   channels: () => '#/channels',
   search: (q: string) => `#/search?q=${encodeURIComponent(q)}`,
   automations: () => '#/automations',
-  secrets: () => '#/secrets',
   roles: () => '#/roles',
-  sync: () => '#/sync',
-  storage: () => '#/storage',
-  /** The workspace Settings page (your name). A channel's own settings tab is `settings(id)`. */
-  settingsPage: () => '#/settings',
-  workspaceSettings: () => '#/settings/workspace',
+  /** The Settings hub. A channel's own settings tab is `settings(id)`. */
+  settingsPage: () => settingsHash(),
+  /** One Settings section: General, Workspace, Machines or Secrets. */
+  settingsSection: (section: SettingsSection, focus?: string) => settingsHash(section, focus),
   artifacts: () => '#/artifacts',
+  /** Every channel's PRs. One channel's is `prs(id)`. */
+  pullRequests: () => '#/prs',
   newChannel: () => '#/new-channel',
 };
 
@@ -174,7 +191,19 @@ export function takeComposerFocus() {
   return v;
 }
 
-// ---------- a new thread from a thread (`/clear`, "New thread on another model") ----------
+/**
+ * New thread from the sidebar or the palette: the current channel's composer, the open thread's channel on a thread,
+ * else Home's. `open` is the store's open thread, which counts only while it is the one the route shows.
+ */
+export function startNewThread(route: Route, open: { id: string; channel_id: string } | null) {
+  const channel = route.name === 'channel' ? route.id : route.name === 'thread' && open?.id === route.id ? open.channel_id : null;
+  if (channel) {
+    if (route.name !== 'channel' || route.tab !== 'threads') navigate(`/c/${encodeURIComponent(channel)}`);
+  } else if (route.name !== 'home') navigate('/');
+  requestComposerFocus();
+}
+
+// ---------- a new thread from a thread (`/clear`) ----------
 
 let preset: NewThreadPreset | null = null;
 // Counts presets, so a composer already open on the channel (the folder's "New thread here") remounts to read it.

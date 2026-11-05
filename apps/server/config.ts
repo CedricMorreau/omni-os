@@ -1,14 +1,36 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { configPath, resolved } from './user-config.ts';
+import { configPath, omniCheckout, resolved } from './user-config.ts';
 
-/** The repo root: data/, crew/, automations/ and mods/ live here, beside apps/ and packages/. */
+/**
+ * The repo root: data/, crew/, automations/ and mods/ live here, beside apps/ and packages/. The desktop app ships the
+ * server as apps/server/index.mjs in a copy of that layout (apps/desktop/scripts/stage.ts), so the same path holds there.
+ */
 export const ROOT = resolve(import.meta.dirname, '../..');
 
-// Minimal .env loader so the launchd service and `npm run dev` read the same config.
-const envFile = join(ROOT, '.env');
-if (existsSync(envFile)) {
+/** The server runs as the desktop app's bundle, not from a checkout's TypeScript. Every module of a bundle shares its URL. */
+export const BUNDLED = import.meta.url.endsWith('.mjs');
+
+/**
+ * What a Node child of the server needs from this runtime. The desktop app runs the server on Electron's own Node,
+ * which acts as Node only when told, and a child started with process.execPath is that same binary.
+ */
+export const nodeChildEnv: Record<string, string> = process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+// The variable was for this process. Left in process.env, every harness, terminal and action would inherit it, and an
+// Electron app run from a thread would start as plain Node.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
+// Minimal .env loader so a server an app starts from a checkout and `npm run dev` read the same config. The desktop
+// app's bundle sits in the app's read-only resources and gets only a fixed environment (apps/desktop/src/backend/launch.ts),
+// so it reads the .env in its data dir instead. When that data dir is a checkout's data/, which the desktop app adopts
+// from an earlier install (apps/desktop/src/backend/data-dir.ts), the checkout's .env still counts,
+// below the data dir's: it may hold OMNI_SECRET_STORE, without which the secrets the old server kept are not found.
+const checkout = omniCheckout();
+const envFiles = BUNDLED
+  ? [join(resolve(ROOT, process.env.OMNI_DATA_DIR || 'data'), '.env'), ...(checkout ? [join(checkout, '.env')] : [])]
+  : [join(ROOT, '.env')];
+for (const envFile of envFiles.filter((file) => existsSync(file))) {
   for (const line of readFileSync(envFile, 'utf8').split('\n')) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
     if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
@@ -31,16 +53,16 @@ export const config = {
   claudeBin: env.OMNI_CLAUDE_BIN ?? 'claude',
   defaultModel: env.OMNI_DEFAULT_MODEL ?? 'claude-sonnet-5-5',
   permissionMode: env.OMNI_PERMISSION_MODE ?? 'bypassPermissions',
-  maxConcurrent: Number(env.OMNI_MAX_CONCURRENT ?? 4),
+  maxConcurrent: Number(env.OMNI_MAX_CONCURRENT ?? 12),
   /** Per-harness concurrency caps. Claude Code uses OMNI_MAX_CONCURRENT. */
-  maxConcurrentCodex: Number(env.OMNI_MAX_CONCURRENT_CODEX ?? 4),
-  maxConcurrentCursor: Number(env.OMNI_MAX_CONCURRENT_CURSOR ?? 4),
-  maxConcurrentHermes: Number(env.OMNI_MAX_CONCURRENT_HERMES ?? 4),
-  /** Hermes API server on the server's Tailscale address, like http://100.x.y.z:8642. Unset means Hermes is off. The bearer token is the Keychain secret HERMES_API_KEY, not an env var. */
+  maxConcurrentCodex: Number(env.OMNI_MAX_CONCURRENT_CODEX ?? 12),
+  maxConcurrentCursor: Number(env.OMNI_MAX_CONCURRENT_CURSOR ?? 12),
+  maxConcurrentHermes: Number(env.OMNI_MAX_CONCURRENT_HERMES ?? 12),
+  /** Hermes API server on the server's Tailscale address, like http://100.x.y.z:8642. Unset means Hermes is off. The bearer token is the secret store secret HERMES_API_KEY, not an env var. */
   get hermesUrl() {
     return resolved.hermesUrl();
   },
-  maxConcurrentCursorCloud: Number(env.OMNI_MAX_CONCURRENT_CURSOR_CLOUD ?? 4),
+  maxConcurrentCursorCloud: Number(env.OMNI_MAX_CONCURRENT_CURSOR_CLOUD ?? 12),
   /** The Cursor Cloud Agents API. Set only to point Omni at a fake for tests or QA. The key is the secret CURSOR_API_KEY. */
   cursorApiUrl: env.OMNI_CURSOR_API_URL ?? 'https://api.cursor.com',
   /** How often a running Cursor cloud agent's run is read for its status, branch and PR. */
@@ -79,6 +101,10 @@ export const config = {
   retentionFirstPassMs: Number(env.OMNI_RETENTION_FIRST_PASS_MS ?? 60_000),
 };
 
+function mcpScript(name: 'omni' | 'ask' | 'render' | 'threads' | 'ticket'): string {
+  return join(ROOT, 'apps', 'mcp', BUNDLED ? `${name}.mjs` : `${name}.ts`);
+}
+
 // OMNI_DATA_DIR moves all runtime state, so tests can run against a temp dir.
 const DATA = env.OMNI_DATA_DIR ? resolve(ROOT, env.OMNI_DATA_DIR) : join(ROOT, 'data');
 
@@ -102,16 +128,19 @@ export const paths = {
     return configPath();
   },
   webDist: env.OMNI_WEB_DIST ? resolve(ROOT, env.OMNI_WEB_DIST) : join(ROOT, 'apps', 'web', 'dist'),
-  mcpOmni: join(ROOT, 'apps', 'mcp', 'omni.ts'),
+  mcpOmni: mcpScript('omni'),
   /** ask_user_question, which every local thread gets. */
-  mcpAsk: join(ROOT, 'apps', 'mcp', 'ask.ts'),
+  mcpAsk: mcpScript('ask'),
+  /** html_render, which every local thread gets. */
+  mcpRender: mcpScript('render'),
   /** read_referenced_thread alone, which every local thread without `omni` gets. */
-  mcpThreads: join(ROOT, 'apps', 'mcp', 'threads.ts'),
-  mcpTicket: join(ROOT, 'apps', 'mcp', 'ticket.ts'),
+  mcpThreads: mcpScript('threads'),
+  mcpTicket: mcpScript('ticket'),
   /** Claude Code mods (plugins of function hooks) Omni loads when config.mods is on. */
   mods: join(ROOT, 'mods'),
   modProgress: join(ROOT, 'mods', 'omni-progress'),
-  tsx: join(ROOT, 'node_modules', '.bin', 'tsx'),
+  /** Runs the mcp scripts: tsx on the TypeScript in a checkout, this runtime on the built files in the desktop app. */
+  mcpRunner: BUNDLED ? process.execPath : join(ROOT, 'node_modules', '.bin', 'tsx'),
 };
 
 for (const p of [paths.data, paths.threads, paths.worktrees, paths.browsers]) mkdirSync(p, { recursive: true });

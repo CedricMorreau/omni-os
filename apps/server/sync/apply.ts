@@ -58,10 +58,13 @@ export function claim(change: RemoteChange): boolean {
   return true;
 }
 
+// A change already deferred for the same reason is left as it is. Every sync cycle retries every deferred row, and
+// rewriting each one (its change JSON spills onto overflow pages) once a cycle kept the disk busy without end.
 function defer(change: RemoteChange, err: unknown) {
   db.prepare(
     `INSERT INTO sync_deferred (seq, change, error) VALUES (?, ?, ?)
-     ON CONFLICT(seq) DO UPDATE SET error = excluded.error, tries = tries + 1`,
+     ON CONFLICT(seq) DO UPDATE SET error = excluded.error, tries = tries + 1
+     WHERE sync_deferred.error IS NOT excluded.error`,
   ).run(change.seq, JSON.stringify(change), (err as Error)?.message ?? String(err));
 }
 

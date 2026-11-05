@@ -1,6 +1,6 @@
 // Delegation card: the threads a Conductor (or a team lead) fanned out to, or a thread's own sub-agents, each with its live state.
 import type { ReactNode } from 'react';
-import { relTime } from '../format.ts';
+import { relTime } from '@omni/shared/format.ts';
 import { href } from '../router.ts';
 import { useNow } from '../store.tsx';
 import type { Branch } from '../transcript/delegation.ts';
@@ -25,7 +25,7 @@ export function RailItem({ status, children }: { status: string; children: React
   );
 }
 
-export const ROW_CARD = 'press flex w-full min-w-0 items-start gap-3 rounded-[20px] bg-bg px-3.5 py-3 text-left shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card),inset_0_0_0_1px_var(--line)]';
+export const ROW_CARD = 'press flex w-full min-w-0 items-start gap-3 rounded-[16px] bg-bg px-3.5 py-3 text-left shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card),inset_0_0_0_1px_var(--line)]';
 
 /** What a row shows: its mark, title, a meta line and its state. */
 export function BranchFace({ role, title, status, children }: { role: string | null | undefined; title: string; status: string; children: ReactNode }) {
@@ -93,7 +93,7 @@ export function DelegationCard({
   const combining = lead?.status === 'running' && n > 0 && branches.every((b) => b.status !== 'running' && b.status !== 'queued');
   const what = lead || team ? `Team of ${n}` : `Delegated ${n === 1 ? '1 task' : `${n} tasks`}`;
   return (
-    <section aria-label={what} className="rounded-[24px] bg-surface px-3.5 pt-3.5 pb-3">
+    <section aria-label={what} className="rounded-[20px] px-3.5 pt-3.5 pb-3 shadow-[inset_0_0_0_1px_var(--line)]">
       <header className="mb-2 flex min-w-0 items-center gap-2.5 px-1 text-[13.5px]">
         <CrewMark role="conductor" size={16} className="text-fg" />
         <span className="shrink-0 font-medium text-fg">{what}</span>

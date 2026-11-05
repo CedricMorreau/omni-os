@@ -1,4 +1,4 @@
-// Removes worktrees from data/worktrees: the ones Ben confirms after reviewing them in Settings > Storage and, when
+// Removes worktrees from data/worktrees: the ones Ben confirms after reviewing them in Settings > Worktrees and, when
 // this Mac's retention policy is on, the ones a daily pass finds idle long enough. Each is checked again right before
 // it goes, with its folder held (workspace.ts) the way a turn, a terminal or a checkout holds it, so whichever starts
 // first wins. Removal is a `git worktree move` aside, then `git worktree remove` without --force: the branch stays, and
@@ -167,7 +167,7 @@ async function removeOne(c: CleanupCandidate, trigger: CleanupTrigger, policy: R
         updateScanItem(c.id, item);
         if (item.verdict !== 'eligible') return out('kept', item.reasons, item.errors);
         const days = item.lastActiveAt ? Math.floor(((opts.now ?? Date.now()) - Date.parse(item.lastActiveAt)) / DAY) : 0;
-        return out('kept', [{ code: 'retention', message: `Its thread was active ${days < 1 ? 'today' : `${days} day${days === 1 ? '' : 's'} ago`}; this Mac keeps worktrees for ${policy.idleDays} days.` }]);
+        return out('kept', [{ code: 'retention', message: `Its thread was active ${days < 1 ? 'today' : `${days} day${days === 1 ? '' : 's'} ago`}; this machine keeps worktrees for ${policy.idleDays} days.` }]);
       }
       const keptBy = (reason: KeepReason) => {
         updateScanItem(c.id, { ...item, verdict: 'kept', reasons: [reason], eligibleBecause: null });

@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import type { Thread, Channel as ChannelRow, ChannelLink, EventRow, Artifact, Folder, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult } from '@omni/server/db.ts';
+import type { Thread as ThreadRow, Channel as ChannelRow, ChannelLink, EventRow, Artifact, Folder, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult } from '@omni/server/db.ts';
 import type { Attachment } from '@omni/server/uploads.ts';
 import type { HarnessInfo, ModelEntry, HarnessId } from '@omni/server/harness/types.ts';
 import type { CommandList as HarnessCommands } from '@omni/server/commands.ts';
 import type { ContextView } from '@omni/server/context.ts';
 import type { ContextUsage } from '@omni/shared/context-meter.ts';
-import type { HandoffView } from '@omni/shared/handoff.ts';
+import type { HandoffView, Takeover } from '@omni/shared/handoff.ts';
+import type { Opening } from '@omni/shared/opening.ts';
 import type { DeliveryPage, DeliveryView } from '@omni/shared/automation-triggers.ts';
 import type { ArtifactTrigger, PrTrigger, WebhookTrigger } from '@omni/server/automation-events.ts';
 import type { ContinueLink } from '@omni/shared/continue.ts';
 import type { Clipped, HistoryHead } from '@omni/shared/history.ts';
 import { outputQuery, type OutputChunk } from '@omni/shared/tool-output.ts';
 
-export type { Thread, EventRow, Artifact, Attachment, HarnessInfo, ModelEntry, HarnessId, Folder, ContextUsage, ContextView, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult, ArtifactTrigger, WebhookTrigger, DeliveryView, DeliveryPage };
+export type { EventRow, Artifact, Attachment, HarnessInfo, ModelEntry, HarnessId, Folder, ContextUsage, ContextView, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult, ArtifactTrigger, WebhookTrigger, DeliveryView, DeliveryPage };
 
 /** A harness in the catalog, plus how many of its threads are running now. */
-export type HarnessWithRunning = HarnessInfo & { running: number };
+export type HarnessWithRunning = HarnessInfo & { running: number; /** How to install it, when it is not available and has a local CLI. */ install?: string };
 
 /** A thread's `/` menu: its harness's commands, and the names Ben used last on that harness, newest first. */
 export type CommandList = HarnessCommands & { recent?: string[] };
@@ -30,9 +31,15 @@ export interface ExtraRepo {
 }
 export type Channel = Omit<ChannelRow, 'design_system' | 'default_base' | 'links' | 'extra_repos'> & { design_system_size: number; links: ChannelLink[]; extra_repos?: ExtraRepo[] };
 
+/**
+ * A thread as the API sends it. `delegating`: a thread it delegated, at any depth, still runs or queues
+ * (apps/server/delegating.ts). Read running state through @omni/shared/delegate-count.ts, not `status` alone.
+ */
+export type Thread = ThreadRow & { delegating?: boolean };
+
 /** Just enough of a thread to list it under its channel in the sidebar. */
 export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at'> &
-  Partial<Pick<Thread, 'parent_id' | 'source'>> & { updated_at?: string; folder_id?: string | null; harness?: string; done_at?: string | null; waiting_on?: string | null };
+  Partial<Pick<Thread, 'parent_id' | 'source' | 'delegating'>> & { updated_at?: string; folder_id?: string | null; harness?: string; done_at?: string | null; waiting_on?: string | null };
 /** A Conductor job and its cross-channel delegated threads, as the channel API sends them. */
 export interface ConductorHandoffGroup {
   parent: ThreadStub;
@@ -76,37 +83,16 @@ export interface Profile {
   pronouns?: string;
   email?: string;
   timezone?: string;
-  /** False until onboarding finished (web, Mac or `npm run setup`). Older servers leave it out. */
+  /** False until onboarding finished (the Web UI or `npm run setup`). Older servers leave it out. */
   onboarded?: boolean;
 }
 
 /** The user config (data/omni.config.json) behind onboarding and Settings: GET and PUT /api/setup. Empty strings mean the default. */
-export interface UserConfig {
-  onboardedAt?: string;
-  user: { name: string; pronouns: string; email: string; timezone: string };
-  workspace: { root: string; reposDir: string; githubOwner: string };
-  integrations: { hermesUrl: string; centralBrainDir: string; tailscaleLogin?: string };
-  automations: Record<string, { enabled?: boolean; channel?: string }>;
-}
-export type UserConfigPatch = {
-  user?: Partial<UserConfig['user']>;
-  workspace?: Partial<UserConfig['workspace']>;
-  integrations?: Partial<UserConfig['integrations']>;
-};
-export interface SetupState {
-  onboarded: boolean;
-  /** Where the file lives, with ~ for the home folder. */
-  path: string;
-  config: UserConfig;
-  /** What each value resolves to on the server's machine, defaults included. */
-  resolved: { timezone: string; workspaceRoot: string; reposDir: string; centralBrainDir: string; hermesUrl: string };
-  fallbacks: { timezone: string; workspaceRoot: string; reposDir: string; home: string };
-  omniRepo: string | null;
-  /** POST /api/setup/complete only: the #conductor thread holding the welcome message, on the first run. */
-  threadId?: string | null;
-}
+export type { SetupState, UserConfig, UserConfigPatch } from '@omni/shared/settings.ts';
 
 export interface Status {
+  /** Which server this is. Only the fields the web reads. */
+  server?: { secretStore?: string; version?: string; gitHead?: string | null; startedAt?: string; root?: string; dataDir?: string; port?: number; pid?: number };
   usage: HarnessUsage;
   slots: Partial<Record<HarnessId, HarnessSlot>>;
   running: number;
@@ -115,6 +101,17 @@ export interface Status {
   maxUploadMb: number;
   /** Older servers leave it out. */
   profile?: Profile;
+  /** The Mac the server runs on, and whether this browser sits at it. Older servers leave it out. */
+  device?: Device;
+  /** A Grok Bot webhook URL is set on this server. Without it the clients hide Send to Grok Bot. Older servers leave it out. */
+  grokBot?: boolean;
+}
+
+export interface Device {
+  /** Its ComputerName. */
+  name: string;
+  /** False when this browser reaches it through tailscale serve from another device. */
+  here: boolean;
 }
 
 export interface ThreadDetail {
@@ -122,17 +119,26 @@ export interface ThreadDetail {
   channel: Channel | undefined;
   events: EventRow[];
   artifacts: Artifact[];
+  /**
+   * The newest files and screenshots of the threads it delegated to, at any depth (packages/shared/crew-artifacts.ts).
+   * Older servers leave it out.
+   */
+  crew_artifacts?: ArtifactWithThread[];
   children: Thread[];
   /** Members of the teams among `children`. Older servers leave it out. */
   team?: Thread[];
   parent: Thread | null;
   pending?: PendingMsg[];
+  /** Ben's first message while the transcript has none of his yet (packages/shared/opening.ts). Older servers leave it out. */
+  opening?: Opening | null;
   /** A warm CLI process is attached (idle or mid-turn), so the next message starts instantly. */
   live?: boolean;
   /** Why this Mac cannot start a turn in the thread (sync: it runs on the other Mac, or its folder is not here). */
   blocked?: string;
   /** A handoff to or from another synced Mac that is under way or just settled. Older servers leave it out. */
   handoff?: HandoffView | null;
+  /** Another synced Mac holds the thread, so this Mac can ask for it. Absent when this Mac holds it or a handoff is under way. */
+  takeover?: Takeover;
   /** The thread this one continues on another harness, and the threads that continue it. Older servers leave them out. */
   continued_from?: ContinueLink | null;
   continued_in?: ContinueLink[];
@@ -222,12 +228,37 @@ export interface PRSummary {
   mergeable: string;
   checks: Checks;
 }
+/**
+ * GET /prs: the PRs of every channel with a repo set, open ones first, then newest first. `repos` is every repo asked,
+ * `failed` the ones gh could not read, with gh's reason.
+ */
+export interface AllPRs {
+  repos: string[];
+  prs: ListedPR[];
+  failed: { repo: string; error: string }[];
+  /** The gh login, which the page groups by. null when gh cannot say; absent from an older server. */
+  viewer?: string | null;
+}
+/** A GET /prs row: a summary, its repo, and what the page searches and groups by. */
+export type ListedPR = PRSummary & { repo: string; createdAt?: string; labels?: string[]; reviewRequests?: string[] };
 /** What GET /channels/:id/thread-prs marks a branch with: its open or merged PR. */
 export interface BranchPRMark {
   number: number;
+  title: string;
   state: 'OPEN' | 'MERGED';
   isDraft: boolean;
   url: string;
+}
+/**
+ * A PR a delegated thread opened, from GET /threads/:id/pr `crew`: one per thread under this one in the delegation
+ * tree, at any depth, oldest delegation first. Open or merged only.
+ */
+export interface CrewPR extends BranchPRMark {
+  repo: string;
+  thread_id: string;
+  thread_title: string;
+  channel_id: string;
+  task_id: string | null;
 }
 export interface PRDetail extends PRSummary {
   body: string;
@@ -236,75 +267,33 @@ export interface PRDetail extends PRSummary {
   comments: { author: { login: string } | null; body: string; createdAt?: string }[];
   checkRuns: { name: string; state: string; url?: string }[];
   diff: string;
+  /** The Omni thread on its head branch and the thread that delegated it. null for a PR opened outside Omni. */
+  thread?: PRThread | null;
 }
-
-/** GET /api/threads/:id/changes (apps/server/changes.ts): a thread's branch changes since its base commit, before any PR. */
-/** `turn`: what one turn changed, between its saved before and after snapshots. */
-export type ChangeKind = 'committed' | 'staged' | 'unstaged' | 'untracked' | 'turn';
-export type ChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type_changed' | 'unmerged';
-/** Why a file's diff text was left out. */
-export type DiffOmitted = 'binary' | 'too_large' | 'limit' | 'symlink' | 'unavailable';
-export interface ChangedFile {
-  path: string;
-  old_path: string | null;
-  status: ChangeStatus;
-  /** Null when git cannot count them (binary) or the file was too big to read. */
-  additions: number | null;
-  deletions: number | null;
-  binary: boolean;
-  omitted: DiffOmitted | null;
-  /** This file's part of a unified diff. Empty when omitted. */
-  diff: string;
-}
-export interface ChangeGroup {
-  kind: ChangeKind;
-  files: ChangedFile[];
-  truncated: boolean;
-}
-export interface ChangeBase {
-  sha: string;
-  /** The branch it came from, or `HEAD`. */
-  ref: string;
-  /** `thread-start`: where the worktree was cut. `merge-base`: with the default branch, for a thread without one. */
-  how: 'thread-start' | 'merge-base';
-  recorded_at: string;
-}
-export type BranchChanges =
-  | { available: false; reason: string }
-  | { available: true; cwd: string; branch: string | null; head: string; base: ChangeBase; groups: ChangeGroup[] };
-
-/** GET /api/threads/:id/turns (apps/server/turns.ts): a worktree thread's saved turns, and what one of them changed. */
-export type TurnState = 'running' | 'capturing' | 'ready' | 'failed';
-/** One side of a turn: a snapshot commit under a hidden ref, and HEAD when it was taken. */
-export interface TurnSide {
-  sha: string;
-  ref: string;
-  head: string;
-}
-export interface TurnView {
+export interface PRThread {
   id: string;
-  n: number;
-  /** running: under way. capturing: ended, its after snapshot being saved. failed: `error` says why. */
-  state: TurnState;
-  error: string | null;
-  before: TurnSide | null;
-  after: TurnSide | null;
-  /** The Result the turn ended with, as in Needs you. */
-  completion_uid: string | null;
-  started_at: string;
-  ended_at: string | null;
+  title: string;
+  channel_id: string;
+  parent: { id: string; title: string } | null;
 }
-export interface TurnChanges {
-  /** False when this thread's turns are not saved here; `reason` says why. */
-  available: boolean;
-  reason: string | null;
-  /** Newest first. */
-  turns: TurnView[];
-  /** The turn shown: the one asked for, else the newest. */
-  turn: TurnView | null;
-  /** Its files once both snapshots are saved: one `turn` group. */
-  groups: ChangeGroup[];
-}
+
+/**
+ * GET /api/threads/:id/changes (a thread's branch changes since its base commit, before any PR) and
+ * GET /api/threads/:id/turns (a worktree thread's saved turns, and what one of them changed): the server's own types.
+ */
+export type {
+  BranchChanges,
+  ChangeBase,
+  ChangeGroup,
+  ChangeKind,
+  ChangedFile,
+  ChangeStatus,
+  DiffOmitted,
+  TurnChanges,
+  TurnSide,
+  TurnState,
+  TurnView,
+} from '@omni/shared/changes.ts';
 
 export interface AutomationRun {
   thread_id: string | null;
@@ -340,7 +329,7 @@ export interface Automation {
   deliveries: DeliveryView[];
   /** Older deliveries exist: GET /automations/:id/deliveries pages through them. */
   deliveries_more: boolean;
-  /** Set for a webhook automation: where GitHub posts, and whether this Mac holds the signing secret. `secret` is its Keychain name, never the value. */
+  /** Set for a webhook automation: where GitHub posts, and whether this Mac holds the signing secret. `secret` is its secret name, never the value. */
   webhook?: { path: string; secret: string; secret_set: boolean };
 }
 
@@ -351,9 +340,10 @@ export interface SecretRow {
 }
 
 /** GET /api/sync/status. */
-export type { SyncStatus } from '@omni/server/sync/worker.ts';
-/** POST /api/sync/setup: a code went out by email, or the sign-in worked. */
-export type SyncSetupResult = { state: 'code_sent'; email: string } | { state: 'signed_in'; email: string; relayChanged: boolean };
+import type { SyncStatus } from '@omni/server/sync/worker.ts';
+export type { SyncStatus };
+/** POST /api/sync/setup/poll once Clerk approved and the relay gave this machine its token. */
+export type SyncSignedIn = { state: 'signed_in'; email: string | null; relayChanged: boolean; status: SyncStatus };
 
 /** A sub-agent or background task the CLI is running, as GET /api/tasks and the feed's 'tasks' event carry it. */
 export interface BackgroundTask {
@@ -407,11 +397,34 @@ export type FeedEvent =
   | { type: 'usage'; harness?: HarnessId; usage: Usage | null }
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'channel'; id: string }
-  /** Ben read a thread's result, here or in the Mac app: Needs you changed, nothing else did. */
+  /** Ben read a thread's result, here or on another client: Needs you changed, nothing else did. */
   | { type: 'needs_you'; thread_id: string }
   /** A delivery to this automation was saved or changed state. */
   | { type: 'automation_delivery'; automation: string }
+  /** The update check or Update moved on: refetch GET /api/update. */
+  | { type: 'update' }
   | { type: 'reconnect' };
+
+/** GET /api/update (apps/server/update.ts): how far this server is behind main, and where Update is. */
+export interface UpdateCommit {
+  sha: string;
+  subject: string;
+}
+
+export type UpdatePhase = 'idle' | 'waiting' | 'updating' | 'restarting' | 'failed';
+
+export interface UpdateView {
+  current: string | null;
+  target: string | null;
+  behind: number;
+  commits: UpdateCommit[];
+  checkedAt: string | null;
+  phase: UpdatePhase;
+  waitingFor: number;
+  error: string | null;
+  /** An app started this server and starts it again, so Update can run. */
+  canApply: boolean;
+}
 
 // ---------- fetch helpers ----------
 
@@ -667,7 +680,9 @@ export function openSSE(
 export type StreamMessage =
   | { type: 'event'; event: EventRow }
   | { type: 'artifact'; artifact: Artifact }
-  | { type: 'thread'; thread: Thread; pending?: PendingMsg[]; live?: boolean; blocked?: string; handoff?: HandoffView | null }
+  /** A new or changed file or screenshot of a thread this one delegated to, at any depth. */
+  | { type: 'crew_artifact'; artifact: ArtifactWithThread }
+  | { type: 'thread'; thread: Thread; pending?: PendingMsg[]; opening?: Opening | null; live?: boolean; blocked?: string; handoff?: HandoffView | null; takeover?: Takeover }
   /**
    * Sent once per connect, after any replayed rows (#224): the detail as GET /threads/:id has it now. `snapshot`: the
    * gap was too big to replay, so `detail` carries the newest page and its head instead.
@@ -683,11 +698,15 @@ export function classifyStream(d: unknown): StreamMessage | null {
   if (o.kind === 'sync' && o.thread)
     return { type: 'sync', detail: { ...o, events: Array.isArray(o.events) ? o.events : [] } as unknown as ThreadOpen, snapshot: o.catch_up === 'snapshot' && !!o.history };
   if (o.kind === 'artifact' && o.artifact) return { type: 'artifact', artifact: o.artifact as Artifact };
+  if (o.kind === 'crew_artifact' && o.artifact) return { type: 'crew_artifact', artifact: o.artifact as ArtifactWithThread };
   if (o.kind === 'thread' && o.thread)
     return {
-      type: 'thread', thread: o.thread as Thread, pending: o.pending as PendingMsg[] | undefined, live: typeof o.live === 'boolean' ? o.live : undefined,
+      type: 'thread', thread: o.thread as Thread, pending: o.pending as PendingMsg[] | undefined,
+      opening: o.opening === undefined ? undefined : o.opening && typeof o.opening === 'object' ? (o.opening as Opening) : null,
+      live: typeof o.live === 'boolean' ? o.live : undefined,
       blocked: typeof o.blocked === 'string' ? o.blocked : undefined,
       handoff: o.handoff && typeof o.handoff === 'object' ? (o.handoff as HandoffView) : null,
+      takeover: o.takeover && typeof o.takeover === 'object' ? (o.takeover as Takeover) : undefined,
     };
   if (o.kind === 'context' && o.context) return { type: 'context', context: o.context as ContextUsage };
   if (o.kind === 'mod_toast' && typeof o.text === 'string')

@@ -1,7 +1,7 @@
 // A turn stopped at the harness's usage limit (apps/server/runner/limits.ts), from the Web UI's side: when it resets and
-// what the card offers. Limits.swift is the Mac app's copy.
+// what the card offers.
+import { clock } from '@omni/shared/format.ts';
 import type { Thread } from './api.ts';
-import { clock } from './format.ts';
 
 const DAY = 86_400_000;
 
@@ -48,8 +48,8 @@ export function limitView(
   if (thread.limit_elsewhere) {
     const when = thread.limit_state === 'scheduled' && at ? `It resumes there at ${at}.` : at ? `It resets at ${at}.` : 'It did not say when it resets.';
     return {
-      title: thread.limit_state === 'scheduled' && at ? `Resumes at ${at} on your other Mac` : 'Usage limit reached on your other Mac',
-      body: `${harness} stopped this turn at your plan's limit on your other Mac. ${when} Resume it there.`,
+      title: thread.limit_state === 'scheduled' && at ? `Resumes at ${at} on your other machine` : 'Usage limit reached on your other machine',
+      body: `${harness} stopped this turn at your plan's limit on your other machine. ${when} Resume it there.`,
       actions: [],
     };
   }

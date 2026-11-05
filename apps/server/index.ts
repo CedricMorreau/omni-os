@@ -1,8 +1,11 @@
+import { spawn } from 'node:child_process';
+import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { config, paths } from './config.ts';
 import { releaseLock, takeLock } from './lock.ts';
 import { about } from './about.ts';
 import { isLoopback } from './loopback.ts';
+import { holdIdleSockets } from './keep-alive.ts';
 
 // Boot order: the data dir's lock, then the database, then the port, and only then the threads.
 // So a second server on the same data, or on the same port, exits having changed nothing.
@@ -14,7 +17,7 @@ if (holder) {
 }
 process.on('exit', () => releaseLock(paths.lock));
 
-// Made before the port opens, so the Mac app and scripts find it as soon as the server answers.
+// Made before the port opens, so the desktop app and scripts find it as soon as the server answers.
 const { apiToken, tokenPath } = await import('./api-token.ts');
 apiToken();
 
@@ -30,12 +33,17 @@ const { backfillPublished } = await import('./published.ts');
 const { startScheduler } = await import('./automations.ts');
 const { startEventWatch } = await import('./automation-watch.ts');
 const { startTriggerDeliveries } = await import('./automation-triggers.ts');
+const { watchDelegating } = await import('./delegating.ts');
 const { startPRWatch } = await import('./pr-watch/worker.ts');
 const { startCatalogRefresh } = await import('./harness/catalog-service.ts');
 const { startSync } = await import('./sync/worker.ts');
+const { startConnect, stopConnect } = await import('./connect/service.ts');
 const { recoverHandoffs } = await import('./handoff.ts');
 const { startWorktreeRetention } = await import('./worktree-cleanup.ts');
+const { startPush } = await import('./push-sender.ts');
 const { migrateLegacyConfig } = await import('./config-migrate.ts');
+const { computerName } = await import('./sync/devices.ts');
+const { onRestart, RESTART_EXIT_CODE, startUpdateCheck } = await import('./update.ts');
 
 // An install from before data/omni.config.json keeps its old settings and skips onboarding.
 migrateLegacyConfig();
@@ -51,6 +59,7 @@ const onBindError = (err: NodeJS.ErrnoException) => {
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   server.off('error', onBindError);
   about.port = info.port;
+  void computerName().then((name) => (about.name = name));
   // A worktree the last server was still preparing never got checked, so nothing runs in it until Ben retries.
   const unprepared = threads.failPreparing("Omni stopped before this thread's worktree was ready.");
   if (unprepared) console.log(`[omni] ${unprepared} thread(s) were mid-setup: kept for Retry`);
@@ -72,33 +81,55 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   startScheduler();
   startEventWatch();
   startTriggerDeliveries();
+  // A parent shows running while a thread it delegated works: sent again on the feed when that changes.
+  watchDelegating();
   startPRWatch();
   startCatalogRefresh();
-  // With this Mac's retention policy on (Settings > Storage), removes idle worktrees that hold nothing unsaved, now and daily.
+  // With this Mac's retention policy on (Settings > Worktrees), removes idle worktrees that hold nothing unsaved, now and daily.
   startWorktreeRetention();
-  // Off unless the sync credentials are in the Keychain; then it runs alongside, and a failure only logs.
-  startSync().catch((err) => console.error('[sync] could not start:', (err as Error).message));
+  // Alerts go out only when the APNs key is set (push-sender.ts); otherwise this logs why and nothing is sent.
+  void startPush();
+  // The Mac stays awake while the server runs, as the old LaunchAgent's caffeinate kept it: phones reach it over the
+  // tailnet. -w ends caffeinate with this process. OMNI_CAFFEINATE=0 turns it off.
+  if (process.platform === 'darwin' && process.env.OMNI_CAFFEINATE !== '0') {
+    spawn('/usr/bin/caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' })
+      .on('error', (err) => console.error('[omni] caffeinate:', err.message))
+      .unref();
+  }
+  // Looks for new commits on main now and then, for the Update button (update.ts). Off with OMNI_UPDATE_CHECK=0.
+  startUpdateCheck();
+  // Off unless the sync credentials are in the secret store; then it runs alongside, and a failure only logs.
+  // Omni Connect after sync: it needs the machine id sync arms. Off unless turned on in Settings.
+  startSync()
+    .catch((err) => console.error('[sync] could not start:', (err as Error).message))
+    .then(() => startConnect())
+    .catch((err) => console.error('[connect] could not start:', (err as Error).message));
   if (!isLoopback(config.host)) {
     console.warn(`[omni] ${config.host} is not loopback. Anyone who can open the port can try the token; it, and the bodies, cross the network in plain HTTP.`);
   }
   console.log(`[omni] listening on http://${config.host}:${info.port}  workspace=${config.brainDir}  token=${process.env.OMNI_TOKEN ? 'OMNI_TOKEN' : tokenPath()}`);
 });
 server.once('error', onBindError);
+// Idle sockets outlive the proxies' own idle timeout, so tailscale serve never sends on one Node is closing (keep-alive.ts).
+holdIdleSockets(server as Server);
 
 // Close warm claude processes so none outlive the server. A second signal exits at once.
 let exiting = false;
-const shutdown = (sig: string) => {
+// Update exits with RESTART_EXIT_CODE, which tells the app that started the server to start it again.
+const shutdown = (sig: string, code = 0) => {
   if (exiting) process.exit(1);
   exiting = true;
   console.log(`[omni] ${sig}, closing live sessions`);
   server.close();
   closeAllTerminals();
   stopAllRuns();
-  setTimeout(() => process.exit(0), 6000).unref();
+  stopConnect();
+  setTimeout(() => process.exit(code), 6000).unref();
   void shutdownAll().finally(() => {
     closeAllBrowsers();
-    process.exit(0);
+    process.exit(code);
   });
 };
+onRestart(() => shutdown('update', RESTART_EXIT_CODE));
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -2,7 +2,7 @@
 // Split into two apps so app.ts can keep mounting threadsApi and terminalApi between them.
 // Hono keeps the first registered match, so that order is the one the handlers already won with.
 import { Hono, type Context } from 'hono';
-import { streamSSE } from 'hono/streaming';
+import { sessionSSE } from './sse.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -10,13 +10,18 @@ import { parseContexts } from '@omni/shared/message-context-kinds.ts';
 import { checkAnnotations } from './message-context/browser-annotation.ts';
 import { stampThreadReferences } from './message-context/thread-reference.ts';
 import { commentsPrompt, isArtifactUrl } from '@omni/shared/published.ts';
+import { CREW_ARTIFACTS_MAX } from '@omni/shared/crew-artifacts.ts';
 import { bus } from './bus.ts';
 import { uploadsDir } from './config.ts';
 import { createTicket, sourceFromText } from './tickets.ts';
 import { artifacts, channels, events, fileDigests, messageRequests, publicChannel, requestFingerprint, threads, type Thread } from './db.ts';
+import { forwardLimit, forwardStop, type LimitAction } from './run-on.ts';
+import { remoteHolder } from './ownership.ts';
 import { readBody } from './read-body.ts';
 import { compactBlocked, contextView } from './context.ts';
 import { continueLinks } from './continue.ts';
+import { allWithDelegating, delegatingIds, withDelegating } from './delegating.ts';
+import { coldRefusal, sessionWarmth } from './session-warmth.ts';
 import {
   acceptedAgain,
   activeMods,
@@ -36,13 +41,17 @@ import {
   resumeLimitNow,
   resumeRequests,
   retrySetup,
+  retryResume,
+  startFresh,
   scheduleLimitResume,
   runsHere,
   steerRequests,
-  switchRun,
+  type PendingMsg,
 } from './runner.ts';
-import { cancelHandoff, handOff } from './handoff.ts';
-import { handoffView } from './handoff/records.ts';
+import { takeoverOf, type HandoffResult } from './handoff.ts';
+import { freshPrompt, handoffView } from './handoff/records.ts';
+import type { Opening } from '@omni/shared/opening.ts';
+import { cancelRelocation, createTransition, type ThreadTransition } from './transition.ts';
 import { headPage } from './history.ts';
 import { liveMessage, openingMessages, parseAfter, STREAM_QUEUE_MAX, type DetailOf } from './stream-catch-up.ts';
 import { threadFilesReady, threadOpened } from './sync/files.ts';
@@ -57,6 +66,8 @@ export const threadRoutesApi = new Hono();
 export const threadActionsApi = new Hono();
 
 const createSchema = z.object({
+  /** The client's id for this thread, kept across its retries. It names the thread's folder on disk, so only a uuid. */
+  id: z.string().uuid().optional(),
   channel: z.string().default('inbox'),
   prompt: z.string().min(1),
   role: z.string().nullish(),
@@ -71,31 +82,48 @@ const createSchema = z.object({
   folder: z.string().max(200).nullish(),
   /** Where a new worktree thread's branch starts (worktree-base.ts). Left out: the repo's HEAD, as before. */
   base: basePick.nullish(),
+  device: z.string().max(100).nullish(),
 });
 
 threadRoutesApi.get('/', (c) =>
   c.json(
-    threads.list({
-      channel: c.req.query('channel'),
-      status: c.req.query('status'),
-      limit: Number(c.req.query('limit') ?? 50),
-    }),
+    allWithDelegating(
+      threads.list({
+        channel: c.req.query('channel'),
+        status: c.req.query('status'),
+        limit: Number(c.req.query('limit') ?? 50),
+      }),
+    ),
   ),
 );
 
+/** Creations in flight by the id the client chose, so a retry that arrives before the first answer shares it. */
+const creating = new Map<string, Promise<Thread>>();
+
 threadRoutesApi.post('/', async (c) => {
   const { data, files } = await readBody(c);
+  // run-on.ts: a synced machine's id, "here", or left out for Settings' default.
   const body = createSchema.parse(data);
   checkUploads(files);
   const channel = channels.get(body.channel);
-  if (body.role === 'ticket' && channel?.kind === 'client') {
-    const found = sourceFromText(body.prompt);
-    const ticket = await createTicket({ channel: channel.id, ...found, context: body.prompt, title: body.title }, ({ id, prompt }) =>
-      createThread({ ...body, id, prompt, files }),
-    );
-    return c.json(threads.get(ticket.thread_id));
+  const make = () =>
+    body.role === 'ticket' && channel?.kind === 'client'
+      ? createTicket({ id: body.id, channel: channel.id, ...sourceFromText(body.prompt), context: body.prompt, title: body.title }, ({ id, prompt }) =>
+          createThread({ ...body, id, prompt, files }),
+        ).then((ticket) => threads.get(ticket.thread_id)!)
+      : createThread({ ...body, files });
+  const { id } = body;
+  if (!id) return c.json(await make());
+  // A retry of a create whose answer was lost: the thread it made, not a second one with the same first message.
+  const made = threads.get(id);
+  if (made) return made.channel_id === body.channel ? c.json(made) : c.json({ error: `Thread id ${id} was already used in another channel.` }, 409);
+  const first = creating.get(id) ?? make();
+  creating.set(id, first);
+  try {
+    return c.json(await first);
+  } finally {
+    creating.delete(id);
   }
-  return c.json(await createThread({ ...body, files }));
 });
 
 const teamSchema = z.object({
@@ -139,19 +167,40 @@ threadRoutesApi.get('/:id', (c) => {
   return c.json(threadDetail(t, c.req.query('history') === 'recent' ? headPage(t.id) : { events: events.since(t.id) }));
 });
 
+/**
+ * Ben's first message while the transcript has none of his yet (packages/shared/opening.ts): the one on its way to
+ * the harness here, or the prompt a thread sent to another machine left with.
+ */
+function openingOf(id: string, pending: PendingMsg[]): Opening | null {
+  if (events.firstUserText(id) !== null) return null;
+  const lead = pending.find((m) => m.kind === 'user' && m.state === 'sent');
+  if (lead) return { text: lead.text, uuid: lead.uuid, ...(lead.attachments?.length && { attachments: lead.attachments }), ...(lead.context && { context: lead.context }) };
+  const prompt = freshPrompt(id);
+  return prompt ? { text: prompt } : null;
+}
+
 /** The detail with `page`'s events: every event, the head and its `history`, or none (the stream's sync). */
 function threadDetail(t: Thread, page: Parameters<DetailOf>[0]) {
+  const pending = pendingFor(t.id);
+  const ids = delegatingIds();
+  const shown = <T extends { id: string }>(list: T[]) => list.map((x) => withDelegating(x, ids));
+  const children = threads.children(t.id);
+  const parent = t.parent_id ? threads.get(t.parent_id) : null;
   const detail = {
-    thread: t,
+    thread: withDelegating(t, ids),
     channel: (ch => ch && publicChannel(ch))(channels.get(t.channel_id)),
     events: page.events,
     ...(page.history && { history: page.history }),
     artifacts: artifacts.byThread(t.id),
-    children: threads.children(t.id),
+    // The newest files and screenshots of the threads it delegated to, at any depth, each with its thread's title.
+    // New ones come on the stream as crew_artifact (artifacts.ts announceArtifact).
+    crew_artifacts: artifacts.crew(t.id, CREW_ARTIFACTS_MAX),
+    children: shown(children),
     // Members of the teams this thread started, so its delegation cards can show their state.
-    team: threads.children(t.id).flatMap((ch) => threads.team(ch.id)),
-    parent: t.parent_id ? threads.get(t.parent_id) : null,
-    pending: pendingFor(t.id),
+    team: shown(children.flatMap((ch) => threads.team(ch.id))),
+    parent: parent ? withDelegating(parent, ids) : null,
+    pending,
+    opening: openingOf(t.id, pending),
     live: isLive(t.id),
     // The status lines its mods pinned, while its process runs. The feed's mods event keeps them current.
     mods: activeMods().filter((m) => m.thread_id === t.id),
@@ -162,7 +211,9 @@ function threadDetail(t: Thread, page: Parameters<DetailOf>[0]) {
   };
   // Only when a turn cannot start here (a synced thread): why, for the composer to show.
   const blocked = turnBlocked(t, runsHere(t.id));
-  return blocked ? { ...detail, blocked } : detail;
+  // Only when another Mac holds it: the Take over note (packages/shared/handoff.ts Takeover).
+  const takeover = takeoverOf(t);
+  return { ...detail, ...(blocked && { blocked }), ...(takeover && { takeover }) };
 }
 
 /** Compact view for the conductor MCP. */
@@ -171,8 +222,14 @@ threadRoutesApi.get('/:id/summary', (c) => {
   if (!t) return c.json({ error: 'not found' }, 404);
   return c.json({
     id: t.id, title: t.title, status: t.status, channel: t.channel_id, role: t.role, task_id: t.task_id,
+    // A thread it delegated, at any depth, still runs or queues: it reports back here.
+    delegating: delegatingIds().has(t.id),
     updated_at: t.updated_at, last_reply: events.lastRunText(t.id) || events.lastAssistantText(t.id),
     artifacts: artifacts.byThread(t.id).map((a) => a.name),
+    // Why this machine did not resume it (runner/spawn.ts), for recover_thread_session. Only while it holds.
+    ...(t.resume_blocked && { resume_blocked: t.resume_blocked }),
+    // Whether its session is still in the prompt cache: a parent messages a warm one and continues a cold one in a new session.
+    session: sessionWarmth(t),
     // The agents it spawned that still run, as the thread panel's Running subagents list shows them.
     running_subagents: activeTasks()
       .filter((k) => k.thread_id === t.id && k.subagent)
@@ -189,7 +246,7 @@ threadActionsApi.get('/:id/base', (c) => {
 threadActionsApi.post('/:id/messages', async (c) => {
   const id = c.req.param('id');
   const { data, files } = await readBody(c);
-  const { prompt, from, mode, request_id, context: raw } = z
+  const { prompt, from, mode, request_id, context: raw, wake_cold } = z
     .object({
       prompt: z.string(),
       from: z.enum(['ben', 'conductor']).default('ben'),
@@ -199,9 +256,16 @@ threadActionsApi.post('/:id/messages', async (c) => {
       request_id: z.string().min(1).max(200).optional(),
       // Records Ben attached (packages/shared/message-context.ts), checked and normalized by parseContexts.
       context: z.unknown().optional(),
+      // A parent thread's send to a thread whose session went cold is refused unless it was asked to resume that thread.
+      wake_cold: z.boolean().default(false),
     })
     .parse(data);
-  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  const target = threads.get(id);
+  if (!target) return c.json({ error: 'not found' }, 404);
+  if (from === 'conductor' && !wake_cold) {
+    const warmth = sessionWarmth(target);
+    if (!warmth.warm) return c.json({ error: coldRefusal(target, warmth), session: warmth }, 409);
+  }
   const context = parseContexts(raw);
   if (!context.ok) return c.json({ error: context.error }, 400);
   if (!prompt && !context.value.length) return c.json({ error: 'Write a message or add context to send.' }, 400);
@@ -248,42 +312,61 @@ threadActionsApi.post('/:id/setup/retry', (c) => {
 });
 
 /**
- * A turn the harness stopped at its usage limit (apps/server/runner/limits.ts). Schedule its one continuation for the
- * reset time the harness reported (a 409 when it reported none), cancel that, or send it now. Scheduling or
- * cancelling twice changes nothing; the continuation is sent at most once.
+ * A thread this machine did not resume because its latest session could not be brought here (runner/spawn.ts):
+ * download it again and send what waits, or start with fresh context, a new session that reads the thread so far.
+ * Each sends the messages waiting for Resume; with none, Ben's next message goes the chosen way. A 409 while it runs.
  */
-threadActionsApi.post('/:id/limit/schedule', (c) => {
-  const id = c.req.param('id');
-  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
-  scheduleLimitResume(id);
-  return c.json(afterRecovery(id));
+threadActionsApi.post('/:id/session/retry', async (c) => {
+  await retryResume(c.req.param('id'));
+  return c.json(afterRecovery(c.req.param('id')));
 });
-
-threadActionsApi.post('/:id/limit/cancel', (c) => {
-  const id = c.req.param('id');
-  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
-  cancelLimitResume(id);
-  return c.json(afterRecovery(id));
-});
-
-threadActionsApi.post('/:id/limit/resume', (c) => {
-  const id = c.req.param('id');
-  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
-  resumeLimitNow(id);
-  return c.json(afterRecovery(id));
+threadActionsApi.post('/:id/session/fresh', async (c) => {
+  await startFresh(c.req.param('id'));
+  return c.json(afterRecovery(c.req.param('id')));
 });
 
 /**
- * Hand the running thread to another synced Mac: `{to}`, that Mac's id from GET /api/devices. Answered as soon as the
- * offer is written; the thread's `handoff` then follows it, here and on the other Mac. A 409 says why it cannot go.
+ * A turn the harness stopped at its usage limit (apps/server/runner/limits.ts). Schedule its one continuation for the
+ * reset time the harness reported (a 409 when it reported none), cancel that, or send it now. Scheduling or
+ * cancelling twice changes nothing; the continuation is sent at most once. A thread that runs on another machine
+ * has its stop there, so the action goes to that machine (run-on.ts).
+ */
+const limitAction = (action: LimitAction, local: (id: string) => unknown) => (c: Context) => {
+  const id = c.req.param('id')!;
+  const t = threads.get(id);
+  if (!t) return c.json({ error: 'not found' }, 404);
+  if (remoteHolder(t)) forwardLimit(t, action);
+  else local(id);
+  return c.json(afterRecovery(id));
+};
+threadActionsApi.post('/:id/limit/schedule', limitAction('schedule', scheduleLimitResume));
+threadActionsApi.post('/:id/limit/cancel', limitAction('cancel', cancelLimitResume));
+threadActionsApi.post('/:id/limit/resume', limitAction('resume', resumeLimitNow));
+
+/** What /handoff, /takeover and /handoff/cancel have always answered, from the `relocate` transition. */
+const handoffAnswer = (t: ThreadTransition): HandoffResult => ({ thread: t.thread, handoff: t.handoff ?? null });
+
+/**
+ * Hand the running thread to another synced Mac: `{to}`, that Mac's id from GET /api/devices. The transition
+ * service's `relocate` (transition.ts). Answered as soon as the offer is written; the thread's `handoff` then follows
+ * it, here and on the other Mac. A 409 says why it cannot go.
  */
 threadActionsApi.post('/:id/handoff', async (c) => {
   const { to } = z.object({ to: z.string().min(1).max(200) }).parse(await c.req.json().catch(() => ({})));
-  return c.json(await handOff(c.req.param('id'), to));
+  return c.json(handoffAnswer(await createTransition(c.req.param('id'), { kind: 'relocate', to })));
 });
 
-/** Cancel a handoff from this Mac before the other one picks the thread up. Its queued messages wait here for Resume. */
-threadActionsApi.post('/:id/handoff/cancel', (c) => c.json(cancelHandoff(c.req.param('id'))));
+/**
+ * Take over a thread another Mac holds: ask that Mac to hand it here. Answered as soon as the request is written; the
+ * thread's `handoff` then follows it, here and on the other Mac. A 409 says why it cannot be taken over.
+ */
+threadActionsApi.post('/:id/takeover', async (c) => c.json(handoffAnswer(await createTransition(c.req.param('id'), { kind: 'relocate', to: 'here' }))));
+
+/**
+ * Cancel this Mac's Take over before it has the thread, or a handoff from this Mac before the other one picks the thread
+ * up. A handoff's queued messages wait here for Resume.
+ */
+threadActionsApi.post('/:id/handoff/cancel', (c) => c.json(cancelRelocation(c.req.param('id'))));
 
 /** Drop messages a restart parked. Each stays in the transcript, marked as never sent. */
 threadActionsApi.post('/:id/requests/discard', async (c) => {
@@ -439,16 +522,21 @@ const runSchema = z.object({
 });
 
 /**
- * Move the thread to another harness, model or effort between turns (runner/switch.ts). A 409 while a turn runs or
- * messages wait, a 400 for a run the catalog does not offer. The same run again changes nothing.
+ * Move the thread to another harness, model or effort: the transition service's `reconfigure` (transition.ts, applied
+ * by runner/switch.ts). Between turns it applies at once; during a turn it waits on the thread. A 409 while another
+ * machine runs the thread, a 400 for a run the catalog does not offer. The same run again changes nothing.
  */
 threadActionsApi.post('/:id/run', async (c) => {
-  const body = runSchema.parse(await c.req.json().catch(() => ({})));
-  return c.json(await switchRun(c.req.param('id'), body));
+  const run = runSchema.parse(await c.req.json().catch(() => ({})));
+  return c.json((await createTransition(c.req.param('id'), { kind: 'reconfigure', run })).thread);
 });
 
 const interrupt = (c: Context) => {
-  const t = interruptThread(c.req.param('id')!);
+  const id = c.req.param('id')!;
+  // A routed thread running on another machine: that machine stops it (run-on.ts).
+  const routed = threads.get(id);
+  if (routed && remoteHolder(routed)) return c.json(forwardStop(routed));
+  const t = interruptThread(id);
   return t ? c.json(t) : c.json({ error: 'not found' }, 404);
 };
 threadActionsApi.post('/:id/stop', interrupt);
@@ -457,7 +545,7 @@ threadActionsApi.post('/:id/interrupt', interrupt);
 threadActionsApi.get('/:id/stream', (c) => {
   const id = c.req.param('id');
   const after = parseAfter(c.req.query('after') ?? c.req.header('Last-Event-ID') ?? '0');
-  return streamSSE(c, async (stream) => {
+  return sessionSSE(c, async (stream) => {
     const queue: unknown[] = [];
     // Rows the opening messages carried, so the bus's copies are not sent twice (apps/server/stream-catch-up.ts).
     const sent = new Set<number>();
@@ -473,7 +561,18 @@ threadActionsApi.get('/:id/stream', (c) => {
     const onFeed = (e: any) => {
       if (e.type !== 'thread' || (e.thread as Thread).id !== id) return;
       const blocked = turnBlocked(e.thread as Thread, runsHere(id));
-      onEvent({ kind: 'thread', thread: e.thread, pending: pendingFor(id), live: isLive(id), handoff: handoffView(e.thread as Thread), ...(blocked && { blocked }) });
+      const takeover = takeoverOf(e.thread as Thread);
+      const pending = pendingFor(id);
+      onEvent({
+        kind: 'thread',
+        thread: withDelegating(e.thread as Thread),
+        pending,
+        opening: openingOf(id, pending),
+        live: isLive(id),
+        handoff: handoffView(e.thread as Thread),
+        ...(blocked && { blocked }),
+        ...(takeover && { takeover }),
+      });
     };
     bus.on('feed', onFeed);
     const detach = () => {

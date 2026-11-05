@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,7 +9,7 @@ vi.mock('../db.ts', () => {
   throw new Error('db.ts must not be imported by sandbox tests');
 });
 
-import { buildMcpConfig, needsWorktree, playwrightMcpBin, plannedWorktree, prepareWorkdir } from '../sandbox.ts';
+import { buildMcpConfig, needsWorktree, playwrightMcpBin, plannedWorktree, prepareWorkdir, writeCursorDenyConfig } from '../sandbox.ts';
 import { config, paths, browserOutDir, threadDir } from '../config.ts';
 import type { Channel } from '../db.ts';
 import type { CrewRole } from '../crew.ts';
@@ -40,7 +40,7 @@ const channel = (patch: Partial<Channel> = {}): Channel => ({
   ...patch,
 });
 
-const role = (mcp: string[]): CrewRole => ({ id: 'r', name: 'R', description: '', mcp, skills: [], stages: [], source: 'shipped', charter: 'x' });
+const role = (mcp: string[], delegateOnly = false): CrewRole => ({ id: 'r', name: 'R', description: '', mcp, skills: [], stages: [], source: 'shipped', delegateOnly, charter: 'x' });
 
 const THREAD = 'thread-123';
 const OMNI_URL = 'http://127.0.0.1:4747';
@@ -54,6 +54,12 @@ afterAll(() => {
 });
 
 describe('buildMcpConfig: browser', () => {
+  it('gives a delegate-only role the omni tools but no browser', () => {
+    const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: role(['omni'], true), browserBusy: false, omniUrl: OMNI_URL });
+    expect(cfg.mcpServers['omni-browser']).toBeUndefined();
+    expect(cfg.mcpServers['omni']).toBeDefined();
+  });
+
   it('adds a headless playwright server with a persistent per-channel profile', () => {
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), browserBusy: false, omniUrl: OMNI_URL });
     const b = cfg.mcpServers['omni-browser'];
@@ -77,6 +83,22 @@ describe('buildMcpConfig: browser', () => {
     expect(existsSync(bin)).toBe(true);
     const installed = JSON.parse(readFileSync(join(bin, '..', 'package.json'), 'utf8'));
     expect(installed.version).toBe(dependencies['@playwright/mcp']);
+  });
+
+  it('points a browser it launches at the one Omni found, not Playwright\'s stock Chrome path', () => {
+    const before = process.env.OMNI_CHROME_BIN;
+    process.env.OMNI_CHROME_BIN = '/usr/bin/chromium';
+    try {
+      for (const browserBusy of [false, true]) {
+        const args = buildMcpConfig({ threadId: THREAD, channel: channel(), browserBusy, omniUrl: OMNI_URL }).mcpServers['omni-browser'].args;
+        expect(args[args.indexOf('--executable-path') + 1]).toBe('/usr/bin/chromium');
+      }
+      const attached = buildMcpConfig({ threadId: THREAD, channel: channel(), browserBusy: false, cdpEndpoint: 'http://127.0.0.1:9333', omniUrl: OMNI_URL });
+      expect(attached.mcpServers['omni-browser'].args).not.toContain('--executable-path');
+    } finally {
+      if (before === undefined) delete process.env.OMNI_CHROME_BIN;
+      else process.env.OMNI_CHROME_BIN = before;
+    }
   });
 
   it('omits --headless when the channel wants a visible browser', () => {
@@ -111,7 +133,7 @@ describe('buildMcpConfig: browser', () => {
   it('adds no browser when OMNI_BROWSER is off', () => {
     config.browser = false;
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), browserBusy: false, omniUrl: OMNI_URL });
-    expect(Object.keys(cfg.mcpServers)).toEqual(['omni-ask', 'omni-threads']);
+    expect(Object.keys(cfg.mcpServers)).toEqual(['omni-ask', 'omni-render', 'omni-threads']);
   });
 });
 
@@ -120,7 +142,7 @@ describe('buildMcpConfig: omni-ask', () => {
     for (const r of [undefined, role([]), role(['github']), role(['omni'])]) {
       const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: r, browserBusy: false, omniUrl: OMNI_URL });
       expect(cfg.mcpServers['omni-ask']).toEqual({
-        command: paths.tsx,
+        command: paths.mcpRunner,
         args: [paths.mcpAsk],
         env: { OMNI_URL, OMNI_TOKEN_FILE: join(paths.data, 'api-token'), OMNI_THREAD_ID: THREAD, OMNI_USER: 'the user' },
       });
@@ -129,12 +151,26 @@ describe('buildMcpConfig: omni-ask', () => {
   });
 });
 
+describe('buildMcpConfig: omni-render', () => {
+  it('gives every thread html_render, whatever its role, with the token file and never the token', () => {
+    for (const r of [undefined, role([]), role(['github']), role(['omni'])]) {
+      const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: r, browserBusy: false, omniUrl: OMNI_URL });
+      expect(cfg.mcpServers['omni-render']).toEqual({
+        command: paths.mcpRunner,
+        args: [paths.mcpRender],
+        env: { OMNI_URL, OMNI_TOKEN_FILE: join(paths.data, 'api-token'), OMNI_THREAD_ID: THREAD, OMNI_USER: 'the user' },
+      });
+    }
+    expect(existsSync(paths.mcpRender)).toBe(true);
+  });
+});
+
 describe('buildMcpConfig: omni-threads', () => {
   it('gives every thread without the conductor server read_referenced_thread, which the conductor server has itself', () => {
     for (const r of [undefined, role([]), role(['github'])]) {
       const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: r, browserBusy: false, omniUrl: OMNI_URL });
       expect(cfg.mcpServers['omni-threads']).toEqual({
-        command: paths.tsx,
+        command: paths.mcpRunner,
         args: [paths.mcpThreads],
         env: { OMNI_URL, OMNI_TOKEN_FILE: join(paths.data, 'api-token'), OMNI_THREAD_ID: THREAD, OMNI_USER: 'the user' },
       });
@@ -148,12 +184,12 @@ describe('buildMcpConfig: omni conductor server', () => {
   it('is added only when the role asks for omni', () => {
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: role(['omni']), browserBusy: false, omniUrl: OMNI_URL });
     expect(cfg.mcpServers['omni']).toEqual({
-      command: paths.tsx,
+      command: paths.mcpRunner,
       args: [paths.mcpOmni],
       // The token file's path, never the token: mcp.json and Cursor's plugin folder hold no secret value.
       env: { OMNI_URL, OMNI_TOKEN_FILE: join(paths.data, 'api-token'), OMNI_THREAD_ID: THREAD, OMNI_USER: 'the user' },
     });
-    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-ask', 'omni-browser']);
+    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-ask', 'omni-browser', 'omni-render']);
   });
 
   it('is absent without a role or when the role lists other servers', () => {
@@ -191,7 +227,7 @@ describe('buildMcpConfig: omni conductor server', () => {
   it('still works with the browser off', () => {
     config.browser = false;
     const cfg = buildMcpConfig({ threadId: THREAD, channel: channel(), role: role(['omni']), browserBusy: true, omniUrl: OMNI_URL });
-    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-ask']);
+    expect(Object.keys(cfg.mcpServers).sort()).toEqual(['omni', 'omni-ask', 'omni-render']);
   });
 });
 
@@ -215,5 +251,26 @@ describe('prepareWorkdir', () => {
     expect(needsWorktree(channel({ repo_path: '/r', use_worktree: 0 }))).toBe(false);
     expect(needsWorktree(channel({ repo_path: null, use_worktree: 1 }))).toBe(false);
     expect(needsWorktree(channel({ repo_path: '/r', use_worktree: 1 }), { remote: true })).toBe(false);
+  });
+});
+
+describe('writeCursorDenyConfig', () => {
+  it('writes the deny rules alone when the user has no Cursor config yet, and again each spawn without failing', () => {
+    const user = mkdtempSync(join(tmpdir(), 'omni-cursor-none-'));
+    const dir = join(mkdtempSync(join(tmpdir(), 'omni-cursor-thread-')), 'cursor-config');
+    expect(writeCursorDenyConfig(dir, user)).toBe(dir);
+    expect(JSON.parse(readFileSync(join(dir, 'cli-config.json'), 'utf8'))).toEqual({ version: 1, permissions: { allow: [], deny: ['Shell(*)', 'Write(**)'] } });
+    // A folder Cursor made since the last spawn is linked on the next; the ones already linked stay.
+    mkdirSync(join(user, 'chats'));
+    expect(writeCursorDenyConfig(dir, user)).toBe(dir);
+    expect(lstatSync(join(dir, 'chats')).isSymbolicLink()).toBe(true);
+    expect(writeCursorDenyConfig(dir, user)).toBe(dir);
+  });
+
+  it('never repeats a deny rule the user already has', () => {
+    const user = mkdtempSync(join(tmpdir(), 'omni-cursor-dup-'));
+    writeFileSync(join(user, 'cli-config.json'), JSON.stringify({ permissions: { deny: ['Shell(*)'] } }));
+    const cfg = JSON.parse(readFileSync(join(writeCursorDenyConfig(join(mkdtempSync(join(tmpdir(), 'omni-cursor-thread-')), 'cursor-config'), user), 'cli-config.json'), 'utf8'));
+    expect(cfg.permissions.deny).toEqual(['Shell(*)', 'Write(**)']);
   });
 });

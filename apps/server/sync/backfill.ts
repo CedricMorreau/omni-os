@@ -1,6 +1,6 @@
 import { db, outbox, tx, type SyncEntity } from '../db.ts';
 
-// Queue every existing row for the relay again: after moving to a new Supabase project, or when the relay lost
+// Queue every existing row for the relay again: after moving to a new relay, or when the relay lost
 // history. The first sync on a machine already queues everything (outbox.arm); this is for later.
 // Idempotent: a row with an upsert already waiting is left alone, so running it twice queues nothing new.
 
@@ -28,6 +28,8 @@ const SOURCES: [SyncEntity, string][] = [
   ['result_read', 'SELECT thread_id AS k, thread_id AS o1, 0 AS o2 FROM result_reads'],
   ['limit_stop', 'SELECT id AS k, created_at AS o1, rowid AS o2 FROM threads WHERE limit_state IS NOT NULL'],
   ['trigger_delivery', 'SELECT uid AS k, created_at AS o1, uid AS o2 FROM trigger_deliveries'],
+  ['remote_command', 'SELECT id AS k, created_at AS o1, id AS o2 FROM remote_commands'],
+  ['assignment', 'SELECT thread_id AS k, at AS o1, thread_id AS o2 FROM assignments'],
   ['kv', `SELECT key AS k, key AS o1, 0 AS o2 FROM kv WHERE key NOT LIKE 'sync.%'`],
 ];
 

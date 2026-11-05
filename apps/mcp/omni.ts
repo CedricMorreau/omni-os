@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { ApiError, call, SELF, text } from './api.ts';
+import { prList, prListInput, PR_LIST_DESCRIPTION } from './pull-requests.ts';
 import { registerReferencedThread } from './referenced-thread.ts';
 
 /** Who the conductor works for, from the user config (apps/server/user-config.ts). */
@@ -137,15 +138,15 @@ server.registerTool(
     inputSchema: {
       channel: z.string().describe('Channel id, e.g. "acme". Use list_channels.'),
       role: z.string().describe('Crew role id, e.g. "researcher". Use list_crew.'),
-      prompt: z.string().describe('Self-contained task brief. Include everything the crewmate needs; it cannot see your chat.'),
+      prompt: z.string().describe('Self-contained task brief (there is no `brief` parameter; the brief goes here). Include everything the crewmate needs; it cannot see your chat.'),
       task_id: z.string().optional().describe('Short id like T-12 to match the report. Generated if omitted.'),
       title: z.string().optional(),
       harness: z
         .string()
         .optional()
         .describe(
-          'Override the role default harness: claude-code, codex, cursor, hermes or cursor-cloud. cursor runs the cursor-agent CLI on this Mac; ' +
-            'cursor-cloud launches a Cursor cloud agent on Cursor\'s Linux machines that pushes a branch and opens a PR (no Mac build, Swift tests or screenshots). Use list_harnesses.',
+          'Override the role default harness: claude-code, codex, cursor, hermes or cursor-cloud. cursor runs the cursor-agent CLI on this machine; ' +
+            'cursor-cloud launches a Cursor cloud agent on Cursor\'s Linux machines that pushes a branch and opens a PR (no Mac build or screenshots). Use list_harnesses.',
         ),
       model: z
         .string()
@@ -161,13 +162,20 @@ server.registerTool(
           'Where a repo channel\'s new worktree branch starts: omit or "head" for the repo\'s current commit, "remote-default" for origin\'s default branch (fetched first, the checkout is never moved), ' +
             'or the name of an existing branch, tag or commit. Ignored when the thread gets no worktree. Use it when the work must start from the latest origin, not a stale local checkout.',
         ),
+      device: z
+        .string()
+        .optional()
+        .describe(
+          `Where it runs: a synced machine by id or name from list_devices, or "here" for this machine. Omit to use ${USER}'s default from Settings. ` +
+            'A thread sent elsewhere runs on that machine and its report still comes back to you. No files travel.',
+        ),
     },
   },
-  async ({ channel, role, prompt, task_id, title, harness, model, effort, folder, create_folder, base }) => {
+  async ({ channel, role, prompt, task_id, title, harness, model, effort, folder, create_folder, base, device }) => {
     if (folder?.trim()) await checkFolder(channel, folder, create_folder);
     const t = await call('/threads', {
       method: 'POST',
-      body: JSON.stringify({ channel, role, prompt, task_id, title, harness, model, effort, folder, base: basePick(base), parent_id: SELF, source: 'conductor' }),
+      body: JSON.stringify({ channel, role, prompt, task_id, title, harness, model, effort, folder, base: basePick(base), parent_id: SELF, source: 'conductor', device: await deviceId(device) }),
     });
     return text({ thread_id: t.id, task_id: t.task_id, channel: t.channel_id, folder_id: t.folder_id, role: t.role, harness: t.harness, model: t.model, effort: t.effort, auto_reason: t.auto_reason, status: t.status, branch: t.branch });
   },
@@ -292,19 +300,41 @@ server.registerTool(
       'Send a message to an existing thread (yours or any other). It resumes with full context. ' +
       'If the thread is busy, mode "steer" (default) hands it over at its next step so it adjusts while it keeps working; ' +
       'mode "queue" waits until its current turn ends and then runs as a new turn. ' +
-      'A steer to a thread whose harness cannot steer (Cursor) is queued automatically.',
+      'A steer to a thread whose harness cannot steer (Cursor) is queued automatically. ' +
+      "Only for a thread whose session is warm (get_thread's session.warm: it runs, or its model was active within the hour). " +
+      'A cold thread is refused: continue it with continue_thread or delegate a fresh thread that links it, and read it with get_thread for its status.',
     inputSchema: {
       thread_id: z.string(),
       message: z.string(),
       mode: z.enum(['steer', 'queue']).optional().describe('steer (default): read at its next step if busy. queue: after its current turn.'),
+      wake_cold: z.boolean().optional().describe(`Resume the thread even though its session went cold. Only when ${USER} asked to resume that thread itself.`),
     },
   },
-  async ({ thread_id, message, mode }) => {
+  async ({ thread_id, message, mode, wake_cold }) => {
     const t = await call(`/threads/${thread_id}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ prompt: message, from: 'conductor', mode: mode ?? 'steer' }),
+      body: JSON.stringify({ prompt: message, from: 'conductor', mode: mode ?? 'steer', ...(wake_cold && { wake_cold }) }),
     });
     return text({ thread_id: t.id, status: t.status });
+  },
+);
+
+server.registerTool(
+  'recover_thread_session',
+  {
+    description:
+      `A thread whose get_thread shows resume_blocked did not resume on this machine: the newer session another machine left could not be ` +
+      'downloaded, so resuming the copy here could miss turns that ran there. Its messages wait. "retry" downloads the session again and sends them; ' +
+      `"fresh" starts the next turn in a new session that reads the thread so far from Omni's transcript (the agent's own session memory is lost). ` +
+      `Retry first; use fresh only when ${USER} asks or retrying keeps failing. Refused while the thread runs.`,
+    inputSchema: {
+      thread_id: z.string(),
+      action: z.enum(['retry', 'fresh']),
+    },
+  },
+  async ({ thread_id, action }) => {
+    const res = await call(`/threads/${thread_id}/session/${action}`, { method: 'POST', body: '{}' });
+    return text({ thread_id, status: res.thread?.status, resume_blocked: res.thread?.resume_blocked ?? null, waiting: res.pending?.length ?? 0 });
   },
 );
 
@@ -339,7 +369,7 @@ server.registerTool(
       "conversation comments, never the signed-in account's own), with author, link and an excerpt; unchanged polls cost " +
       'no turn. A watch ends on its own when the PR merges or closes, the thread is archived, or after its wake limit ' +
       '(three wakes for review comments alone). action: start (the branch\'s open PR, or `number`), stop, ' +
-      'or status. Without thread_id, status lists every watch on this Mac.',
+      'or status. Without thread_id, status lists every watch on this machine.',
     inputSchema: {
       thread_id: z.string().optional(),
       action: z.enum(['start', 'stop', 'status']),
@@ -359,10 +389,48 @@ server.registerTool(
 );
 
 server.registerTool(
+  'crew_prs',
+  {
+    description:
+      'The PRs opened from the branches of the threads you delegated to, and of the threads they delegated to in turn (a ' +
+      "team's members included): number, title, state (OPEN or MERGED; one closed without merging is left out), url, repo, " +
+      'and the thread and task id it came from. Read from GitHub on each call, so it is current. A crew report does not ' +
+      'say when a PR merges later; call this to check. thread_id defaults to your own thread.',
+    inputSchema: { thread_id: z.string().optional() },
+  },
+  async ({ thread_id }) => {
+    const id = thread_id ?? SELF;
+    if (!id) throw new Error('Pass a thread_id: this session is not a thread.');
+    return text((await call(`/threads/${encodeURIComponent(id)}/pr`)).crew ?? []);
+  },
+);
+
+server.registerTool(
+  'crew_questions',
+  {
+    description:
+      'The questions the threads you delegated to (at any depth, team members included) asked Ben with ask_user_question ' +
+      'and still wait on: the thread and task id that asked, and the questions. Ben answers them on your thread, where ' +
+      'their cards show; you cannot answer for him. A thread waiting here is blocked on Ben, not stuck. thread_id ' +
+      'defaults to your own thread.',
+    inputSchema: { thread_id: z.string().optional() },
+  },
+  async ({ thread_id }) => {
+    const id = thread_id ?? SELF;
+    if (!id) throw new Error('Pass a thread_id: this session is not a thread.');
+    const { items } = await call(`/threads/${encodeURIComponent(id)}/crew-questions`);
+    return text(
+      items.map((c: any) => ({ thread_id: c.thread_id, thread_title: c.thread_title, task_id: c.task_id, questions: c.question.questions.map((q: any) => q.question) })),
+    );
+  },
+);
+
+server.registerTool(
   'continue_thread',
   {
     description:
-      `Continue an idle thread in a new one on a local harness, only when ${USER} asks. The new thread is linked to it, in the same ` +
+      `Continue an idle thread in a new one on a local harness, when ${USER} asks or when you have a follow-up for a thread whose session went cold ` +
+      "(get_thread's session.warm is false; pass the thread's own harness then). The new thread is linked to it, in the same " +
       'channel, with a session of its own and, for repo work, its own worktree on a new branch with the uncommitted changes carried. ' +
       'Its first session reads a carryover of the thread (goal, changed files, checks, recent history) ahead of `message`. ' +
       'Files attached in the thread go only when named in `attachments`: they are copied into the new thread, and any that are missing, too big or not plain files are listed back with why. ' +
@@ -411,7 +479,12 @@ server.registerTool(
 
 server.registerTool(
   'get_thread',
-  { description: 'Status, last reply, artifacts and running subagents of a thread.', inputSchema: { thread_id: z.string() } },
+  {
+    description:
+      'Status, last reply, artifacts and running subagents of a thread, and `session`: whether its session is still warm in the prompt cache, ' +
+      'its last model activity and the minutes since. Reading it never wakes the thread.',
+    inputSchema: { thread_id: z.string() },
+  },
   async ({ thread_id }) => text(await call(`/threads/${thread_id}/summary`)),
 );
 
@@ -427,16 +500,44 @@ server.registerTool(
     if (status) q.set('status', status);
     q.set('limit', String(limit ?? 20));
     const list = await call(`/threads?${q}`);
-    return text(list.map((t: any) => ({ id: t.id, title: t.title, channel: t.channel_id, role: t.role, status: t.status, task_id: t.task_id, updated_at: t.updated_at })));
+    return text(list.map((t: any) => ({ id: t.id, title: t.title, channel: t.channel_id, role: t.role, status: t.status, delegating: t.delegating, task_id: t.task_id, updated_at: t.updated_at })));
   },
+);
+
+server.registerTool(
+  'list_pull_requests',
+  { description: PR_LIST_DESCRIPTION, inputSchema: prListInput },
+  async ({ search }) => text(prList(await call('/prs'), search)),
+);
+
+/** A machine named by id or name (from list_devices), "here", or nothing for the default, as POST /threads takes it. */
+async function deviceId(device: string | undefined): Promise<string | undefined> {
+  const want = device?.trim();
+  if (!want) return undefined;
+  if (want.toLowerCase() === 'here') return 'here';
+  const devices: any[] = await call('/devices');
+  const named = devices.filter((d) => d.name.toLowerCase() === want.toLowerCase());
+  const hit = devices.find((d) => d.id === want) ?? (named.length === 1 ? named[0] : null);
+  if (named.length > 1 && !hit) throw new Error(`${named.length} machines are called "${want}". Pass the id instead: ${named.map((d) => d.id).join(', ')}.`);
+  if (!hit) throw new Error(`No synced machine is called "${want}". Machines: ${devices.map((d) => `${d.name} (${d.id})`).join(', ') || 'none, sync is off'}.`);
+  return hit.id;
+}
+
+server.registerTool(
+  'set_automations_machine',
+  {
+    description: 'Choose the synced machine for all scheduled and event-triggered automations. The choice syncs to other machines. Run now still uses the connected machine.',
+    inputSchema: { device: z.string().trim().min(1).describe('Machine id or name from list_devices, or here.') },
+  },
+  async ({ device }) => text(await call('/sync/automations-owner', { method: 'POST', body: JSON.stringify({ device: await deviceId(device) }) })),
 );
 
 server.registerTool(
   'list_devices',
   {
     description:
-      `The other Macs ${USER} syncs Omni with, each with its id, name and whether Tailscale sees it up: online, offline or unknown ` +
-      '(no Tailscale to ask). A thread can be handed to any that is not offline. Empty while sync is off.',
+      `The other machines ${USER} syncs Omni with (Macs, or a Linux box), each with its id, name and whether Tailscale sees it up: online, offline or unknown ` +
+      '(no Tailscale to ask). A thread can be handed to any that is not offline, and delegate can run a new one there. Empty while sync is off.',
   },
   async () => text(await call('/devices')),
 );
@@ -445,21 +546,26 @@ server.registerTool(
   'hand_off_thread',
   {
     description:
-      `Move a thread to another of ${USER}'s Macs, only when ${USER} asks. A running turn stops here and the other Mac resumes the same ` +
-      'session, then runs the messages that were queued for it. An idle thread moves between turns: the next message runs on the other Mac. A worktree thread takes its commits and uncommitted changes along. ' +
+      `Move a thread to another of ${USER}'s machines, only when ${USER} asks. A running turn stops here and the other machine resumes the same ` +
+      'session, then runs the messages that were queued for it. An idle thread moves between turns: the next message runs on the other machine. A worktree thread takes its commits and uncommitted changes along. ' +
+      'With to "here", take over a thread another machine holds: that machine hands it to this one on its next sync, the same way. ' +
       'It runs in the background after this answers; the thread shows where it is.',
     inputSchema: {
       thread_id: z.string(),
-      to: z.string().describe('The Mac, by id or name (ignoring case), from list_devices.'),
+      to: z.string().describe('The machine, by id or name (ignoring case), from list_devices, or "here" to take the thread over from the machine that holds it.'),
     },
   },
   async ({ thread_id, to }) => {
+    if (to.trim().toLowerCase() === 'here') {
+      const res = await call(`/threads/${thread_id}/takeover`, { method: 'POST', body: '{}' });
+      return text({ thread_id, to: 'here', handoff: res.handoff?.state ?? null });
+    }
     const devices: any[] = await call('/devices');
     const want = to.trim().toLowerCase();
     const named = devices.filter((d) => d.name.toLowerCase() === want);
     const hit = devices.find((d) => d.id === to) ?? (named.length === 1 ? named[0] : null);
-    if (named.length > 1 && !hit) throw new Error(`${named.length} Macs are called "${to}". Pass the id instead: ${named.map((d) => d.id).join(', ')}.`);
-    if (!hit) throw new Error(`No synced Mac is called "${to}". Macs: ${devices.map((d) => `${d.name} (${d.id})`).join(', ') || 'none, sync is off or no other Mac has synced'}.`);
+    if (named.length > 1 && !hit) throw new Error(`${named.length} machines are called "${to}". Pass the id instead: ${named.map((d) => d.id).join(', ')}.`);
+    if (!hit) throw new Error(`No synced machine is called "${to}". Machines: ${devices.map((d) => `${d.name} (${d.id})`).join(', ') || 'none, sync is off or no other machine has synced'}.`);
     const res = await call(`/threads/${thread_id}/handoff`, { method: 'POST', body: JSON.stringify({ to: hit.id }) });
     return text({ thread_id, to: { id: hit.id, name: hit.name }, handoff: res.handoff?.state ?? null });
   },
@@ -537,7 +643,7 @@ server.registerTool(
   {
     description:
       "An event automation's deliveries, newest first: each event that reached it (a published page, a GitHub webhook) and what became of it. " +
-      'state is received, accepted, queued (held for the Mac that runs automations), started (its thread exists: see thread_id and thread_status), ' +
+      'state is received, accepted, queued (held for the machine that runs automations), started (its thread exists: see thread_id and thread_status), ' +
       'failed or skipped (with reason). can_retry means it failed before any thread was made, so retrying cannot duplicate a run. ' +
       "A failed one that has a thread (retry_blocked says so) has an unknown outcome: open that thread and follow up there. Pass the last id as before to page.",
     inputSchema: { automation: z.string().min(1).max(200), limit: z.number().int().min(1).max(100).optional(), before: z.string().optional() },
@@ -571,9 +677,53 @@ server.registerTool(
 );
 
 server.registerTool('worktree_storage', {
-  description: 'Read-only inventory of the worktrees in data/worktrees: size, owning thread and why each is kept or eligible for cleanup, plus what a cleanup or this Mac\'s retention policy would remove and the last cleanup runs. With scan: true, starts a background scan first (it takes a minute); call again without it to read progress and the result. Deletes nothing: only Ben removes worktrees, in Settings > Storage.',
+  description: 'Read-only inventory of the worktrees in data/worktrees: size, owning thread and why each is kept or eligible for cleanup, plus what a cleanup or this machine\'s retention policy would remove and the last cleanup runs. With scan: true, starts a background scan first (it takes a minute); call again without it to read progress and the result. Deletes nothing: only Ben removes worktrees, in Settings > Worktrees.',
   inputSchema: { scan: z.boolean().optional() },
 }, async ({ scan }) => text(await call('/worktrees/scan', scan ? { method: 'POST' } : undefined)));
+
+server.registerTool('settings', {
+  description:
+    `Read-only: ${USER}'s Omni settings on this machine and where each value comes from. config: data/omni.config.json (you, folders, integrations, ` +
+    'network access, run-on machine, worktree retention). env_overrides: config fields an environment variable overrides now, by section.key. ' +
+    'server_options: the .env options (models, threads, worktrees, port), each with its value, default and source (env or default). ' +
+    `Changes nothing: ${USER} edits these in Settings, and .env needs a server restart. Channel defaults are list_channels; secrets are names only in Settings > Secrets.`,
+  inputSchema: {},
+}, async () => {
+  const [setup, server] = await Promise.all([call('/setup'), call('/setup/server')]);
+  const { automations: _automations, ...config } = setup.config;
+  return text({ path: setup.path, config, resolved: setup.resolved, env_overrides: setup.env, server_options: server.options });
+});
+
+server.registerTool('signed_in_devices', {
+  description: `The Google account linked to this Omni and the devices that signed in with it (browsers, phones, apps), most recently used first. Not the synced machines: those are list_devices. Linking or unlinking the account is ${USER}'s to do in Settings > Sharing & access.`,
+  inputSchema: {},
+}, async () => {
+  const [account, devices] = await Promise.all([call('/auth/account'), call('/auth/devices')]);
+  return text({ account: account.owner, google_sign_in: account.available, devices: devices.devices });
+});
+
+server.registerTool('revoke_signed_in_device', {
+  description: `End one signed-in device's session, by id from signed_in_devices, only when ${USER} asks. That device has to sign in with Google again. Devices paired with the token are not on the list and keep working.`,
+  inputSchema: { device_id: z.string().min(1).max(100) },
+}, async ({ device_id }) => text(await call(`/auth/devices/${encodeURIComponent(device_id)}`, { method: 'DELETE' })));
+
+server.registerTool('omni_connect_status', {
+  description: 'Read-only state of Omni Connect on this machine: whether it is on, its public hostname and URL, the relay\'s Connect page, the cloudflared tunnel state and the last error. While it is on, also the machines the relay knows with online state. Connect needs the sync relay sign-in first.',
+  inputSchema: {},
+}, async () => {
+  const status = await call('/connect');
+  if (!status.enabled) return text(status);
+  const machines = await call('/connect/machines').then((r) => r.machines, (err) => ({ error: err instanceof Error ? err.message : String(err) }));
+  return text({ ...status, machines });
+});
+
+server.registerTool('omni_connect_set', {
+  description:
+    `Turn Omni Connect on or off for this machine, only when ${USER} asks. On makes this Omni reachable from the internet at a public hostname ` +
+    '(<name>-xxxxxx.omni-os.app) through a Cloudflare tunnel the sync relay creates; every request there still needs the token or a signed-in session. ' +
+    'It needs the sync relay sign-in and cloudflared installed. Off deletes the tunnel and its DNS record. Sessions already signed in through Connect stay until revoked.',
+  inputSchema: { enabled: z.boolean() },
+}, async ({ enabled }) => text(await call(`/connect/${enabled ? 'enable' : 'disable'}`, { method: 'POST' })));
 
 // #218: the conductor reads a thread Ben referenced in a message the same way every other thread does.
 registerReferencedThread(server);
@@ -594,5 +744,10 @@ server.registerTool('note_tool_failure_recovery', {
   description: 'Record observed recovery for a tool failure occurrence. Do not infer recovery from an unrelated success. Optionally link a failed retry to an earlier failure ID with retry_of.',
   inputSchema: { id: z.string(), recovery: z.enum(['recovered', 'not_recovered', 'unknown']), retry_of: z.string().optional() },
 }, async ({ id, ...body }) => text(await call(`/tool-failures/occurrences/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })));
+
+server.registerTool('omni_update', {
+  description: `Omni's own update. check: fetch origin's main and say how many commits this server is behind, with their subjects. apply: the Update button. It waits until no turn runs (this one included, so it starts after your turn ends), updates the main checkout to main, rebuilds the Web UI and restarts the server. Only works when a supervisor started the server from a checkout: the desktop app run with --dev, or a service manager with OMNI_SUPERVISOR set. The packaged desktop app updates itself and offers to relaunch, so there check finds nothing and apply is refused. Apply only when ${USER} asks.`,
+  inputSchema: { action: z.enum(['check', 'apply']) },
+}, async ({ action }) => text(await call(action === 'check' ? '/update/check' : '/update', { method: 'POST' })));
 
 await server.connect(new StdioServerTransport());

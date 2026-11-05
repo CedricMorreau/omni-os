@@ -9,6 +9,7 @@ import { channels, folders as folderRepo, publicChannel, threads, type Channel, 
 import { detectRepo } from './github.ts';
 import { getCatalog } from './harness/catalog-service.ts';
 import { activeTasks } from './runner.ts';
+import { allWithDelegating, delegatingIds } from './delegating.ts';
 import { validateDefaults } from './harness/resolve.ts';
 import { publishFeed } from './bus.ts';
 import { baseOptions } from './worktree-base.ts';
@@ -97,12 +98,13 @@ const RECENT_PER_CHANNEL = 5;
 /** A folder lists at most this many of its threads in the sidebar; its count still says how many there are. */
 const THREADS_PER_FOLDER = 50;
 
-const stub = ({ id, channel_id, title, status, created_at, updated_at, folder_id, harness, done_at, parent_id, source, waiting_on }: Thread) => ({
-  id, channel_id, title, status, created_at, updated_at, folder_id, harness, done_at, parent_id, source, waiting_on,
+/** A thread as the sidebar lists it. `delegating`: a thread it delegated still works (apps/server/delegating.ts). */
+const stub = ({ id, channel_id, title, status, created_at, updated_at, folder_id, harness, pinned_at, done_at, parent_id, source, waiting_on }: Thread, delegating: ReadonlySet<string>) => ({
+  id, channel_id, title, status, created_at, updated_at, folder_id, harness, pinned_at, done_at, parent_id, source, waiting_on, delegating: delegating.has(id),
 });
 
 /** Conductor jobs with their delegated child threads, including children in other channels. */
-function conductorHandoffs() {
+function conductorHandoffs(delegating: ReadonlySet<string>) {
   const groups = new Map<string, { parent: Thread; children: Thread[] }>();
   for (const child of threads.conductorHandoffChildren()) {
     const parentID = child.parent_id;
@@ -116,11 +118,11 @@ function conductorHandoffs() {
     }
     group.children.push(child);
   }
-  return [...groups.values()].map(({ parent, children }) => ({ parent: stub(parent), children: children.map(stub) }));
+  return [...groups.values()].map(({ parent, children }) => ({ parent: stub(parent, delegating), children: children.map((t) => stub(t, delegating)) }));
 }
 
 /** Each folder with its count, how many of its threads run, and its newest threads, keyed by channel. */
-function foldersByChannel(list: Folder[], filed: Thread[]) {
+function foldersByChannel(list: Folder[], filed: Thread[], delegating: ReadonlySet<string>) {
   const byFolder = new Map<string, Thread[]>();
   for (const t of filed) byFolder.set(t.folder_id!, [...(byFolder.get(t.folder_id!) ?? []), t]);
   const withThreads = (f: Folder) => {
@@ -128,8 +130,8 @@ function foldersByChannel(list: Folder[], filed: Thread[]) {
     return {
       ...f,
       count: mine.length,
-      running: mine.filter((t) => t.status === 'running' || t.status === 'queued').length,
-      threads: mine.slice(0, THREADS_PER_FOLDER).map(stub),
+      running: mine.filter((t) => isWorking(t, delegating)).length,
+      threads: mine.slice(0, THREADS_PER_FOLDER).map((t) => stub(t, delegating)),
     };
   };
   const out = new Map<string, ReturnType<typeof withThreads>[]>();
@@ -139,13 +141,13 @@ function foldersByChannel(list: Folder[], filed: Thread[]) {
 
 /**
  * Running and queued threads, plus any thread whose sub-agents still run after its turn ended, so the sidebar can
- * nest those agents under it. A team member's agents count for its lead, the thread the sidebar lists.
+ * nest those agents under it, and any thread whose delegated threads still work. A team member's agents count for its
+ * lead, the thread the sidebar lists.
  */
-function busyThreads() {
+function busyThreads(delegating: ReadonlySet<string>) {
   const busy = threads.running();
   const seen = new Set(busy.map((t) => t.id));
-  for (const task of activeTasks()) {
-    const id = task.lead_id ?? task.thread_id;
+  for (const id of [...activeTasks().map((task) => task.lead_id ?? task.thread_id), ...delegating]) {
     if (seen.has(id)) continue;
     seen.add(id);
     const t = threads.get(id);
@@ -154,37 +156,40 @@ function busyThreads() {
   return busy;
 }
 
-const isRunning = (t: Thread) => t.status === 'running' || t.status === 'queued';
+/** Its own turn runs or queues, or a thread it delegated does. A thread with only sub-agents left is not counted. */
+const isWorking = (t: Thread, delegating: ReadonlySet<string>) => t.status === 'running' || t.status === 'queued' || delegating.has(t.id);
 
 /**
  * A channel plus its busy threads, its latest ones, and its folders with their threads, so the sidebar can list them
- * under the name. `running` counts only the running and queued ones.
+ * under the name. `running` counts the running and queued ones and those whose delegated threads still work.
  */
-const withActive = (ch: Channel, busy: Thread[], recent: Thread[], folders: Map<string, unknown[]>, handoffs: ReturnType<typeof conductorHandoffs>) => {
+const withActive = (ch: Channel, busy: Thread[], recent: Thread[], folders: Map<string, unknown[]>, handoffs: ReturnType<typeof conductorHandoffs>, delegating: ReadonlySet<string>) => {
   const mine = busy.filter((t) => t.channel_id === ch.id && t.source !== 'team');
   return {
     ...publicChannel(ch),
-    running: mine.filter(isRunning).length,
-    active: mine.map(stub),
-    recent: recent.filter((t) => t.channel_id === ch.id).map(stub),
+    running: mine.filter((t) => isWorking(t, delegating)).length,
+    active: mine.map((t) => stub(t, delegating)),
+    recent: recent.filter((t) => t.channel_id === ch.id).map((t) => stub(t, delegating)),
     folders: folders.get(ch.id) ?? [],
     ...(ch.id === 'conductor' && handoffs.length ? { handoffs } : {}),
   };
 };
 
 channelsApi.get('/', (c) => {
-  const busy = busyThreads();
+  const delegating = delegatingIds();
+  const busy = busyThreads(delegating);
   const recent = threads.recentPerChannel(RECENT_PER_CHANNEL);
-  const folders = foldersByChannel(folderRepo.all(), threads.filed());
-  const handoffs = conductorHandoffs();
-  return c.json(channels.list(c.req.query('archived') === '1').map((ch) => withActive(ch, busy, recent, folders, handoffs)));
+  const folders = foldersByChannel(folderRepo.all(), threads.filed(), delegating);
+  const handoffs = conductorHandoffs(delegating);
+  return c.json(channels.list(c.req.query('archived') === '1').map((ch) => withActive(ch, busy, recent, folders, handoffs, delegating)));
 });
 
 channelsApi.get('/:id', (c) => {
   const ch = channels.get(c.req.param('id'));
   if (!ch) return c.json({ error: 'not found' }, 404);
-  const folders = foldersByChannel(folderRepo.byChannel(ch.id), threads.filed(ch.id));
-  return c.json(withActive(ch, busyThreads(), threads.byChannel(ch.id, RECENT_PER_CHANNEL), folders, conductorHandoffs()));
+  const delegating = delegatingIds();
+  const folders = foldersByChannel(folderRepo.byChannel(ch.id), threads.filed(ch.id), delegating);
+  return c.json(withActive(ch, busyThreads(delegating), threads.byChannel(ch.id, RECENT_PER_CHANNEL), folders, conductorHandoffs(delegating), delegating));
 });
 
 channelsApi.post('/', async (c) => {
@@ -209,7 +214,10 @@ channelsApi.patch('/:id', async (c) => {
   delete (body as any).id;
   const runError = runDefaultsError(body, current);
   if (runError) return c.json({ error: runError }, 400);
-  if (body.repo_path && !body.github_repo && !current.github_repo) body.github_repo = await detectRepo(body.repo_path);
+  // Read the GitHub repo from the path when none is typed and there is none yet, or when the path moves without one
+  // typed (the clients leave it out unless detection failed or it was edited, #405).
+  const moved = body.repo_path && body.repo_path !== current.repo_path && body.github_repo === undefined;
+  if (body.repo_path && !body.github_repo && (!current.github_repo || moved)) body.github_repo = await detectRepo(body.repo_path);
   const updated = channels.update(id, body as any)!;
   publishFeed({ type: 'channel', id });
   return c.json(publicChannel(updated));
@@ -248,4 +256,4 @@ channelsApi.get('/:id/bases', async (c) => {
   return channel ? c.json(await baseOptions(channel)) : c.json({ error: 'not found' }, 404);
 });
 
-channelsApi.get('/:id/threads', (c) => c.json(threads.byChannel(c.req.param('id'), 200, c.req.query('archived') === '1')));
+channelsApi.get('/:id/threads', (c) => c.json(allWithDelegating(threads.byChannel(c.req.param('id'), 200, c.req.query('archived') === '1'))));

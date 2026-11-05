@@ -1,6 +1,6 @@
 // Watch PR: the server polls a thread's pull request and wakes the thread when something new needs it
-// (apps/server/pr-watch/). Server and web share these shapes; the Mac app mirrors them (OmniKit PRWatch.swift) and
-// the fixtures in apps/server/tests/mac-fixtures.test.ts hold both to the same JSON.
+// (apps/server/pr-watch/). Server and web share these shapes, and the
+// fixtures in apps/server/tests/wire-fixtures.test.ts record their JSON.
 
 /**
  * Why a watch stopped polling. `stopped`: Ben or the Conductor stopped it. `archived`: its thread was archived.
@@ -85,3 +85,7 @@ export function watchLine(w: PRWatchView): string {
 /** The PR menu's start row: what pressing it does, and what a watch does before there is one. */
 export const WATCH_ACTION = 'Watch PR';
 export const WATCH_HINT = 'Wakes this thread when a check fails or a review comes in';
+
+export function watchCopy(w: PRWatchView | null | undefined): { action: string; line: string } {
+  return { action: w?.state === 'watching' ? 'Stop watching' : WATCH_ACTION, line: w ? watchLine(w) : WATCH_HINT };
+}
