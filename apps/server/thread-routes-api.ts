@@ -109,7 +109,7 @@ threadRoutesApi.post('/', async (c) => {
   const make = () =>
     body.role === 'ticket' && channel?.kind === 'client'
       ? createTicket({ id: body.id, channel: channel.id, ...sourceFromText(body.prompt), context: body.prompt, title: body.title }, ({ id, prompt }) =>
-          createThread({ ...body, id, prompt, files }),
+          createThread({ ...body, id, prompt, files, device: 'here' }),
         ).then((ticket) => threads.get(ticket.thread_id)!)
       : createThread({ ...body, files });
   const { id } = body;

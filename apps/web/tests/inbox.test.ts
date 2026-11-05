@@ -65,6 +65,23 @@ describe('inboxLayout', () => {
     expect(ids(l.inbox)).toEqual(['back', 'old', 'mid']);
   });
 
+  it('moves a ticket waiting on an outside party to Working, unless a question holds it', () => {
+    const l = inboxLayout({
+      threads: [t('parked', { waiting_on: 'Acme' }), t('asked', { waiting_on: 'Globex' }), t('idle')],
+      needs: [need('asked', '2026-10-02', [{ kind: 'question', detail: 'Which?', count: 1 }])],
+      delegated: none,
+      open: null,
+    });
+    expect(ids(l.working)).toEqual(['parked']);
+    expect(ids(l.inbox).sort()).toEqual(['asked', 'idle']);
+  });
+
+  it('labels a finished ticket waiting on an outside party with the grey waiting mark', () => {
+    expect(rowStatus(t('parked', { waiting_on: 'Acme' }), undefined)).toEqual({ glyph: 'settled', label: 'Waiting' });
+    expect(rowStatus(t('asked', { waiting_on: 'Acme' }), need('asked', '2026-10-02', [{ kind: 'question', detail: 'Which?', count: 1 }]))?.glyph).toBe('needs');
+    expect(rowStatus(t('run', { status: 'running', waiting_on: 'Acme' }), undefined)?.label).toBe('Working');
+  });
+
   it('keeps a running thread that asked a question in the inbox', () => {
     const l = inboxLayout({
       threads: [t('ask', { status: 'running' })],

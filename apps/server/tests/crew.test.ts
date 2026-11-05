@@ -89,4 +89,9 @@ describe('parseCrewFile', () => {
     expect(crew.filter((r) => r.delegateOnly).map((r) => r.id)).toEqual(['conductor']);
     for (const r of crew) expect(r.charter.length).toBeGreaterThan(0);
   });
+
+  it('asks a delegate-only role for no shell command, since it runs without a shell', async () => {
+    const { listCrew } = await import('../crew.ts');
+    for (const r of listCrew().filter((x) => x.delegateOnly)) expect(r.charter).not.toMatch(/`git [a-z-]+/);
+  });
 });

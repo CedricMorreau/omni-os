@@ -44,7 +44,7 @@ ticketsApi.post('/', async (c) => {
   const channel = channels.get(body.channel);
   if (!channel || channel.kind !== 'client') throw new TicketError(`no client channel "${body.channel}"`, 404);
   const view = await createTicket(body, ({ id, prompt }) =>
-    createThread({ id, channel: channel.id, role: 'ticket', prompt, title: body.title, source: 'manual', base: body.base ? { kind: 'ref', ref: body.base } : null }),
+    createThread({ id, channel: channel.id, role: 'ticket', prompt, title: body.title, source: 'manual', base: body.base ? { kind: 'ref', ref: body.base } : null, device: 'here' }),
   );
   return c.json(view);
 });

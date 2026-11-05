@@ -61,6 +61,7 @@ export function rowStatus(t: ThreadStub, need: NeedsYouItem | undefined, agents 
   if (b) return { glyph: 'needs', label: BLOCKER_LABEL[b.kind] };
   if (t.status === 'queued') return { glyph: 'queued', label: 'Queued' };
   if (showsRunning(t) || agents > 0) return { glyph: 'running', label: 'Working' };
+  if (t.waiting_on && t.status === 'done') return { glyph: 'settled', label: 'Waiting' };
   switch (need?.result?.status) {
     case 'failed':
       return { glyph: 'needs', label: 'Failed' };
@@ -105,7 +106,7 @@ export function inboxLayout({
     if (t.done_at) layout.done.push(t);
     else if (t.pinned_at) layout.pinned.push(t);
     // A question holds a running thread up, so it waits in the inbox, as T3 keeps approvals out of Working.
-    else if (isBusy(t) && !blocked(t)) layout.working.push(t);
+    else if ((isBusy(t) || t.waiting_on) && !blocked(t)) layout.working.push(t);
     else layout.inbox.push(t);
   }
   layout.pinned.sort(newest((t) => t.pinned_at ?? ''));

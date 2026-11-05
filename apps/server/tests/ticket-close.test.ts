@@ -41,6 +41,21 @@ describe('closing a ticket', () => {
   });
 });
 
+describe('where a ticket runs', () => {
+  it('runs every ticket on this machine, since tickets stay local, even when Settings sends threads elsewhere', async () => {
+    expect((await call('PUT', '/setup', { runOn: { device: 'mac-b' } })).status).toBe(200);
+    try {
+      const api = await call('POST', '/tickets', { channel: 'acme', source: 'local', context: 'Globex footer' });
+      expect(api.status).toBe(200);
+      const composer = await call('POST', '/threads', { channel: 'acme', role: 'ticket', prompt: 'fix the Acme header' });
+      expect(composer.status).toBe(200);
+      expect((await call('GET', `/tickets/${composer.body.id}`)).status).toBe(200);
+    } finally {
+      await call('PUT', '/setup', { runOn: { device: '' } });
+    }
+  });
+});
+
 describe('a ticket from the channel composer', () => {
   it('makes a ticket when a client channel thread starts with the ticket role, with the link from the prompt', async () => {
     const made = await call('POST', '/threads', { channel: 'acme', role: 'ticket', prompt: 'please pick up https://app.productive.io/1/projects/2/tasks/task/555' });
