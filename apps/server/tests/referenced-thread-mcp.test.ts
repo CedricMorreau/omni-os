@@ -82,10 +82,10 @@ describe('read_referenced_thread', () => {
   if (!stamped.ok) throw new Error(stamped.error);
   h.db.events.add(from.id, 'user', { text: 'read it', context: stamped.value });
 
-  it('is the only tool the thread gets, with its limits in the description', T, async () => {
+  it('is the only read tool the thread gets, with its limits in the description', T, async () => {
     const client = await connect(from.id);
     const { tools } = (await client.request('tools/list')) as { tools: { name: string; description: string }[] };
-    expect(tools.map((t) => t.name)).toEqual(['read_referenced_thread']);
+    expect(tools.map((t) => t.name)).toEqual(['read_referenced_thread', 'draft_message']);
     expect(tools[0].description).toContain('at most 100 messages and 60,000 characters');
     expect(tools[0].description).toContain('cut at 8,000 characters');
   });
@@ -121,5 +121,15 @@ describe('read_referenced_thread', () => {
     expect(both).toMatchObject({ isError: true, body: { state: 'unavailable', message: 'Pass before or after, not both.' } });
     const lone = await connect(randomUUID());
     expect(await callTool(lone, { thread_id: to.id })).toMatchObject({ isError: true, body: { state: 'unavailable', message: 'not found' } });
+  });
+});
+
+describe('draft_message', () => {
+  it('puts the message in the thread draft panel', T, async () => {
+    const t = make('Drafting');
+    const client = await connect(t.id);
+    const r = (await client.request('tools/call', { name: 'draft_message', arguments: { text: 'Hi Acme' } })) as { isError?: boolean };
+    expect(r.isError).toBeFalsy();
+    expect(h.db.threads.get(t.id)).toMatchObject({ draft: 'Hi Acme', draft_kind: 'message' });
   });
 });

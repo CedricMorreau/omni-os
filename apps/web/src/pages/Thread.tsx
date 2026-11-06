@@ -40,6 +40,7 @@ import { useTranscriptScroll } from './useTranscriptScroll.ts';
 import { useReveal } from './useReveal.ts';
 import { tailId } from '@omni/shared/history.ts';
 import { blockedNote } from '@omni/shared/thread-machine.ts';
+import { shownDraft } from '../ticket-route.ts';
 
 export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: string; artifact?: number; at?: number; view?: ThreadView }) {
   const { mods, tasks } = useApp();
@@ -209,7 +210,7 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <DraftPanel ticket={ticket} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} />
+          <DraftPanel threadId={thread.id} draft={shownDraft(ticket, thread)} ticketRef={ticket?.ref} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} />
           {/* transcript */}
           <div className="relative min-h-0 flex-1">
             <div ref={scrollRef} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">

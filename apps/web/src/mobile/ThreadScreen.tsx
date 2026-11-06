@@ -35,6 +35,7 @@ import { threadView } from '@omni/shared/thread-view.ts';
 import { crewLine, prLine } from '@omni/shared/thread-glance.ts';
 import { statusLabel } from '../status-line.ts';
 import { shownStatus } from '@omni/shared/delegate-count.ts';
+import { shownDraft } from '../ticket-route.ts';
 
 /** The thread: the outcome first, steps folded behind a row, one secondary surface at a time from the menu. */
 export function ThreadScreen() {
@@ -201,7 +202,7 @@ export function ThreadScreen() {
         onSwitched={(t) => applyThread(t)}
         onFork={() => shell.sheet({ name: 'continue', source: thread })}
       />
-      <DraftPanel ticket={ticket} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} mobile />
+      <DraftPanel threadId={thread.id} draft={shownDraft(ticket, thread)} ticketRef={ticket?.ref} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} mobile />
       {menu && (
         <MenuSheet
           thread={thread}

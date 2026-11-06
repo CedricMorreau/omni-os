@@ -347,6 +347,8 @@ export function migrate() {
   ensureColumn('tickets', 'waiting_on', 'TEXT');
   ensureColumn('tickets', 'waiting_at', 'TEXT');
   ensureColumn('threads', 'waiting_on', 'TEXT');
+  ensureColumn('threads', 'draft', 'TEXT');
+  ensureColumn('threads', 'draft_kind', 'TEXT');
   db.exec('UPDATE threads SET waiting_on = (SELECT waiting_on FROM tickets WHERE tickets.thread_id = threads.id)');
   for (const t of db.prepare(`SELECT thread_id, ref, link FROM tickets WHERE source = 'productive' AND link IS NOT NULL`).all() as { thread_id: string; ref: string; link: string }[]) {
     const id = t.link.match(/\/tasks\/(?:task\/)?(\d+)/)?.[1];

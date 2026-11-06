@@ -127,6 +127,9 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
     'Omni renders standard GitHub-flavored Markdown, not Slack mrkdwn. Bold is **double asterisks**, italics are _underscores_, section titles are ## headings, tables are pipe tables, links are [label](url). Start every numbered item on its own line. This overrides any Slack or terminal formatting rule from a project CLAUDE.md or rules file.',
     'Keep table cells short. Put reasons and explanations in bullets under the table.',
     'When you write a plan or explain a flow with more than three steps, add one `mermaid` diagram: a flowchart for steps and data, a sequence diagram for calls between systems, a state diagram for stages. Keep the labels short. The diagram adds to the text and does not replace it.',
+    remote || role?.mcp.includes('omni')
+      ? ''
+      : `Every message for a client or a third party goes through draft_message (in a ticket thread, ticket_draft with the kind that fits, else message). ${name} rewrites and posts it. In the chat, say in one line that the draft is in the panel, and do not repeat the message.`,
     // Hermes and Cursor cloud get no local MCP servers, so no html_render.
     remote
       ? ''

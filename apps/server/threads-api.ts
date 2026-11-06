@@ -5,6 +5,7 @@ import { TITLE_MAX } from '@omni/shared/slash.ts';
 import { publishFeed } from './bus.ts';
 import { FolderError, folders, threads, type Thread } from './db.ts';
 import { controlThread, isLive } from './runner/state.ts';
+import { saveMessageDraft } from './tickets.ts';
 
 export const threadsApi = new Hono();
 
@@ -98,4 +99,12 @@ threadsApi.post('/:id/mcp', async (c) => {
   if (!status.ok) return c.json({ error: status.error }, 502);
   const rows = ((status.response as { mcpServers?: McpRow[] } | null)?.mcpServers ?? []).map(({ name, status: s, scope }) => ({ name, status: s, scope }));
   return c.json({ servers: rows, auth_url: authUrl });
+threadsApi.post('/:id/draft', async (c) => {
+  const id = c.req.param('id');
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  const body = z.object({ text: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return c.json({ error: 'a draft needs its text' }, 400);
+  const thread = saveMessageDraft(id, body.data.text);
+  publishFeed({ type: 'thread', thread });
+  return c.json(thread);
 });
