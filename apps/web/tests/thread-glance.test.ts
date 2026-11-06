@@ -92,13 +92,15 @@ describe('the agents card', () => {
 describe('the Details tab', () => {
   const details = { channel: undefined, parent: null, children: [], lastResult: null, warm: undefined, links: { from: null, into: [] }, agents: [], onJump: () => {} };
 
-  it('keeps MCP to one line until opened', () => {
+  it('shows every MCP server as a chip, connected ones first, in green or grey', () => {
     const mcp = Array.from({ length: 6 }, (_, i) => `server${i}:${i % 2 ? 'failed' : 'connected'}`);
     const html = renderToStaticMarkup(createElement(DetailsTab, { ...details, thread: thread(), init: { mcp } }));
     expect(html).toContain('3 connected');
     expect(html).toContain('3 not connected');
-    expect(html).not.toContain('server1');
-    expect(html).toContain('aria-expanded="false"');
+    expect(html.indexOf('>server4<')).toBeLessThan(html.indexOf('>server1<'));
+    expect(html).toContain('title="server1: Failed to start."');
+    expect(html.match(/bg-done/g)).toHaveLength(3);
+    expect(html).not.toMatch(/bg-(red|danger|error)/);
   });
 
   it('leads with the branch card: branch, PR and the step it calls for', () => {

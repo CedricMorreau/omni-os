@@ -212,6 +212,12 @@ export function refreshContext(threadId: string): boolean {
   return !!l?.session && !l.closing && !!l.session.requestContext?.();
 }
 
+/** Send a control request to the thread's warm process. Null when there is none, or its harness takes none. */
+export function controlThread(threadId: string, request: { subtype: string } & Record<string, unknown>) {
+  const l = lives.get(threadId);
+  return l?.session && !l.closing && l.session.control ? l.session.control(request) : null;
+}
+
 /** The current process's commands, MCP prompts included. A closing process may belong to the previous harness. */
 export function threadCommands(threadId: string): CommandList | null {
   const live = lives.get(threadId);

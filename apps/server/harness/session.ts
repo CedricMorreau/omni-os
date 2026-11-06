@@ -8,7 +8,7 @@ import type { AdapterCallbacks, EndMode, HarnessSession } from './adapter.ts';
 /** The signal each end mode sends a process, and the one a session without a process reports. */
 const SIGNALS: Record<Exclude<EndMode, 'close'>, NodeJS.Signals> = { stop: 'SIGINT', terminate: 'SIGTERM', kill: 'SIGKILL' };
 
-type Ops = Pick<HarnessSession, 'send' | 'interrupt' | 'requestContext'>;
+type Ops = Pick<HarnessSession, 'send' | 'interrupt' | 'requestContext' | 'control'>;
 
 /**
  * A session that is one process. `close` ends its stdin and the other modes signal it. It has ended once its exit
@@ -34,6 +34,7 @@ export function processSession(child: ChildProcess, cb: AdapterCallbacks, ops: O
     send: ops.send,
     interrupt: ops.interrupt,
     requestContext: ops.requestContext,
+    control: ops.control,
     end(mode) {
       if (mode === 'close') child.stdin?.end();
       else child.kill(SIGNALS[mode]);

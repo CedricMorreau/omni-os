@@ -724,6 +724,21 @@ function projectCommands() {
 
 const commandList = () => [...COMMANDS, ...projectCommands(), ...(mcpConnected ? MCP_PROMPTS : [])];
 
+// MCP control requests as claude 2.1.319 answers them: the config's servers plus one claude.ai connector that needs a sign-in.
+let mcpState = null;
+function onMcpControl(id, sub, req) {
+  mcpState ??= [...mcpServers(), { name: 'claude.ai Acme', status: 'needs-auth', scope: 'claudeai' }];
+  const ok = (response) => writeRaw({ type: 'control_response', response: { subtype: 'success', request_id: id, ...(response ? { response } : {}) } });
+  if (sub === 'mcp_status') return ok({ mcpServers: mcpState });
+  const row = mcpState.find((s) => s.name === req.serverName);
+  if (!row) return writeRaw({ type: 'control_response', response: { subtype: 'error', request_id: id, error: `Server not found: ${req.serverName}` } });
+  if (sub === 'mcp_authenticate') return ok({ authUrl: `https://claude.ai/mcp/start-auth/${encodeURIComponent(row.name)}`, requiresUserAction: true, callbackExpected: false });
+  if (sub === 'mcp_clear_auth') row.status = 'needs-auth';
+  else if (sub === 'mcp_toggle') row.status = req.enabled ? 'connected' : 'disabled';
+  else if (sub === 'mcp_reconnect' && row.status !== 'needs-auth') row.status = 'connected';
+  ok();
+}
+
 function onControl(msg) {
   const id = msg.request_id;
   const sub = msg.request?.subtype;
@@ -762,6 +777,8 @@ function onControl(msg) {
         },
       },
     });
+  } else if (sub?.startsWith('mcp_')) {
+    onMcpControl(id, sub, msg.request);
   } else if (sub === 'set_model' || sub === 'set_permission_mode') {
     writeRaw({ type: 'control_response', response: { subtype: 'success', request_id: id, response: {} } });
   } else {
