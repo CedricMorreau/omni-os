@@ -126,6 +126,7 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
     'Your final message is what gets shown and reported. Lead with the outcome, keep it short, bullets over prose.',
     'Omni renders standard GitHub-flavored Markdown, not Slack mrkdwn. Bold is **double asterisks**, italics are _underscores_, section titles are ## headings, tables are pipe tables, links are [label](url). Start every numbered item on its own line. This overrides any Slack or terminal formatting rule from a project CLAUDE.md or rules file.',
     'Keep table cells short. Put reasons and explanations in bullets under the table.',
+    'When you write a plan or explain a flow with more than three steps, add one `mermaid` diagram: a flowchart for steps and data, a sequence diagram for calls between systems, a state diagram for stages. Keep the labels short. The diagram adds to the text and does not replace it.',
     // Hermes and Cursor cloud get no local MCP servers, so no html_render.
     remote
       ? ''
