@@ -12,7 +12,7 @@ const CLIENT = 8;
 const PREVIEW = 7;
 export const SOURCES = ['productive', 'slack', 'local'] as const;
 export const GATES = ['plan', 'client', 'go'] as const;
-export const DRAFT_KINDS = ['qa', 'answer', 'closing'] as const;
+export const DRAFT_KINDS = ['qa', 'answer', 'closing', 'message'] as const;
 export const BADGES = ['go', 'decide', 'check', 'working', 'client', 'waiting', 'closed'] as const;
 
 export type Source = (typeof SOURCES)[number];
@@ -170,6 +170,15 @@ export function recordGate(threadId: string, gate: Gate, words: string) {
 export function saveDraft(threadId: string, kind: DraftKind, text: string) {
   open(threadId);
   return tickets.update(threadId, { draft_kind: kind, draft: text.trim() || null });
+}
+
+export function saveMessageDraft(threadId: string, text: string) {
+  const t = threads.get(threadId);
+  if (!t) throw new TicketError('no such thread', 404);
+  const ticket = tickets.get(threadId);
+  if (ticket && !ticket.closed_at) saveDraft(threadId, 'message', text);
+  else threads.update(threadId, { draft: text.trim() || null, draft_kind: 'message', updated_at: t.updated_at });
+  return threads.get(threadId)!;
 }
 
 export function clientFeedback(threadId: string) {

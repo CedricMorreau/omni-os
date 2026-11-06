@@ -347,6 +347,8 @@ export function migrate() {
   ensureColumn('tickets', 'waiting_on', 'TEXT');
   ensureColumn('tickets', 'waiting_at', 'TEXT');
   ensureColumn('threads', 'waiting_on', 'TEXT');
+  ensureColumn('threads', 'draft', 'TEXT');
+  ensureColumn('threads', 'draft_kind', 'TEXT');
   db.exec('UPDATE threads SET waiting_on = (SELECT waiting_on FROM tickets WHERE tickets.thread_id = threads.id)');
   // The channel's design system: one standalone HTML file for the pages its threads write, and the file's name.
   ensureColumn('channels', 'design_system', 'TEXT');

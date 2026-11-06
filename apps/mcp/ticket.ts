@@ -67,8 +67,8 @@ server.registerTool(
 server.registerTool(
   'ticket_draft',
   {
-    description: `Put a draft on the ticket card for ${USER} to rewrite and post: qa (the QA note at stage 7), answer (a reply to a client question) or closing (the closing comment at stage 10). You never post it yourself.`,
-    inputSchema: { kind: z.enum(['qa', 'answer', 'closing']), text: z.string().min(1) },
+    description: `Put a draft on the ticket card for ${USER} to rewrite and post: qa (the QA note at stage 7), answer (a reply to a client question), closing (the closing comment at stage 10) or message (any other message for the client or a third party). You never post it yourself.`,
+    inputSchema: { kind: z.enum(['qa', 'answer', 'closing', 'message']), text: z.string().min(1) },
   },
   async ({ kind, text: body }) => text(await post('/draft', { kind, text: body })),
 );

@@ -45,6 +45,8 @@ export interface Thread {
   limit_elsewhere: number;
   continued_from: string | null;
   waiting_on: string | null;
+  draft: string | null;
+  draft_kind: 'message' | null;
   created_at: string;
   updated_at: string;
 }

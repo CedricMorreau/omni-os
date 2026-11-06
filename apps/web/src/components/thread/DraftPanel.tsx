@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { draftLabel, draftSeenKey, draftStamp, draftUnseen, type TicketView } from '../../ticket-route.ts';
+import { draftLabel, draftSeenKey, draftStamp, draftUnseen } from '../../ticket-route.ts';
 import { useDismissable } from '../ui/use-dismissable.ts';
 import { CopyButton, Icon, IconButton } from '../ui.tsx';
 
@@ -19,9 +19,9 @@ function writeSeen(threadId: string, stamp: string) {
   }
 }
 
-export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: { ticket: TicketView | null; open: boolean; onToggle: () => void; onClose: () => void; mobile?: boolean }) {
-  const threadId = ticket?.thread_id ?? '';
-  const draft = ticket?.draft ?? null;
+type Draft = { kind: string | null; text: string };
+
+export function DraftPanel({ threadId, draft, ticketRef, open, onToggle, onClose, mobile = false }: { threadId: string; draft: Draft | null; ticketRef?: string; open: boolean; onToggle: () => void; onClose: () => void; mobile?: boolean }) {
   const [seen, setSeen] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
 
   useDismissable(open, onClose, { outside: false });
 
-  if (!ticket || !draft) return null;
+  if (!draft) return null;
   const label = draftLabel(draft.kind);
   const unseen = !open && draftUnseen(draft, seen);
   const panelId = `draft-panel-${threadId}`;
@@ -97,7 +97,7 @@ export function DraftPanel({ ticket, open, onToggle, onClose, mobile = false }: 
           <div className="flex shrink-0 items-center gap-2 px-4 pt-3 pb-2">
             <Icon name="file" size={15} className="text-fg-3" />
             <h2 className="min-w-0 flex-1 truncate text-[14px] font-medium text-fg">{label}</h2>
-            <span className="text-[12px] text-fg-4 font-num">{ticket.ref}</span>
+            {ticketRef && <span className="text-[12px] text-fg-4 font-num">{ticketRef}</span>}
             <IconButton icon="x" label={`Close ${label.toLowerCase()}`} onClick={onClose} />
           </div>
           <div id={`${panelId}-text`} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-3 text-[14px] leading-[1.55] break-words whitespace-pre-wrap text-fg">

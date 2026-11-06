@@ -33,7 +33,10 @@ export function skipReason(t: Pick<TicketView, 'route_proposal'>, stage: number)
   return t.route_proposal?.reasons[String(stage)]?.trim() || null;
 }
 
-const DRAFT_LABEL: Record<string, string> = { qa: 'QA note', answer: 'Client answer', closing: 'Closing comment' };
+const DRAFT_LABEL: Record<string, string> = { qa: 'QA note', answer: 'Client answer', closing: 'Closing comment', message: 'Message' };
+
+export const shownDraft = (ticket: Pick<TicketView, 'draft'> | null, thread: { draft: string | null; draft_kind: string | null } | null) =>
+  ticket?.draft ?? (thread?.draft ? { kind: thread.draft_kind, text: thread.draft } : null);
 
 export const draftLabel = (kind: string | null | undefined) => (kind && DRAFT_LABEL[kind]) || 'Draft';
 
