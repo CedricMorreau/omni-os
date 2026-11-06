@@ -21,10 +21,17 @@ export function useAttachments() {
   const depth = useRef(0); // dragenter/leave also fire for children, so count them
 
   const add = useCallback(
-    (incoming: File[]) => {
+    async (incoming: File[]) => {
       if (!incoming.length) return;
-      const tooBig = incoming.filter((f) => f.size > maxMb * 1024 * 1024);
-      const ok = incoming.filter((f) => f.size <= maxMb * 1024 * 1024 && f.size > 0);
+      const limit = maxMb * 1024 * 1024;
+      // macOS deletes the temporary file of a dragged screenshot thumbnail soon after the drop. Read the file now.
+      const read = await Promise.all(
+        incoming.map((f) => (f.size > limit ? f : f.arrayBuffer().then((b) => new File([b], f.name, { type: f.type, lastModified: f.lastModified }), () => null))),
+      );
+      const unread = incoming.filter((_, i) => !read[i]);
+      const kept = read.filter((f): f is File => !!f);
+      const tooBig = kept.filter((f) => f.size > limit);
+      const ok = kept.filter((f) => f.size <= limit && f.size > 0);
       setFiles((prev) => {
         const next = [...prev];
         for (const f of ok) if (!next.some((x) => sameFile(x, f))) next.push(f);
@@ -34,7 +41,12 @@ export function useAttachments() {
         }
         return next;
       });
-      setError(tooBig.length ? `${tooBig.map((f) => `"${f.name}"`).join(', ')} ${tooBig.length > 1 ? 'are' : 'is'} over the ${maxMb} MB limit.` : null);
+      const names = (fs: File[]) => fs.map((f) => `"${f.name}"`).join(', ');
+      const problems = [
+        unread.length ? `Omni could not read ${names(unread)}. Drag it in again, or paste it.` : '',
+        tooBig.length ? `${names(tooBig)} ${tooBig.length > 1 ? 'are' : 'is'} over the ${maxMb} MB limit.` : '',
+      ].filter(Boolean);
+      setError(problems.length ? problems.join(' ') : null);
     },
     [maxMb],
   );
@@ -65,7 +77,8 @@ export function useAttachments() {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     },
-    onDragLeave: () => {
+    onDragLeave: (e: ReactDragEvent) => {
+      if (![...e.dataTransfer.types].includes('Files')) return;
       if (--depth.current <= 0) {
         depth.current = 0;
         setOver(false);
@@ -76,7 +89,7 @@ export function useAttachments() {
       e.preventDefault();
       depth.current = 0;
       setOver(false);
-      add([...e.dataTransfer.files]);
+      void add([...e.dataTransfer.files]);
     },
   };
 
