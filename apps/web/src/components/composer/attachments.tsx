@@ -10,6 +10,10 @@ import { Icon, IconButton } from '../ui.tsx';
 const MAX_ATTACHMENTS = 10;
 const isImage = (f: File) => f.type.startsWith('image/');
 const sameFile = (a: File, b: File) => a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+const PASTE_LINES = 10;
+const PASTE_CHARS = 1000;
+const pasted = new WeakMap<File, number>();
+export const pastedLines = (f: File) => pasted.get(f);
 
 /** Files staged for the next message: paperclip, drag-and-drop and paste all land here. */
 export function useAttachments() {
@@ -19,6 +23,7 @@ export function useAttachments() {
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const depth = useRef(0); // dragenter/leave also fire for children, so count them
+  const pastes = useRef(0);
 
   const add = useCallback(
     async (incoming: File[]) => {
@@ -26,7 +31,7 @@ export function useAttachments() {
       const limit = maxMb * 1024 * 1024;
       // macOS deletes the temporary file of a dragged screenshot thumbnail soon after the drop. Read the file now.
       const read = await Promise.all(
-        incoming.map((f) => (f.size > limit ? f : f.arrayBuffer().then((b) => new File([b], f.name, { type: f.type, lastModified: f.lastModified }), () => null))),
+        incoming.map((f) => (f.size > limit || pasted.has(f) ? f : f.arrayBuffer().then((b) => new File([b], f.name, { type: f.type, lastModified: f.lastModified }), () => null))),
       );
       const unread = incoming.filter((_, i) => !read[i]);
       const kept = read.filter((f): f is File => !!f);
@@ -53,16 +58,25 @@ export function useAttachments() {
 
   const remove = (f: File) => setFiles((prev) => prev.filter((x) => x !== f));
   const clear = () => {
+    pastes.current = 0;
     setFiles([]);
     setError(null);
   };
 
   const onPaste = (e: ReactClipboardEvent) => {
-    const pasted = [...(e.clipboardData?.files ?? [])];
-    // Text pastes carry no files; only intercept when something real came along.
-    if (!pasted.length) return;
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (files.length) {
+      e.preventDefault();
+      void add(files);
+      return;
+    }
+    const text = e.clipboardData?.getData('text/plain') ?? '';
+    const lines = text.split('\n').length;
+    if (lines <= PASTE_LINES && text.length <= PASTE_CHARS) return;
     e.preventDefault();
-    add(pasted);
+    const file = new File([text], `Pasted text ${++pastes.current}.txt`, { type: 'text/plain' });
+    pasted.set(file, lines);
+    void add([file]);
   };
 
   const dropZone = {
@@ -131,8 +145,8 @@ export function AttachmentStrip({ files, onRemove }: { files: File[]; onRemove: 
             </span>
           )}
           <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate font-medium text-fg-2">{f.name}</span>
-            <span className="block font-num text-[10.5px] text-fg-4">{bytes(f.size)}</span>
+            <span className="block truncate font-medium text-fg-2">{pasted.has(f) ? f.name.replace(/\.txt$/, '') : f.name}</span>
+            <span className="block font-num text-[10.5px] text-fg-4">{pasted.has(f) ? `${pasted.get(f)} lines` : bytes(f.size)}</span>
           </span>
           <IconButton icon="x" label={`Remove ${f.name}`} size={13} className="h-6 w-6" onClick={() => onRemove(f)} />
         </span>
