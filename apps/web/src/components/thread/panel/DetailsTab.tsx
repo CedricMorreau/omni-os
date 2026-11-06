@@ -1,8 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { type ThreadLinks } from '@omni/shared/continue-flow.ts';
 import type { BackgroundTask, Channel, Thread } from '../../../api.ts';
 import { HarnessMark } from '../../brand.tsx';
-import { Chip, CopyButton, Icon, StatusDot } from '../../ui.tsx';
+import { Button, CopyButton, ErrorNote, Modal, StatusDot } from '../../ui.tsx';
+import { api, ApiError } from '../../../api.ts';
+import { MCP_ACTION_LABEL, mcpActions, mcpFromInit, mcpStatusText, type McpAction, type McpServer } from '../../../mcp-servers.ts';
 import { duration, fullDate, plural } from '../../../format.ts';
 import { href } from '../../../router.ts';
 import { cloudAgentUrl } from '@omni/shared/cloud-agent.ts';
@@ -28,41 +30,86 @@ export interface ResultP {
 
 const shellQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
-/** One line: how many servers connected and how many did not. The names show only when asked for, failed ones first. */
-function McpList({ servers }: { servers: string[] }) {
-  const [open, setOpen] = useState(false);
-  const parsed = servers.map((m) => {
-    const cut = m.lastIndexOf(':');
-    const name = cut > 0 ? m.slice(0, cut) : m;
-    const status = cut > 0 ? m.slice(cut + 1) : '';
-    const label = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(name) ? `${name.slice(0, 8)}…` : name;
-    return { key: m, name, status, label, ok: !status || status === 'connected' };
-  });
-  const bad = parsed.filter((p) => !p.ok);
-  const good = parsed.filter((p) => p.ok);
+type McpReply = { servers: McpServer[]; auth_url: string | null };
+
+/** Every MCP server as a chip, green when connected and grey otherwise. A click shows its status in words and the /mcp actions. */
+function McpList({ threadId, servers }: { threadId: string; servers: string[] }) {
+  const snapshot = servers.join('\n');
+  const [rows, setRows] = useState<McpServer[]>(() => mcpFromInit(servers));
+  const [picked, setPicked] = useState<string | null>(null);
+  const [busy, setBusy] = useState<McpAction | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [idle, setIdle] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRows(mcpFromInit(snapshot.split('\n')));
+    let alive = true;
+    api
+      .post<McpReply>(`/threads/${threadId}/mcp`, { action: 'status' })
+      .then((r) => alive && (setRows(r.servers), setIdle(null)))
+      .catch((e) => alive && e instanceof ApiError && e.status === 409 && setIdle(e.message));
+    return () => {
+      alive = false;
+    };
+  }, [threadId, snapshot]);
+
+  const run = async (server: string, action: McpAction) => {
+    setBusy(action);
+    setProblem(null);
+    try {
+      const r = await api.post<McpReply>(`/threads/${threadId}/mcp`, { action, server });
+      setRows(r.servers);
+      if (r.auth_url) window.open(r.auth_url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const ok = rows.filter((r) => r.status === 'connected');
+  const rest = rows.filter((r) => r.status !== 'connected');
+  const open = rows.find((r) => r.name === picked) ?? null;
+  const label = (name: string) => (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(name) ? `${name.slice(0, 8)}…` : name);
   return (
     <div>
-      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex max-w-full items-center gap-1 text-left text-fg-2 hover:text-fg">
-        <span className="truncate">
-          {good.length} connected
-          {bad.length > 0 && <span className="text-fg-3"> · {bad.length} not connected</span>}
-        </span>
-        <Icon name="chevronDown" size={12} className={`shrink-0 text-fg-4 transition-transform group-hover:text-fg-3 ${open ? '' : '-rotate-90'}`} />
-      </button>
-      {open && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {bad.map((p) => (
-            <Chip key={p.key} tone="outline" title={`${p.name} (${p.status})`}>
-              {p.label}
-            </Chip>
-          ))}
-          {good.map((p) => (
-            <Chip key={p.key} title={p.name}>
-              {p.label}
-            </Chip>
-          ))}
-        </div>
-      )}
+      <span className="text-fg-2">
+        {ok.length} connected
+        {rest.length > 0 && <span className="text-fg-3"> · {rest.length} not connected</span>}
+      </span>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {[...ok, ...rest].map((r) => (
+          <button
+            key={r.name}
+            type="button"
+            title={`${r.name}: ${mcpStatusText(r)}`}
+            onClick={() => (setPicked(r.name), setProblem(null))}
+            className="press inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-full bg-surface-2 px-2 text-[11px] leading-none font-medium text-fg-2 hover:text-fg"
+          >
+            <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.status === 'connected' ? 'bg-done' : 'bg-fg-4'}`} />
+            <span className="truncate">{label(r.name)}</span>
+          </button>
+        ))}
+      </div>
+      <Modal open={!!open} onClose={() => setPicked(null)} title={open?.name}>
+        {open && (
+          <div className="flex flex-col gap-3 px-6 pt-1 pb-5 text-[13.5px]">
+            <p className="flex items-center gap-2 text-fg-2">
+              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${open.status === 'connected' ? 'bg-done' : 'bg-fg-4'}`} />
+              {mcpStatusText(open)}
+            </p>
+            {idle && <p className="text-fg-3">{idle}</p>}
+            <div className="flex flex-wrap gap-2">
+              {(idle ? [] : mcpActions(open)).map((a) => (
+                <Button key={a} size="sm" variant="secondary" disabled={!!busy} onClick={() => void run(open.name, a)}>
+                  {busy === a ? `${MCP_ACTION_LABEL[a]}…` : MCP_ACTION_LABEL[a]}
+                </Button>
+              ))}
+            </div>
+            {problem && <ErrorNote>{problem}</ErrorNote>}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -172,7 +219,7 @@ export function DetailsTab({
         )}
         {init?.mcp && init.mcp.length > 0 && (
           <Row k="MCP">
-            <McpList servers={init.mcp} />
+            <McpList threadId={thread.id} servers={init.mcp} />
           </Row>
         )}
         <Row k="Created">{fullDate(thread.created_at)}</Row>

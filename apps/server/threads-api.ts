@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { TITLE_MAX } from '@omni/shared/slash.ts';
 import { publishFeed } from './bus.ts';
 import { FolderError, folders, threads, type Thread } from './db.ts';
+import { controlThread, isLive } from './runner/state.ts';
 
 export const threadsApi = new Hono();
 
@@ -60,4 +61,41 @@ threadsApi.patch('/:id', async (c) => {
   publishFeed({ type: 'thread', thread: renamed });
   if (body.data.done !== undefined) publishFeed({ type: 'needs_you', thread_id: id });
   return c.json(renamed);
+});
+
+const MCP_ACTIONS = {
+  reconnect: { subtype: 'mcp_reconnect' },
+  authenticate: { subtype: 'mcp_authenticate' },
+  clear_auth: { subtype: 'mcp_clear_auth' },
+  enable: { subtype: 'mcp_toggle', enabled: true },
+  disable: { subtype: 'mcp_toggle', enabled: false },
+} as const;
+
+const mcpSchema = z.union([
+  z.object({ action: z.literal('status') }),
+  z.object({ action: z.enum(Object.keys(MCP_ACTIONS) as [keyof typeof MCP_ACTIONS]), server: z.string().min(1) }),
+]);
+
+type McpRow = { name: string; status: string; scope?: string };
+
+/** The live MCP servers of a thread's Claude Code process, and the /mcp actions on one of them. */
+threadsApi.post('/:id/mcp', async (c) => {
+  const id = c.req.param('id');
+  if (!threads.get(id)) return c.json({ error: 'not found' }, 404);
+  const body = mcpSchema.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return c.json({ error: 'unknown MCP action' }, 400);
+  if (!isLive(id)) return c.json({ error: 'The thread has no running process. Send a message to start it.' }, 409);
+  const ask = (request: { subtype: string } & Record<string, unknown>) => controlThread(id, request);
+  let authUrl: string | null = null;
+  if (body.data.action !== 'status') {
+    const reply = await ask({ ...MCP_ACTIONS[body.data.action], serverName: body.data.server });
+    if (!reply) return c.json({ error: 'Only a Claude Code thread can change its MCP servers.' }, 409);
+    if (!reply.ok) return c.json({ error: reply.error }, 502);
+    authUrl = (reply.response as { authUrl?: string } | null)?.authUrl ?? null;
+  }
+  const status = await ask({ subtype: 'mcp_status' });
+  if (!status) return c.json({ error: 'Only a Claude Code thread can change its MCP servers.' }, 409);
+  if (!status.ok) return c.json({ error: status.error }, 502);
+  const rows = ((status.response as { mcpServers?: McpRow[] } | null)?.mcpServers ?? []).map(({ name, status: s, scope }) => ({ name, status: s, scope }));
+  return c.json({ servers: rows, auth_url: authUrl });
 });

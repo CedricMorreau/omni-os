@@ -19,19 +19,22 @@ import { normalizeClaudeCommands } from './commands.ts';
 import { fromClaudeContext, type ContextUsage } from '@omni/shared/context-meter.ts';
 import { CAPABILITIES } from '../types.ts';
 import { CLAUDE_ALIASES } from '../catalog.ts';
-import type { AdapterCallbacks, AdapterContext, HarnessAdapter, HarnessSession } from '../adapter.ts';
+import type { AdapterCallbacks, AdapterContext, ControlReply, HarnessAdapter, HarnessSession } from '../adapter.ts';
 
 /** Omni's own `initialize` request, whose answer lists the process's commands. */
 const COMMANDS_REQUEST = 'omni-commands';
 /** Omni's `get_context_usage` requests: the CLI's split of the context window. Costs no tokens. */
 const CONTEXT_REQUEST = 'omni-context';
+/** Omni's other control requests, such as mcp_status, each answered to the caller that sent it. */
+const CONTROL_REQUEST = 'omni-control';
+const CONTROL_TIMEOUT_MS = 30_000;
 
 /** The parts of a stream-json event the adapter reads itself; parseEvent reads the rest. */
 interface ClaudeEvent {
   type?: unknown;
   subtype?: unknown;
   commands?: unknown;
-  response?: { request_id?: unknown; subtype?: unknown; response?: { commands?: unknown } };
+  response?: { request_id?: unknown; subtype?: unknown; error?: unknown; response?: { commands?: unknown } };
 }
 
 /** The answer to one of Omni's context requests, or null for any other event. */
@@ -164,6 +167,12 @@ export const claudeAdapter: HarnessAdapter = {
         return;
       }
       if (!evt || typeof evt !== 'object') return;
+      const reply = (evt as ClaudeEvent).type === 'control_response' ? (evt as ClaudeEvent).response : undefined;
+      const waiting = typeof reply?.request_id === 'string' ? pending.get(reply.request_id) : undefined;
+      if (reply && waiting) {
+        pending.delete(reply.request_id as string);
+        return waiting(reply.subtype === 'success' ? { ok: true, response: reply.response ?? null } : { ok: false, error: String(reply.error ?? 'the request failed') });
+      }
       const listed = listedCommands(evt);
       if (listed) cb.commands?.(normalizeClaudeCommands(listed));
       const context = contextAnswer(evt);
@@ -192,6 +201,20 @@ export const claudeAdapter: HarnessAdapter = {
       }
     };
 
+    const pending = new Map<string, (r: ControlReply) => void>();
+    let controlRequests = 0;
+    const control = (request: { subtype: string } & Record<string, unknown>) =>
+      new Promise<ControlReply>((resolve) => {
+        const id = `${CONTROL_REQUEST}-${++controlRequests}`;
+        const done = (r: ControlReply) => (clearTimeout(timer), pending.delete(id), resolve(r));
+        const timer = setTimeout(() => done({ ok: false, error: `${request.subtype} got no answer in ${CONTROL_TIMEOUT_MS / 1000} s` }), CONTROL_TIMEOUT_MS);
+        pending.set(id, done);
+        if (!writeLine({ type: 'control_request', request_id: id, request })) done({ ok: false, error: 'the process has ended' });
+      });
+    child.on('close', () => {
+      for (const done of [...pending.values()]) done({ ok: false, error: 'the process has ended' });
+    });
+
     let contextRequests = 0;
     const requestContext = () =>
       writeLine({ type: 'control_request', request_id: `${CONTEXT_REQUEST}-${++contextRequests}`, request: { subtype: 'get_context_usage' } });
@@ -214,6 +237,7 @@ export const claudeAdapter: HarnessAdapter = {
       interrupt: (requestId) => writeLine({ type: 'control_request', request_id: requestId, request: { subtype: 'interrupt' } }),
       flush: () => splitter.flush().forEach(handleLine),
       requestContext,
+      control,
     });
   },
 };

@@ -117,7 +117,11 @@ export interface HarnessSession {
   end(mode: EndMode): void;
   /** Ask for a full context reading, answered through `context`. False if it can't. */
   requestContext?: () => boolean;
+  /** Send a control request, such as mcp_status, and wait for its answer. */
+  control?: (request: { subtype: string } & Record<string, unknown>) => Promise<ControlReply>;
 }
+
+export type ControlReply = { ok: true; response: unknown } | { ok: false; error: string };
 
 export interface HarnessAdapter {
   readonly id: HarnessId;
