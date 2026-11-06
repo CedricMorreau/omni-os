@@ -4,8 +4,7 @@ import { relTime } from '@omni/shared/format.ts';
 import { href } from '../router.ts';
 import { useNow } from '../store.tsx';
 import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticket-route.ts';
-import { StagePill } from './StagePill.tsx';
-import { Chip } from './ui.tsx';
+import { StagePill, TicketRef } from './StagePill.tsx';
 
 export function useChannelTickets(channelId: string, enabled: boolean, version: unknown) {
   const [tickets, setTickets] = useState<TicketView[]>([]);
@@ -42,9 +41,7 @@ export function TicketGroups({ tickets }: { tickets: TicketView[] }) {
           {s.items.map((t) => (
             <a key={t.thread_id} href={href.thread(t.thread_id)} className="hov group flex min-w-0 items-center gap-2 rounded-[18px] px-3 py-3 [--hov:var(--surface)] md:px-3.5">
               <span className="min-w-0 truncate text-[14px] text-fg-2 group-hover:text-fg">{t.title}</span>
-              <Chip tone="outline" className="font-num">
-                {t.ref}
-              </Chip>
+              <TicketRef ticket={t} />
               <StagePill ticket={t} />
               {waitingText(t) && <span className="min-w-0 truncate text-[12px] text-fg-3">{waitingText(t)}</span>}
               <span className="ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-4 tabular-nums">{relTime(t.updated_at)}</span>

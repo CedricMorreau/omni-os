@@ -348,6 +348,10 @@ export function migrate() {
   ensureColumn('tickets', 'waiting_at', 'TEXT');
   ensureColumn('threads', 'waiting_on', 'TEXT');
   db.exec('UPDATE threads SET waiting_on = (SELECT waiting_on FROM tickets WHERE tickets.thread_id = threads.id)');
+  for (const t of db.prepare(`SELECT thread_id, ref, link FROM tickets WHERE source = 'productive' AND link IS NOT NULL`).all() as { thread_id: string; ref: string; link: string }[]) {
+    const id = t.link.match(/\/tasks\/(?:task\/)?(\d+)/)?.[1];
+    if (id && t.ref !== `#${id}`) db.prepare('UPDATE tickets SET ref = ? WHERE thread_id = ?').run(`#${id}`, t.thread_id);
+  }
   // The channel's design system: one standalone HTML file for the pages its threads write, and the file's name.
   ensureColumn('channels', 'design_system', 'TEXT');
   ensureColumn('channels', 'design_system_name', 'TEXT');

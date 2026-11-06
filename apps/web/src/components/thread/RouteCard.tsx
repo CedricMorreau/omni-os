@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, ApiError, errorText, type Thread } from '../../api.ts';
 import { STAGES } from '../../roles.ts';
 import { ALL_STAGES, canClose, isWaiting, waitingText, initialTicks, phaseColor, routeMode, routeSummary, skipReason, stagePhase, stageState, toggleStage, type Phase, type StageState, type TicketView } from '../../ticket-route.ts';
-import { phaseStyle, StagePill } from '../StagePill.tsx';
+import { phaseStyle, StagePill, TicketRef } from '../StagePill.tsx';
 import { Button, ErrorNote, StatusDot } from '../ui.tsx';
 
 const ticketPath = (id: string) => `/tickets/${encodeURIComponent(id)}`;
@@ -255,7 +255,7 @@ export function RouteCard({ ticket, onTicket: setTicket, className = '' }: { tic
       className={`flex flex-col gap-2 rounded-2xl px-3.5 py-2.5 ${mode === 'proposal' ? 'bg-surface shadow-[inset_0_0_0_1.5px_var(--needs)]' : 'bg-surface'} ${className}`}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
-        <span className="font-num font-medium text-fg">{ticket.ref}</span>
+        <TicketRef ticket={ticket} />
         {ticket.round > 1 && <span className="text-fg-3">Round {ticket.round}</span>}
         <StagePill ticket={ticket} />
         {summary && (

@@ -2,11 +2,11 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ChannelWithRunning, ConductorHandoffGroup, Thread } from '../api.ts';
 import { OmniMark } from '../components/brand.tsx';
 import { useLiveThreads } from '../components/ThreadList.tsx';
-import { Avatar, Chip, Icon, Segmented, StatusDot } from '../components/ui.tsx';
+import { Avatar, Icon, Segmented, StatusDot } from '../components/ui.tsx';
 import { inChannel, reasonOf } from '../needs-you.ts';
 import { href } from '../router.ts';
 import { QuickLinks } from '../components/QuickLinks.tsx';
-import { StagePill } from '../components/StagePill.tsx';
+import { StagePill, TicketRef } from '../components/StagePill.tsx';
 import { useChannelTickets } from '../components/TicketGroups.tsx';
 import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticket-route.ts';
 import { useApp, useNow } from '../store.tsx';
@@ -311,9 +311,7 @@ function MobileTicketRows({ items, now, onOpen }: { items: TicketView[]; now: nu
               <span className="shrink-0 text-[12px] leading-none text-fg-3 tabular-nums">{shortTime(t.updated_at, now)}</span>
             </span>
             <span className="flex min-w-0 items-center gap-1.5">
-              <Chip tone="outline" className="font-num">
-                {t.ref}
-              </Chip>
+              <TicketRef ticket={t} />
               <StagePill ticket={t} />
               {waitingText(t) && <span className="min-w-0 truncate text-[12px] text-fg-3">{waitingText(t)}</span>}
             </span>

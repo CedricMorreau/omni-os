@@ -1,5 +1,5 @@
-import type { CSSProperties } from 'react';
-import { Icon, StatusDot } from './ui.tsx';
+import type { CSSProperties, SyntheticEvent } from 'react';
+import { Chip, Icon, StatusDot } from './ui.tsx';
 import { phaseColor, stagePhase, stagePillText, type Phase, type TicketView } from '../ticket-route.ts';
 
 export const phaseStyle = (phase: Phase): CSSProperties => ({
@@ -37,5 +37,33 @@ export function StagePillButton({ ticket, expanded, onClick }: { ticket: Pick<Ti
       {text}
       <Icon name="chevronDown" size={12} className={`transition-transform motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`} />
     </button>
+  );
+}
+
+export function TicketRef({ ticket }: { ticket: Pick<TicketView, 'ref' | 'source' | 'link'> }) {
+  const pill = (
+    <Chip tone="outline" className="font-num">
+      {ticket.ref}
+    </Chip>
+  );
+  const { link } = ticket;
+  if (ticket.source !== 'productive' || !link) return pill;
+  const open = (e: SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(link, '_blank', 'noopener,noreferrer');
+  };
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      aria-label={`Open ${ticket.ref} in Productive`}
+      title="Open in Productive"
+      onClick={open}
+      onKeyDown={(e) => e.key === 'Enter' && open(e)}
+      className="shrink-0 cursor-pointer rounded-full hover:brightness-125 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-current"
+    >
+      {pill}
+    </span>
   );
 }

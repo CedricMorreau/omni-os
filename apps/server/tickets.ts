@@ -111,6 +111,9 @@ export function ticketRef(source: Source, link: string | null) {
   return `L-${String(Math.max(0, ...taken) + 1).padStart(3, '0')}`;
 }
 
+const refFor = (source: Source, link: string | null, typed?: string | null) =>
+  !(source === 'productive' && link) && typed?.trim().match(/^#?\d+$/) ? `#${typed.trim().replace(/^#/, '')}` : ticketRef(source, link);
+
 export function moveTicket(threadId: string, to: number) {
   const t = open(threadId);
   if (!t.route) throw new TicketError(`${t.ref} has no route yet. Propose one with ticket_propose_route and wait for the user to confirm it.`, 409);
@@ -269,7 +272,7 @@ export function ticketBrief(ref: string, input: NewTicket) {
 export async function createTicket(input: NewTicket, start: (thread: { id: string; prompt: string }) => Promise<Thread>) {
   if (input.source !== 'local' && !input.link?.trim()) throw new TicketError(`a ${input.source} ticket needs its link`);
   const link = input.source === 'local' ? null : input.link!.trim();
-  const ref = input.ref?.trim().match(/^#?\d+$/) ? `#${input.ref.trim().replace(/^#/, '')}` : ticketRef(input.source, link);
+  const ref = refFor(input.source, link, input.ref);
   const id = input.id ?? randomUUID();
   tickets.insert({ thread_id: id, channel_id: input.channel, ref, source: input.source, link, context: input.context?.trim() || null });
   try {
@@ -317,7 +320,7 @@ export function attachTicket(threadId: string, input: { source: Source; link?: s
   if (tickets.get(threadId)) throw new TicketError('this thread is a ticket already', 409);
   if (input.source !== 'local' && !input.link?.trim()) throw new TicketError(`a ${input.source} ticket needs its link`);
   const link = input.source === 'local' ? null : input.link!.trim();
-  const ref = input.ref?.trim().match(/^#?\d+$/) ? `#${input.ref.trim().replace(/^#/, '')}` : ticketRef(input.source, link);
+  const ref = refFor(input.source, link, input.ref);
   tickets.insert({ thread_id: threadId, channel_id: thread.channel_id, ref, source: input.source, link, context: input.context?.trim() || null });
   threads.update(threadId, { role: 'ticket' });
   return {

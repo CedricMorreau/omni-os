@@ -41,7 +41,18 @@ describe('creating tickets', () => {
     const t = await T.createTicket({ channel: 'acme', source: 'productive', link: 'https://app.productive.io/1-example/projects/100/tasks/task/18506533?filter=OTM4MjY5' }, fakeStart);
     expect(t.ref).toBe('#18506533');
     const numbered = await T.createTicket({ channel: 'acme', source: 'productive', ref: '997', link: 'https://app.productive.io/1/projects/2/tasks/task/18506533' }, fakeStart);
-    expect(numbered.ref).toBe('#997');
+    expect(numbered.ref).toBe('#18506533');
+  });
+
+  it('keeps a typed ref for a ticket without a link', async () => {
+    const t = await T.createTicket({ channel: 'acme', source: 'local', ref: '1053' }, fakeStart);
+    expect(t.ref).toBe('#1053');
+  });
+
+  it('gives an old Productive ticket the task id from its link on migrate', () => {
+    T.tickets.insert({ thread_id: 'old-1053', channel_id: 'acme', ref: '#1053', source: 'productive', link: 'https://app.productive.io/1/projects/2/tasks/task/20706074', context: null });
+    db.migrate();
+    expect(T.tickets.get('old-1053')?.ref).toBe('#20706074');
   });
 
   it('numbers local and Slack work L-001, L-002', async () => {
@@ -204,7 +215,7 @@ describe('tickets from the composer and from existing threads', () => {
     const thread = await fakeStart({ id: 'plain-1' });
     db.threads.update(thread.id, { role: null });
     const { ticket, prompt } = T.attachTicket(thread.id, { source: 'productive', link: 'https://app.productive.io/1/projects/2/tasks/task/20706074', ref: '1053' });
-    expect(ticket).toMatchObject({ ref: '#1053', stage: 0, source: 'productive' });
+    expect(ticket).toMatchObject({ ref: '#20706074', stage: 0, source: 'productive' });
     expect(db.threads.get(thread.id)?.role).toBe('ticket');
     expect(prompt).toContain('done earlier in this thread');
     expect(() => T.attachTicket(thread.id, { source: 'local' })).toThrow(/ticket already/);
