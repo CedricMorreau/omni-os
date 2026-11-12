@@ -49,6 +49,14 @@ describe('creating tickets', () => {
     expect(t.ref).toBe('#1053');
   });
 
+  it('confirms the route of a quick ticket without the user', async () => {
+    let brief = '';
+    const t = await T.createTicket({ channel: 'acme', source: 'productive', link: 'https://app.productive.io/1-example/tasks/2001', context: 'fix the typo', quick: true }, (s) => ((brief = s.prompt), fakeStart(s)));
+    expect(brief).toMatch(/quick ticket/i);
+    const done = T.proposeRoute(t.thread_id, [3, 4, 10], { '1': 'tiny fix' });
+    expect(done).toMatchObject({ route: [3, 4, 10], route_proposal: null, stage: 3, quick: 1 });
+  });
+
   it('gives an old Productive ticket the task id from its link on migrate', () => {
     T.tickets.insert({ thread_id: 'old-1053', channel_id: 'acme', ref: '#1053', source: 'productive', link: 'https://app.productive.io/1/projects/2/tasks/task/20706074', context: null });
     db.migrate();

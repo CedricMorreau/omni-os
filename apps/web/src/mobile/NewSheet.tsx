@@ -43,7 +43,7 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
   const [base, setBase] = useBasePick(target);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [noRole, setNoRole] = useState(false);
+  const [ticketMode, setTicketMode] = useState<'ticket' | 'quick' | 'none'>('ticket');
   const att = useAttachments();
   const file = useRef<HTMLInputElement>(null);
   const mic = useDictation((p) => setText((t) => withPhrase(t, p)));
@@ -56,7 +56,7 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
   const conductor = target === 'conductor';
   const ch = conductor ? undefined : listed.find((c) => c.id === target);
   const suggested = defaultRoleFor(conductor ? { id: 'conductor' } : ch, crew);
-  const role = suggested === 'ticket' && noRole ? '' : suggested;
+  const role = suggested === 'ticket' && ticketMode === 'none' ? '' : suggested;
   const ro = crew.find((r) => r.id === role);
   const run = harnesses ? draftRun(picked?.target === target ? picked : null, ro, channels.find((c) => c.id === target), harnesses) : null;
   const { rows: baseRows, reload: reloadBases } = useBaseRows(target, run?.choice.harness ?? '');
@@ -82,6 +82,7 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
           ...draftRunRequest(picked?.target === target ? run : null),
           ...baseRequest(base, run?.choice.harness),
           ...runOn.request,
+          quick: role === 'ticket' && ticketMode === 'quick' ? true : undefined,
         },
         att.files,
       );
@@ -132,10 +133,11 @@ export function NewSheet({ channel: initial }: { channel?: string }) {
               <Segmented
                 label="Role"
                 size="sm"
-                value={noRole ? 'none' : 'ticket'}
-                onChange={(v) => setNoRole(v === 'none')}
+                value={ticketMode}
+                onChange={setTicketMode}
                 options={[
                   { id: 'ticket', label: 'Ticket' },
+                  { id: 'quick', label: 'Quick ticket' },
                   { id: 'none', label: 'No role' },
                 ]}
               />

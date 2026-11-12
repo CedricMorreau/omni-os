@@ -75,6 +75,7 @@ const createSchema = z.object({
   harness: z.string().nullish(),
   effort: z.string().nullish(),
   title: z.string().nullish(),
+  quick: z.boolean().optional(),
   parent_id: z.string().nullish(),
   task_id: z.string().nullish(),
   source: z.enum(['manual', 'conductor', 'capture']).default('manual'),
@@ -108,7 +109,7 @@ threadRoutesApi.post('/', async (c) => {
   const channel = channels.get(body.channel);
   const make = () =>
     body.role === 'ticket' && channel?.kind === 'client'
-      ? createTicket({ id: body.id, channel: channel.id, ...sourceFromText(body.prompt), context: body.prompt, title: body.title }, ({ id, prompt }) =>
+      ? createTicket({ id: body.id, channel: channel.id, ...sourceFromText(body.prompt), context: body.prompt, title: body.title, quick: body.quick }, ({ id, prompt }) =>
           createThread({ ...body, id, prompt, files, device: 'here' }),
         ).then((ticket) => threads.get(ticket.thread_id)!)
       : createThread({ ...body, files });

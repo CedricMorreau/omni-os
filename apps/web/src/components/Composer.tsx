@@ -63,6 +63,7 @@ export function NewThreadComposer({
   const [picked, setPicked] = useState<DraftRun | null>(() => preset?.choice ? { choice: preset.choice, effort: preset.effort ?? '' } : null);
   // "New thread here" on a sidebar folder files the thread in it, until Ben takes it out.
   const [folder, setFolder] = useState(preset?.folder ?? null);
+  const [quick, setQuick] = useState(false);
   // As the channel sees them: Cursor Cloud needs its GitHub repo.
   const { data: harnesses, reload: reloadHarnesses } = useApi<HarnessWithRunning[]>(harnessesPath(channel));
   const [busy, setBusy] = useState(false);
@@ -85,6 +86,7 @@ export function NewThreadComposer({
   const roleObj = crew.find((r) => r.id === role);
   // The Conductor channel runs the Conductor, and with no crew there is nothing to pick.
   const showRole = crew.length > 0 && channel !== 'conductor';
+  const ticket = role === 'ticket' && channels.find((c) => c.id === channel)?.kind === 'client';
   const visibleChannels = channels.filter((c) => !c.archived);
 
   const onRole = (r: string) => {
@@ -126,6 +128,7 @@ export function NewThreadComposer({
           ...baseRequest(base, choice.harness),
           ...runOn.request,
           folder: folder && channel === preset?.channel ? folder.id : undefined,
+          quick: ticket && quick ? true : undefined,
         },
         att.files,
       );
@@ -179,6 +182,18 @@ export function NewThreadComposer({
         <BasePicker channel={channel} harness={choice.harness} value={base} onChange={setBase} />
         <RunOnPicker rows={runOn.rows} value={runOn.pick} onChange={runOn.setPick} />
         <AttachButton onPick={att.add} disabled={busy} />
+        {ticket && (
+          <button
+            type="button"
+            aria-pressed={quick}
+            onClick={() => setQuick(!quick)}
+            title="Quick ticket: Omni confirms the route and the agent picks its roles without asking you."
+            className={`hov inline-flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] ${quick ? 'bg-surface-3 font-medium text-fg' : 'text-fg-3 hover:text-fg'}`}
+          >
+            <Icon name={quick ? 'check' : 'plus'} size={13} />
+            Quick
+          </button>
+        )}
         {folder && channel === preset?.channel && (
           <button
             type="button"

@@ -346,6 +346,7 @@ export function migrate() {
   ensureColumn('tickets', 'route_proposal', 'TEXT');
   ensureColumn('tickets', 'waiting_on', 'TEXT');
   ensureColumn('tickets', 'waiting_at', 'TEXT');
+  ensureColumn('tickets', 'quick', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('threads', 'waiting_on', 'TEXT');
   ensureColumn('threads', 'draft', 'TEXT');
   ensureColumn('threads', 'draft_kind', 'TEXT');

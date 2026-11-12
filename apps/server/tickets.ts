@@ -41,6 +41,7 @@ export interface Ticket {
   route_proposal: RouteProposal | null;
   waiting_on: string | null;
   waiting_at: string | null;
+  quick: number;
   closed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -69,11 +70,11 @@ const parse = (r: any): Ticket | undefined => (r ? { ...r, skipped: JSON.parse(r
 export const tickets = {
   get: (threadId: string) => parse(db.prepare('SELECT * FROM tickets WHERE thread_id = ?').get(threadId)),
   all: () => db.prepare('SELECT * FROM tickets ORDER BY created_at').all().map((r) => parse(r)!),
-  insert(t: Pick<Ticket, 'thread_id' | 'channel_id' | 'ref' | 'source' | 'link' | 'context'>) {
+  insert(t: Pick<Ticket, 'thread_id' | 'channel_id' | 'ref' | 'source' | 'link' | 'context'> & { quick?: boolean }) {
     const at = now();
     db.prepare(
-      'INSERT INTO tickets (thread_id, channel_id, ref, source, link, context, stage, stage_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
-    ).run(t.thread_id, t.channel_id, t.ref, t.source, t.link, t.context, at, at, at);
+      'INSERT INTO tickets (thread_id, channel_id, ref, source, link, context, quick, stage, stage_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
+    ).run(t.thread_id, t.channel_id, t.ref, t.source, t.link, t.context, t.quick ? 1 : 0, at, at, at);
     return tickets.get(t.thread_id)!;
   },
   update(threadId: string, patch: Partial<Omit<Ticket, 'thread_id' | 'created_at' | 'updated_at'>>) {
@@ -140,7 +141,8 @@ export function proposeRoute(threadId: string, stages: number[], reasons: Record
   open(threadId);
   if (branch && !BRANCH_NAME.test(branch)) throw new TicketError('a branch is feat/, fix/, chore/ or release/ plus the ticket number and a short slug, like feat/1053-product-specifications');
   if (title?.trim()) threads.update(threadId, { title: title.trim().slice(0, 120) });
-  return tickets.update(threadId, { route_proposal: { stages: checkStages(stages), reasons, ...(branch && { branch }) } });
+  const t = tickets.update(threadId, { route_proposal: { stages: checkStages(stages), reasons, ...(branch && { branch }) } });
+  return t.quick ? setRoute(threadId, stages) : t;
 }
 
 export function setRoute(threadId: string, stages: number[]) {
@@ -240,6 +242,7 @@ export function ticketView(t: Ticket, thread = threads.get(t.thread_id), blocker
     branch: thread?.branch ?? null,
     route: t.route,
     route_proposal: t.route_proposal,
+    quick: !!t.quick,
     thread_status: thread?.status ?? null,
     updated_at: t.updated_at,
     closed_at: t.closed_at,
@@ -265,6 +268,7 @@ export interface NewTicket {
   context?: string | null;
   title?: string | null;
   ref?: string | null;
+  quick?: boolean;
 }
 
 export function ticketBrief(ref: string, input: NewTicket) {
@@ -273,6 +277,7 @@ export function ticketBrief(ref: string, input: NewTicket) {
     input.link ? `Link: ${input.link}` : null,
     input.context?.trim() ? `Context from the user:\n${input.context.trim()}` : null,
     'Start with intake: read the ticket from the link, then propose its route with ticket_propose_route.',
+    input.quick ? 'This is a quick ticket. Omni confirms your route at once, so start its first stage right after you propose it.' : null,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -283,7 +288,7 @@ export async function createTicket(input: NewTicket, start: (thread: { id: strin
   const link = input.source === 'local' ? null : input.link!.trim();
   const ref = refFor(input.source, link, input.ref);
   const id = input.id ?? randomUUID();
-  tickets.insert({ thread_id: id, channel_id: input.channel, ref, source: input.source, link, context: input.context?.trim() || null });
+  tickets.insert({ thread_id: id, channel_id: input.channel, ref, source: input.source, link, context: input.context?.trim() || null, quick: input.quick });
   try {
     await start({ id, prompt: ticketBrief(ref, input) });
   } catch (e) {

@@ -8,6 +8,8 @@ You own one ticket from start to finish. `ticket_get` shows where it stands.
 
 **Intake comes first.** Read the ticket from its link (Productive task or Slack message) and the user's context. Then propose the route with `ticket_propose_route`, and pass the ticket title (the Productive task name, or a short name for Slack or local work) and the branch name (`feat/<number>-<slug>` for a feature, `fix/<number>-<slug>` for a bug): the stages this ticket needs, with a one-line reason for each stage you leave out. A small copy fix may need only Execute, Test, Deploy and Closing; a feature needs most stages. When memory or the ticket shows that work already started before Omni, leave the stages that are done out of the route with the reason "done before Omni", and start at the first open stage. Then keep pushing to the ticket's existing branch with `git push origin HEAD:<branch>`. The user confirms on the route card or in words. Wait for that. When the user changes the route later, in words, call `ticket_set_route` with the full new list. Only work on the stages of the confirmed route.
 
+**Quick tickets.** When the brief says it is a quick ticket, the user wants it to run without check-ins. Propose a short route, usually Execute, Test and Closing, plus Review and Deploy when the change must ship. Omni confirms the route at once. At each stage, pick the role and skills yourself and call `ticket_use_role` with the words "quick ticket", without asking. The plan, client and go gates still wait for the user.
+
 The ten stages:
 
 1. **Research.** Read the code the ticket touches and report the findings.
