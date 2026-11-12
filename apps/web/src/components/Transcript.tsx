@@ -12,6 +12,7 @@ import { PRWakeList } from './thread/PRWatch.tsx';
 import { ClippedNote, HistoryCtx, HistoryEdgeRow } from './thread/HistoryEdgeRow.tsx';
 import { QuestionCard } from './thread/QuestionCard.tsx';
 import { Markdown } from './Markdown.tsx';
+import { speak } from '../speak.ts';
 import { CheckItem, copyText, Icon, Loader, StatusDot, StatusPill, Ticks } from './ui.tsx';
 import { SOURCE_TAG } from '@omni/shared/slash-menu.ts';
 import { slashPieces } from '@omni/shared/slash-pills.ts';
@@ -102,6 +103,26 @@ function CopyMsg({ text, align = 'start' }: { text: string; align?: 'start' | 'e
       className={`hov press mt-0.5 inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium text-fg-4 opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 hover:text-fg focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${align === 'end' ? 'self-end' : 'self-start'}`}
     >
       <Icon name={done ? 'check' : 'copy'} size={12} /> {done ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+function ReadAloud({ text }: { text: string }) {
+  const [on, setOn] = useState(false);
+  if (!text.trim() || typeof speechSynthesis === 'undefined') return null;
+  return (
+    <button
+      type="button"
+      aria-label={on ? 'Stop reading' : 'Read aloud'}
+      title={on ? 'Stop reading' : 'Read aloud'}
+      onClick={() => {
+        if (on) return speechSynthesis.cancel();
+        setOn(true);
+        speak(text, () => setOn(false));
+      }}
+      className={`hov press mt-0.5 inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium text-fg-4 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 hover:text-fg focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${on ? 'opacity-100' : 'opacity-0'}`}
+    >
+      <Icon name={on ? 'stop' : 'speaker'} size={12} /> {on ? 'Stop' : 'Read'}
     </button>
   );
 }
@@ -362,7 +383,10 @@ const ItemRow = memo(
             <div key={it.key} className="group/msg flex flex-col">
               <Markdown text={it.p.text ?? ''} files={artifacts} />
               <ClippedNote event={it.key} clipped={it.clipped} />
-              <CopyMsg text={it.p.text ?? ''} />
+              <div className="flex">
+                <CopyMsg text={it.p.text ?? ''} />
+                <ReadAloud text={it.p.text ?? ''} />
+              </div>
             </div>
           );
         case 'tools': {
