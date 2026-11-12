@@ -268,7 +268,7 @@ threadActionsApi.post('/:id/messages', async (c) => {
   }
   const context = parseContexts(raw);
   if (!context.ok) return c.json({ error: context.error }, 400);
-  if (!prompt && !context.value.length) return c.json({ error: 'Write a message or add context to send.' }, 400);
+  if (!prompt && !context.value.length && !files.length) return c.json({ error: 'Write a message or add context to send.' }, 400);
   const unsendable = checkAnnotations(id, context.value);
   if (unsendable) return c.json({ error: unsendable }, 400);
   checkUploads(files);

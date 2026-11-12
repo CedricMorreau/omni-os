@@ -296,7 +296,7 @@ export function ReplyComposer({
   const menus = joinMenus(slashMenu, fileMenu);
 
   // `mode` only matters while a turn is in progress; an idle thread just starts the next turn.
-  const canSend = !!text.trim() || context.length > 0;
+  const canSend = !!text.trim() || context.length > 0 || att.files.length > 0;
   const submit = async (mode?: SendMode) => {
     const raw = text;
     const prompt = raw.trim();

@@ -74,9 +74,14 @@ export function useAttachments() {
     const lines = text.split('\n').length;
     if (lines <= PASTE_LINES && text.length <= PASTE_CHARS) return;
     e.preventDefault();
-    const file = new File([text], `Pasted text ${++pastes.current}.txt`, { type: 'text/plain' });
+    const name = `Pasted text ${++pastes.current}`;
+    const file = new File([text], `${name}.txt`, { type: 'text/plain' });
     pasted.set(file, lines);
     void add([file]);
+    const field = e.currentTarget;
+    if (!(field instanceof HTMLTextAreaElement)) return;
+    field.setRangeText(`[${name}]`, field.selectionStart, field.selectionEnd, 'end');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   };
 
   const dropZone = {

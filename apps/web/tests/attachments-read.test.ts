@@ -59,6 +59,19 @@ it('turns a long text paste into a numbered attachment', async () => {
   expect(pastedLines(a.current!.files[0])).toBe(40);
 });
 
+it('puts the name of a long paste in the text field', async () => {
+  const a = mount();
+  const field = document.createElement('textarea');
+  field.value = 'see  please';
+  field.setSelectionRange(4, 4);
+  const typed = vi.fn();
+  field.addEventListener('input', typed);
+  const e = { ...paste('x\n'.repeat(20)), currentTarget: field };
+  await act(async () => a.current!.onPaste(e));
+  expect(field.value).toBe('see [Pasted text 1] please');
+  expect(typed).toHaveBeenCalled();
+});
+
 it('leaves a short text paste in the text field', async () => {
   const a = mount();
   const e = paste('a short line');

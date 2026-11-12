@@ -150,6 +150,14 @@ describe('a message with context', () => {
     expect(harness).not.toContain('note:');
   });
 
+  it('sends a file without words', T, async () => {
+    const t = await thread();
+    const res = await post(t.id, { prompt: '' }, [new File(['png bytes'], 'shot.png', { type: 'image/png' })]);
+    expect(res.status).toBe(200);
+    await h.untilResults(t.id, 2);
+    expect(users(t.id).at(-1).attachments.map((a: any) => a.name)).toEqual(['shot.png']);
+  });
+
   it('keeps a file and context together in a multipart send', T, async () => {
     const t = await thread();
     const record = await selection(t.id);
