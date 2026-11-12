@@ -38,6 +38,7 @@ import { useThreadPresence } from './useThreadPresence.ts';
 import { useThreadSession } from './useThreadSession.ts';
 import { useTranscriptScroll } from './useTranscriptScroll.ts';
 import { useReveal } from './useReveal.ts';
+import { sentTexts } from '../components/composer/recall.ts';
 import { tailId } from '@omni/shared/history.ts';
 import { blockedNote } from '@omni/shared/thread-machine.ts';
 import { shownDraft } from '../ticket-route.ts';
@@ -111,6 +112,7 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
   const members = useMemo(() => teamOf(children), [children]);
   const reports = useMemo(() => reportNotes(queued), [queued]);
   const asking = useMemo(() => isAsking(events), [events]);
+  const sentHistory = useMemo(() => sentTexts(events), [events]);
   const agents = useMemo(() => runningSubagents(tasks, id), [tasks, id]);
   const selectArtifact = useCallback(
     (artifact: number) => {
@@ -291,6 +293,7 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
                 // A rename keeps updated_at, so it has to win a tie.
                 onChanged={(t) => applyThread(t)}
                 machine={{ blocked, handoff, takeover, onChanged: handedOff }}
+                history={sentHistory}
               />
             </div>
           </div>

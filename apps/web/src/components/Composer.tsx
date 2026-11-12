@@ -21,6 +21,7 @@ import { defaultRoleFor } from '../ticket-route.ts';
 import { removeDraftContext, settleDraftContext, useDraftContext } from '../message-context/draft.ts';
 
 import { AttachButton, AttachmentStrip, useAttachments, useWindowDrop } from './composer/attachments.tsx';
+import { recallStep } from './composer/recall.ts';
 import { DropHint, enterKey, SendButton, shell, StopButton, useAutosize, useFocusRequests, withKeys } from './composer/controls.tsx';
 import { joinMenus, useNewThreadMenus, useSlashMenu } from './composer/menus.tsx';
 import { pickerOptions } from './composer/pickerOptions.tsx';
@@ -260,8 +261,10 @@ export function ReplyComposer({
   onChanged,
   stop,
   machine,
+  history = [],
 }: {
   thread: Thread;
+  history?: readonly string[];
   /** When false (e.g. Cursor), a busy thread offers only Queue and Interrupt; Cmd+Enter queues. */
   canSteer?: boolean;
   /** The thread's handoff state, for the Machine chip next to the model pill. Without it the chip is left out. */
@@ -298,6 +301,7 @@ export function ReplyComposer({
   const suggestion = !busyThread && !text && thread.suggestion ? thread.suggestion : null;
   const latest = useRef(text);
   latest.current = text;
+  const recalled = useRef<number | null>(null);
 
   // ----- the `/` menu -----
   const update = (v: string) => {
@@ -402,6 +406,17 @@ export function ReplyComposer({
         onPaste={att.onPaste}
         onKeyDown={(e) => {
           if (menus.onKey(e)) return;
+          if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+            const from = text === '' ? null : recalled.current !== null && text === history[recalled.current] ? recalled.current : undefined;
+            if (from !== undefined) {
+              const at = recallStep(history, from, e.key === 'ArrowUp' ? -1 : 1);
+              if (at !== from) {
+                e.preventDefault();
+                recalled.current = at;
+                return update(at === null ? '' : history[at]);
+              }
+            }
+          }
           if (e.key === 'Tab' && suggestion && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             return update(suggestion);
