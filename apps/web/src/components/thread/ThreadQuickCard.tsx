@@ -10,6 +10,7 @@ import { machineLabel } from '@omni/shared/handoff.ts';
 import { prBadge, prLine, STEP_WORKING, type PRStep } from '@omni/shared/thread-glance.ts';
 import { isWorking } from '@omni/shared/delegate-count.ts';
 import { threadPill } from './thread-state.ts';
+import { runningLabel } from '@omni/shared/goal.ts';
 import { toDate } from '@omni/shared/format.ts';
 import { duration } from '../../format.ts';
 import { useHereName, useNow } from '../../store.tsx';
@@ -119,7 +120,7 @@ export function ThreadQuickCard({
   const now = useNow(60_000);
   // The run row says what the header pill says, except that a turn in progress reads as one.
   const pill = threadPill(thread, { asking, reconnecting, now });
-  const run = reconnecting || asking || !slotBusy ? { ...pill, label: asking ? 'Waiting on you' : pill.label } : { glyph: 'running' as const, label: 'Turn running' };
+  const run = reconnecting || asking || !slotBusy ? { ...pill, label: asking ? 'Waiting on you' : pill.label } : { glyph: 'running' as const, label: runningLabel(thread, 'Turn running') };
   const branchDisabled = !thread.branch;
   // The account its harness ran as when its process last started (apps/server/harness-accounts.ts), here or elsewhere.
   const ran = useThreadAccount(thread.id);
