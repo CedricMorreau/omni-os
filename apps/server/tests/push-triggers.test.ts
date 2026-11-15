@@ -7,7 +7,7 @@ import { startRunner } from './runner-boot.ts';
 const r = await startRunner();
 const { askQuestion } = await import('../runner/questions.ts');
 const { failSetup } = await import('../runner/setup.ts');
-const { alertFor, installPushSender, noopPushSender, notifyCrewReport, notifyEnded } = await import('../push-sender.ts');
+const { alertFor, installPushSender, noopPushSender, notifyCrewReport, notifyEnded, payloadFor } = await import('../push-sender.ts');
 type PushEvent = import('../push-sender.ts').PushEvent;
 type ThreadStatus = import('../db.ts').ThreadStatus;
 
@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => installPushSender(noopPushSender));
 
 let n = 0;
-function thread(over: { channel?: string; parent?: string | null } = {}) {
+function thread(over: { channel?: string; parent?: string | null; task?: string | null } = {}) {
   const id = `trigger-${++n}`;
   r.db.threads.create({
     id,
@@ -42,7 +42,7 @@ function thread(over: { channel?: string; parent?: string | null } = {}) {
     cwd: r.tmp,
     branch: null,
     parent_id: over.parent ?? null,
-    task_id: null,
+    task_id: over.task ?? null,
     source: 'manual',
     automation: null,
   });
@@ -54,6 +54,56 @@ describe('a thread needs input', () => {
     const id = thread({ channel: 'scratch' });
     askQuestion(id, [Q]);
     expect(sent).toEqual([{ kind: 'needsInput', threadId: id, channelId: 'scratch', title: id, text: Q.question }]);
+  });
+
+  it("opens a delegated thread's question on the thread Ben delegated from, naming the thread that asked", () => {
+    const conductor = thread({ channel: 'conductor' });
+    const lead = thread({ channel: 'scratch', parent: conductor });
+    const member = thread({ channel: 'scratch', parent: lead, task: 'T-ASK' });
+    askQuestion(member, [Q]);
+    expect(sent).toEqual([{ kind: 'needsInput', threadId: conductor, channelId: 'conductor', title: conductor, text: Q.question, from: `T-ASK · ${member}`, askerId: member }]);
+    expect(alertFor(sent[0]!)).toEqual({ title: conductor, subtitle: `Needs your answer: T-ASK · ${member}`, body: Q.question });
+  });
+
+  it('opens it on the newest thread that continues the delegating one, never an archived one', () => {
+    const conductor = thread({ channel: 'conductor' });
+    const child = thread({ parent: conductor, task: 'T-CONT' });
+    const next = thread({ channel: 'conductor' });
+    const newest = thread({ channel: 'conductor' });
+    const shelved = thread({ channel: 'conductor' });
+    r.db.continuations.link(next, conductor);
+    r.db.continuations.link(newest, next);
+    r.db.continuations.link(shelved, newest);
+    r.db.threads.update(shelved, { archived: 1 });
+    askQuestion(child, [Q]);
+    expect(sent).toEqual([{ kind: 'needsInput', threadId: newest, channelId: 'conductor', title: newest, text: Q.question, from: `T-CONT · ${child}`, askerId: child }]);
+    expect(JSON.parse(payloadFor(sent[0]!)).omni).toEqual({ kind: 'needsInput', threadId: newest, channelId: 'conductor', askerId: child });
+  });
+
+  it('follows the continuations through archived threads to the live one after them', () => {
+    const a = thread({ channel: 'conductor' });
+    const child = thread({ parent: a });
+    const b = thread({ channel: 'conductor' });
+    const c = thread({ channel: 'conductor' });
+    r.db.continuations.link(b, a);
+    r.db.continuations.link(c, b);
+    r.db.threads.update(b, { archived: 1 });
+    expect(r.db.threads.home(child)).toBe(c);
+    // The first thread archived too: still the live one at the end.
+    r.db.threads.update(a, { archived: 1 });
+    askQuestion(child, [Q]);
+    expect(sent.map((e) => e.threadId)).toEqual([c]);
+    // Nothing live along the chain: the thread Ben delegated from, as before.
+    r.db.threads.update(c, { archived: 1 });
+    expect(r.db.threads.home(child)).toBe(a);
+  });
+
+  it("keeps a continued thread's own question on itself: nobody delegated it", () => {
+    const solo = thread();
+    const next = thread();
+    r.db.continuations.link(next, solo);
+    askQuestion(solo, [Q]);
+    expect(sent.map((e) => [e.threadId, e.askerId])).toEqual([[solo, undefined]]);
   });
 });
 
