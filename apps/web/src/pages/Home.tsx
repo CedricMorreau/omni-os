@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { dayKey, isInsightRange, type InsightRange, type Insights } from '@omni/shared/insights.ts';
-import { isWorking } from '@omni/shared/delegate-count.ts';
 import { relTime } from '@omni/shared/format.ts';
 import { api, errorText, type Thread } from '../api.ts';
 import { NewThreadComposer } from '../components/Composer.tsx';
@@ -17,20 +16,20 @@ import { greeting } from '../greeting.ts';
 import { isFresh, keepInsights, keptInsights } from '../insights-cache.ts';
 import { splitNeeds } from '../needs-you.ts';
 import { readPref, useApp, useFeed, useNow, writePref } from '../store.tsx';
+import { useInbox } from '../app/useInbox.ts';
 
 const acceptAll = () => true;
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const LISTS: ListKind[] = ['needs', 'running', 'unread', 'done'];
 
-function Pulse() {
-  const { status } = useApp();
-  if (!status) return null;
-  const busy = status.running > 0;
+/** How many threads are working (queued ones included), the Inbox's own count. */
+function Pulse({ working }: { working: number | null }) {
+  if (working === null) return null;
+  const busy = working > 0;
   return (
     <span className="inline-flex h-7 items-center gap-2 rounded-full bg-surface px-3 font-num text-[11.5px] text-fg-2 tabular-nums">
       <StatusDot status={busy ? 'running' : 'idle'} size={7} />
-      {busy ? `${status.running} running` : 'Nothing running'}
-      {status.queued > 0 && <span className="text-fg-3">· {status.queued} queued</span>}
+      {busy ? `${working} working` : 'Nothing working'}
     </span>
   );
 }
@@ -131,11 +130,11 @@ function Freshness({ at, refreshing, onRefresh }: { at: number | undefined; refr
   );
 }
 
-function OpenList({ kind, insights, machine, machines }: { kind: ListKind; insights: Insights | undefined; machine: string | null; machines: MachinesView | undefined }) {
+function OpenList({ kind, insights, machine, machines, working }: { kind: ListKind; insights: Insights | undefined; machine: string | null; machines: MachinesView | undefined; working: ReadonlySet<string> }) {
   const { needsYou } = useApp();
   const on = machine ? machines?.machines.find((m) => m.id === machine) : undefined;
   const onIds = new Set(on?.threadIds ?? []);
-  const running = (t: Thread) => isWorking(t) && (!machine || onIds.has(t.id));
+  const running = (t: Thread) => working.has(t.id) && (!machine || onIds.has(t.id));
   const recent = useLiveThreads('/recent?limit=200', acceptAll, 200);
   const { needs, unread } = splitNeeds(needsYou?.items ?? []);
   const meta = LIST_TITLE[kind];
@@ -194,6 +193,9 @@ export function HomePage() {
   const data = insights.data?.range === range ? insights.data : undefined;
   const split = needsYou ? splitNeeds(needsYou.items) : null;
   const chips = data?.channels.slice(0, 4) ?? [];
+  const inbox = useInbox();
+  const working = inbox.loaded ? inbox.working.count : null;
+  const workingIds = useMemo(() => new Set(inbox.working.threads.map((t) => t.id)), [inbox.working.threads]);
 
   return (
     <div className="scroll-thin h-full overflow-y-auto">
@@ -216,7 +218,7 @@ export function HomePage() {
                 { id: '30d', label: '30 days' },
               ]}
             />
-            <Pulse />
+            <Pulse working={working} />
             <Freshness at={insights.at} refreshing={insights.refreshing} onRefresh={insights.reload} />
           </div>
         </header>
@@ -245,9 +247,9 @@ export function HomePage() {
         )}
 
         <div className="mt-8">
-          <KpiTiles needs={split?.needs ?? null} unread={split?.unread.length ?? null} done={data?.done ?? null} open={machine ? null : open} />
+          <KpiTiles needs={split?.needs ?? null} unread={split?.unread.length ?? null} working={working} done={data?.done ?? null} open={machine ? null : open} />
           <MachineTiles view={machines.data} open={machine} />
-          {open && <OpenList kind={open} insights={data} machine={machine} machines={machines.data} />}
+          {open && <OpenList kind={open} insights={data} machine={machine} machines={machines.data} working={workingIds} />}
         </div>
 
         <div className="mt-8">
