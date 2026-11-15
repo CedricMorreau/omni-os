@@ -1,98 +1,21 @@
-// Browser notifications for results that need Ben. They come from the same state as Needs you: a result alerts when it first shows there, under its own uid, so one result
-// alerts once however often the inbox loads. Choices stay in this browser and start off.
+// Browser notifications for what needs Ben. Which events alert is packages/shared/attention.ts, shared with the desktop
+// app; this file keeps this browser's choices and what it allows. Choices stay in this browser and start off.
 import { useEffect, useState } from 'react';
-import type { NeedsYou, NeedsYouItem } from './api.ts';
-import { reasonOf } from './needs-you.ts';
+import { parseAlertKinds, type AlertKind, type AlertPrefs } from '@omni/shared/attention.ts';
+import type { DesktopBridge } from '@omni/shared/desktop-bridge.ts';
 import { readPref, writePref } from './store.tsx';
 
-export interface AttentionAlert {
-  /** The result's uid, so posting it twice replaces it. */
-  id: string;
-  threadId: string;
-  channelId: string;
-  title: string;
-  body: string;
-}
-
-/** Completions and failures. A stop is Ben's own doing, and blockers are not results. */
-const ALERTED = new Set(['done', 'failed']);
-
-/** A result older than this when it first shows never alerts, so a sync that brings in a day of results does not flood. */
-export const FRESHNESS_MS = 10 * 60 * 1000;
-
-export function alertFor(item: NeedsYouItem, channelName?: string): AttentionAlert | null {
-  const r = item.result;
-  if (!r || !ALERTED.has(r.status)) return null;
-  const channel = `#${channelName ?? item.thread.channel_id}`;
-  const detail = reasonOf(item).detail;
-  return {
-    id: r.uid,
-    threadId: item.thread.id,
-    channelId: item.thread.channel_id,
-    title: item.thread.title || 'Untitled thread',
-    body: `${r.status === 'failed' ? 'Failed' : 'Finished'} in ${channel}${detail ? `: ${detail.slice(0, 160)}` : ''}`,
-  };
-}
-
-export interface Changes {
-  post: AttentionAlert[];
-  /** Alerts whose result left the list (read here, on the Mac or the other Mac), by id. */
-  withdraw: string[];
-}
-
-/**
- * Which results alert, from each Needs you list in turn:
- * - the first list only records what is there: results from before the page loaded are history, not news;
- * - a result alerts once, the first time a list has it;
- * - a result older than FRESHNESS_MS when it first shows never alerts;
- * - the thread on screen in a visible tab is being watched: its result is recorded, not alerted;
- * - a muted channel's result is recorded too, so unmuting later does not alert old ones.
- */
-export function createTracker() {
-  const seen = new Set<string>();
-  const posted = new Set<string>();
-  let started = false;
-  return {
-    observe(
-      list: NeedsYou,
-      o: { now: number; viewing: string | null; visible: boolean; alerts: (channelId: string) => boolean; channelName?: (id: string) => string | undefined },
-    ): Changes {
-      const unread = new Set(list.items.flatMap((i) => (i.result ? [i.result.uid] : [])));
-      const withdraw = [...posted].filter((id) => !unread.has(id)).sort();
-      withdraw.forEach((id) => posted.delete(id));
-      const post: AttentionAlert[] = [];
-      // Oldest first, so alerts stack in the order the turns ended.
-      for (const item of [...list.items].reverse()) {
-        const r = item.result;
-        if (!r || seen.has(r.uid)) continue;
-        seen.add(r.uid);
-        if (!started) continue;
-        if (o.now - Date.parse(r.at) > FRESHNESS_MS) continue;
-        if (o.visible && o.viewing === item.thread.id) continue;
-        if (!o.alerts(item.thread.channel_id)) continue;
-        const alert = alertFor(item, o.channelName?.(item.thread.channel_id));
-        if (!alert) continue;
-        posted.add(alert.id);
-        post.push(alert);
-      }
-      started = true;
-      return { post, withdraw };
-    },
-  };
-}
+export { createTracker, allows, type AttentionAlert } from '@omni/shared/attention.ts';
 
 // ---------- this browser's choices ----------
 
-export interface NotificationPrefs {
-  enabled: boolean;
-  /** Channels that never alert. A new channel alerts until it is turned off. */
-  muted: string[];
-}
+/** The master switch, which kinds alert, and channels that never alert (a new channel alerts until it is turned off). */
+export type NotificationPrefs = AlertPrefs;
 
 const KEY = 'notifications';
 let prefs: NotificationPrefs = (() => {
   const v = readPref<Partial<NotificationPrefs> | null>(KEY, null);
-  return { enabled: v?.enabled === true, muted: Array.isArray(v?.muted) ? v.muted.filter((m) => typeof m === 'string') : [] };
+  return { enabled: v?.enabled === true, kinds: parseAlertKinds(v?.kinds), muted: Array.isArray(v?.muted) ? v.muted.filter((m) => typeof m === 'string') : [] };
 })();
 const listeners = new Set<(p: NotificationPrefs) => void>();
 
@@ -104,9 +27,28 @@ export function setNotificationPrefs(next: NotificationPrefs) {
   listeners.forEach((fn) => fn(next));
 }
 
+export function setKindAlerts(kind: AlertKind, on: boolean) {
+  setNotificationPrefs({ ...prefs, kinds: { ...prefs.kinds, [kind]: on } });
+}
+
 export function setChannelAlerts(channelId: string, on: boolean) {
   const muted = prefs.muted.filter((m) => m !== channelId);
   setNotificationPrefs({ ...prefs, muted: on ? muted : [...muted, channelId] });
+}
+
+/**
+ * The desktop app once used this page's choices too. Its native notifications keep their own, so channels muted here
+ * move to the app's setting, once: the list here empties after, so a channel turned back on in the app stays on.
+ * Resolves with the channels it moved.
+ */
+export async function carryMutesToApp(bridge: Pick<DesktopBridge, 'settings'>): Promise<string[]> {
+  const old = prefs.muted;
+  if (!old.length) return [];
+  const current = await bridge.settings.get();
+  const muted = [...new Set([...current.notifications.muted, ...old])];
+  await bridge.settings.set({ notifications: { muted } });
+  setNotificationPrefs({ ...prefs, muted: [] });
+  return old;
 }
 
 export function useNotificationPrefs() {

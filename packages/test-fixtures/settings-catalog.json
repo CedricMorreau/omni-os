@@ -41,7 +41,7 @@
       "group": "omni",
       "title": "Notifications",
       "icon": "bell",
-      "blurb": "What tells you a thread finished or failed.",
+      "blurb": "What tells you a thread needs you.",
       "scoped": true
     },
     {
@@ -225,7 +225,24 @@
         "failed",
         "desktop",
         "permission",
-        "needs you"
+        "needs you",
+        "native",
+        "macos"
+      ]
+    },
+    {
+      "id": "notify-kinds",
+      "section": "notifications",
+      "title": "What notifies",
+      "keywords": [
+        "questions",
+        "crew",
+        "pull request",
+        "checks",
+        "review",
+        "finished",
+        "failed",
+        "kinds"
       ]
     },
     {
