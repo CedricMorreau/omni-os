@@ -2,7 +2,8 @@
 // the page gets named calls, never ipcRenderer itself.
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { DesktopBridge, DesktopEvent } from '@omni/shared/desktop-bridge.ts';
-import { BOOTSTRAP, EVENT, type Bootstrap, type InvokeChannel, type InvokeChannels, type SendChannel, type SendChannels } from './ipc.ts';
+import { BOOTSTRAP, EVENT, LINK, type Bootstrap, type InvokeChannel, type InvokeChannels, type SendChannel, type SendChannels } from './ipc.ts';
+import { answerLink } from './link-routing.ts';
 
 const boot = ipcRenderer.sendSync(BOOTSTRAP) as Bootstrap;
 
@@ -29,6 +30,15 @@ const bridge: DesktopBridge = {
   nativeNotifications: true,
   setAppearance: (mode) => send('omni:appearance', mode),
   setLayout: (layout) => send('omni:layout', layout),
+  routeLinks(decide) {
+    const ask = (_event: IpcRendererEvent, id: number, url: string, deadline: number) => send('omni:links:answer', id, answerLink(decide, url, deadline));
+    ipcRenderer.on(LINK, ask);
+    send('omni:links:routing', true);
+    return () => {
+      ipcRenderer.off(LINK, ask);
+      send('omni:links:routing', false);
+    };
+  },
   settings: {
     get: () => invoke('omni:settings:get'),
     set: (patch) => invoke('omni:settings:set', patch),
