@@ -5,12 +5,12 @@ import { parseChannelIcon } from '@omni/shared/channel-icon.ts';
 import type { BackgroundTask, Thread } from '../../api.ts';
 import { useInbox } from '../../app/useInbox.ts';
 import { useDoneKey } from '../../inbox-key.ts';
-import type { RowStatus } from '@omni/shared/status.ts';
+import { MARK, blockerMark, markOf, threadPhase, type RowStatus } from '@omni/shared/status.ts';
 import type { InboxThread } from '../../inbox.ts';
 import { canMarkDone } from '../../needs-you.ts';
 import { href } from '../../router.ts';
-import { useApp, useNow } from '../../store.tsx';
-import { HarnessLogo, Loader, OmniMark } from '../brand.tsx';
+import { useApp, useNeedOf, useNow } from '../../store.tsx';
+import { HarnessLogo, OmniMark } from '../brand.tsx';
 import { Avatar, ChannelMark, DoneMark, Icon, StatusDot } from '../ui.tsx';
 import { useMarkDone } from '../../done-confirm.tsx';
 import { useJobTree, useTreesFold, type TreesFold } from '../../thread-tree.ts';
@@ -172,6 +172,12 @@ function InboxCard({
   const tree = useJobTree(t, 'inbox');
   const own = (agents ?? []).filter((k) => k.thread_id === t.id && k.subagent);
   const title = t.title || 'Untitled';
+  // At work, the card names the phase: Starting, Running, Waiting on crew.
+  const phase = status && (status.glyph === 'running' || status.glyph === 'queued') ? threadPhase(t) : null;
+  // What holds it up names its kind: a question, the crew's question, a held message, a failed setup.
+  const blocker = useNeedOf(t.id)?.blockers[0];
+  const mark = status ? (blocker ? blockerMark(blocker) : markOf(status.glyph, phase)) : null;
+  const said = mark && (blocker || phase) ? MARK[mark].label : status?.label;
   const channelName = channel?.id === 'conductor' ? 'Conductor' : (channel?.name ?? t.channel_id);
   // The machine it runs on or last ran on, with the run's time while it runs; the branch only without a machine.
   const where = ranOnLine(t, now);
@@ -188,7 +194,7 @@ function InboxCard({
       <a
         href={href.thread(t.id)}
         onClick={onNavigate}
-        title={`${title} · ${channelName}${status ? ` · ${status.label}` : ''}`}
+        title={`${title} · ${channelName}${status ? ` · ${said}` : ''}`}
         aria-current={active ? 'page' : undefined}
         data-active={active || undefined}
         className="item block [grid-area:1/1] px-3 py-2"
@@ -202,8 +208,8 @@ function InboxCard({
           <span className="flex shrink-0 items-center gap-1.5 md:group-focus-within/row:invisible md:group-hover/row:invisible">
             {status ? (
               <>
-                {status.glyph === 'running' ? <Loader size={10} className="text-live-text" /> : <StatusDot status={status.glyph} size={6} />}
-                <span className="text-fg-3">{status.label}</span>
+                <StatusDot mark={mark} size={phase ? 7 : 6} />
+                <span className="text-fg-3">{said}</span>
               </>
             ) : (
               <span className="font-num tabular-nums">{relTime(t.updated_at ?? t.created_at, now)}</span>

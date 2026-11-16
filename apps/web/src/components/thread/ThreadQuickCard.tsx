@@ -1,3 +1,4 @@
+import type { TurnPhase } from '@omni/shared/status.ts';
 import { useState, type ReactNode } from 'react';
 import type { Thread } from '../../api.ts';
 import type { PanelTab } from '../../pages/useThreadSession.ts';
@@ -10,7 +11,7 @@ import { machineLabel } from '@omni/shared/handoff.ts';
 import { prBadge, prLine, STEP_WORKING, type PRStep } from '@omni/shared/thread-glance.ts';
 import { threadPill } from './thread-state.ts';
 import { runningLabel } from '@omni/shared/goal.ts';
-import { useHereName, useNow } from '../../store.tsx';
+import { useHereName, useNeedOf, useNow } from '../../store.tsx';
 import { cloudAgentUrl } from '@omni/shared/cloud-agent.ts';
 import { shortPath } from '@omni/shared/short-path.ts';
 import type { ThreadPRs } from './panel/PRsTab.tsx';
@@ -78,6 +79,7 @@ export function ThreadQuickCard({
   onOpen,
   onOpenPR,
   asking = false,
+  turn,
   reconnecting = false,
   className = '',
 }: {
@@ -97,6 +99,8 @@ export function ThreadQuickCard({
   onOpenPR: (channelId: string, n: number) => void;
   /** The agent waits on a question card: the turn is open, but on Ben. */
   asking?: boolean;
+  /** What the running turn is doing, for the run row's dot. */
+  turn?: TurnPhase | null;
   reconnecting?: boolean;
   className?: string;
 }) {
@@ -106,8 +110,9 @@ export function ThreadQuickCard({
   const model = thread.model || init?.model;
   const now = useNow(60_000);
   // The run row says what the header pill says, except that a turn in progress reads as one.
-  const pill = threadPill(thread, { asking, reconnecting, now });
-  const run = reconnecting || asking || !slotBusy ? { ...pill, label: asking ? 'Waiting on you' : pill.label } : { glyph: 'running' as const, label: runningLabel(thread, 'Turn running') };
+  const need = useNeedOf(thread.id);
+  const pill = threadPill(thread, { asking, reconnecting, now, turn, need, pr: prs?.pr });
+  const run = reconnecting || asking || !slotBusy ? { ...pill, label: asking ? 'Waiting on you' : pill.label } : { glyph: 'running' as const, label: runningLabel(thread, 'Turn running'), phase: pill.phase, mark: pill.phase ?? ('working' as const) };
   const branchDisabled = !thread.branch;
   // The account its harness ran as when its process last started (apps/server/harness-accounts.ts), here or elsewhere.
   const ran = useThreadAccount(thread.id);
@@ -152,7 +157,7 @@ export function ThreadQuickCard({
         </QuickRow>
       )}
       <QuickRow icon={run.glyph === 'running' ? 'zap' : 'clock'}>
-        <StatusDot status={run.glyph} size={8} />
+        <StatusDot mark={run.mark} size={8} />
         <span className="truncate">
           {run.label}
           {warm !== undefined && !remote && !reconnecting && (
