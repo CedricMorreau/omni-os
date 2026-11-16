@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { inspectScript, pickScript, type RawInspect, type RawPick } from '@omni/shared/browser-pick-script.ts';
@@ -16,9 +16,21 @@ export {
   type BrowserTab, type BrowserState, type BrowserFrame, type BrowserEvent, type PageObservation,
 } from './browser-page.ts';
 import {
-  IDLE_MS, SCREENCAST_QUALITY, VIEWPORT, WINDOW_PAGE, chromeBinary, clampViewport, defaultFavicon, keyCommands, safeIcon,
+  IDLE_MS, SCREENCAST_QUALITY, VIEWPORT, WINDOW_PAGE, chromeBinary, clampViewport, stealthArgs, defaultFavicon, keyCommands, safeIcon,
   type BrowserEvent, type BrowserFrame, type BrowserState, type BrowserTab, type Listener, type PageObservation,
 } from './browser-page.ts';
+
+const versions = new Map<string, string>();
+function chromeVersion(bin: string) {
+  if (!versions.has(bin)) {
+    try {
+      versions.set(bin, execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5000 }));
+    } catch {
+      versions.set(bin, '');
+    }
+  }
+  return versions.get(bin)!;
+}
 
 class ChannelBrowser {
   proc: ChildProcess | null = null;
@@ -78,6 +90,7 @@ class ChannelBrowser {
       `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
     ];
     if (this.headless) args.push('--headless=new');
+    args.push(...stealthArgs(chromeVersion(bin), process.platform, this.headless));
     args.push('about:blank');
     const proc = spawn(bin, args, { stdio: 'ignore' });
     this.proc = proc;

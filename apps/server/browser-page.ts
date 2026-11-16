@@ -175,6 +175,16 @@ export function chromeBinary(): string | null {
   return findChrome({ platform: process.platform, home: homedir(), path: process.env.PATH ?? '', exists: existsSync, list: readdirSync });
 }
 
+const UA_OS: Record<string, string> = { darwin: 'Macintosh; Intel Mac OS X 10_15_7', win32: 'Windows NT 10.0; Win64; x64', linux: 'X11; Linux x86_64' };
+
+// Cloudflare shows its human check to a browser that reports navigator.webdriver or a HeadlessChrome user agent.
+export function stealthArgs(version: string, platform: string, headless: boolean) {
+  const major = version.match(/(\d+)\.\d+\.\d+/)?.[1];
+  const os = UA_OS[platform] ?? UA_OS.linux;
+  const ua = `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+  return ['--disable-blink-features=AutomationControlled', ...(headless && major ? [`--user-agent=${ua}`] : [])];
+}
+
 /** Only web pages and blank tabs: nothing internal, no navigating the browser to file:// or chrome://. */
 export function normalizeUrl(input: string): string | null {
   const address = readAddress(input);
