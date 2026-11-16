@@ -17,10 +17,17 @@
 // otherwise, since the relay keeps every write. Each machine writes only its own key. A switch (a reading signed in as
 // someone else than the last signed-in account) stays on the record with the account before it until the next one;
 // `accounts-seen.<machine>.<harness>` holds the account it was acknowledged as, written from any machine.
+//
+// Plan usage belongs to an account, not a harness: each reading (usage.ts) also goes to the synced kv
+// `usage-account.<harness>.<hash of the account>`, under the account this machine's harness runs as when it comes in.
+// Two machines on one account share that key (the newer reading wins); two accounts never do.
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { ACCOUNT_USAGE_PREFIX, type AccountUsage, type PlanUsage } from '@omni/shared/account-usage.ts';
 import {
   ACCOUNTS_PREFIX,
   identityKey,
+  identityOf,
   nextAccount,
   RAN_PREFIX,
   seenKey,
@@ -29,6 +36,7 @@ import {
   type HarnessAccount,
   type MachineAccounts,
   type MachineAccountsRecord,
+  type RecordedAccount,
   type ThreadAccount,
 } from '@omni/shared/harness-accounts.ts';
 import { publishFeed } from './bus.ts';
@@ -40,7 +48,7 @@ import type { GetAccountResponse } from './harness/codex/protocol.ts';
 import { cursorBin } from './harness/cursor/bin.ts';
 import { CursorCloudClient } from './harness/cursor-cloud/client.ts';
 import { probeHermes } from './harness/hermes/client.ts';
-import { account, clean, parseClaudeStatus, parseCodexAccount, parseCursorAbout, parseCursorMe, sanitize } from './harness/accounts-parse.ts';
+import { account, clean, parseAccountUsage, parseClaudeStatus, parseCodexAccount, parseCursorAbout, parseCursorMe, sanitize } from './harness/accounts-parse.ts';
 import { harnessEnv } from './harness/env-guard.ts';
 import { HARNESS_IDS, type HarnessId } from './harness/types.ts';
 import { globalSecret } from './secrets.ts';
@@ -192,6 +200,17 @@ let reading: Promise<MachineAccountsRecord> | null = null;
 /** The record's content, without the time it was read: what decides whether it changed. */
 const content = (r: MachineAccountsRecord) => JSON.stringify([r.name, r.accounts]);
 
+/** Keep a new record of this machine: in kv when it changed (or the stored one is old), and in memory. */
+function saveOwn(prev: MachineAccountsRecord | null, record: MachineAccountsRecord, now: number, fresh: boolean) {
+  const changed = !!prev && content(prev) !== content(record);
+  const stored = parseRecord(record.id, kv.get<unknown>(keyOf(record.id)));
+  if (!stored || content(stored) !== content(record) || now - Date.parse(stored.checkedAt) > REWRITE_MS) kv.set(keyOf(record.id), record);
+  // A one-harness check keeps the time of the last full reading, so the others are still read again when it is old.
+  own = { record, at: fresh ? now : (own?.at ?? 0) };
+  // The first reading is no news: clients asked for it. A change is, wherever it shows.
+  if (changed) publishFeed({ type: 'accounts' });
+}
+
 async function readOwn(): Promise<MachineAccountsRecord> {
   const now = Date.now();
   const at = new Date(now).toISOString();
@@ -199,13 +218,33 @@ async function readOwn(): Promise<MachineAccountsRecord> {
   const [name, ...readings] = await Promise.all([computerName(), ...HARNESS_IDS.map(readOne)]);
   const accounts = readings.map((r) => nextAccount(prev?.accounts.find((a) => a.harness === r.harness), r, at));
   const record: MachineAccountsRecord = { id: selfId(), name, checkedAt: at, accounts };
-  const changed = !!prev && content(prev) !== content(record);
-  const stored = parseRecord(record.id, kv.get<unknown>(keyOf(record.id)));
-  if (!stored || content(stored) !== content(record) || now - Date.parse(stored.checkedAt) > REWRITE_MS) kv.set(keyOf(record.id), record);
-  own = { record, at: now };
-  // The first reading is no news: clients asked for it. A change is, wherever it shows.
-  if (changed) publishFeed({ type: 'accounts' });
+  saveOwn(prev, record, now, true);
   return record;
+}
+
+/** Read one harness's account again, now, and keep it on this machine's record. A full reading under way is waited for first. */
+async function checkHarness(harness: HarnessId): Promise<RecordedAccount> {
+  if (reading) await reading.catch(() => null);
+  // No record yet to keep it on: read them all, which makes one.
+  if (!(own?.record ?? storedOwn())) {
+    const r = await ownAccounts({ force: true });
+    return r.accounts.find((a) => a.harness === harness) ?? sanitize(account(harness, 'unknown'), harness);
+  }
+  const result = await readOne(harness);
+  const now = Date.now();
+  const at = new Date(now).toISOString();
+  const prev = own?.record ?? storedOwn();
+  const had = prev?.accounts.find((a) => a.harness === harness);
+  // A check that failed (a timeout, a CLI hiccup) says nothing about who is signed in. Over a signed-in account it is
+  // not kept: Settings would say "Could not check" and the Usage row would go for one bad check. Handed back, it only
+  // drops the reading it was for; the next check that answers files the next one.
+  if (result.state === 'unknown' && had && identityOf(had)) return sanitize(result, harness);
+  const next = nextAccount(had, result, at);
+  if (prev) {
+    const accounts = prev.accounts.some((a) => a.harness === harness) ? prev.accounts.map((a) => (a.harness === harness ? next : a)) : [...prev.accounts, next];
+    saveOwn(prev, { ...prev, id: selfId(), accounts }, now, false);
+  }
+  return next;
 }
 
 /** This machine's accounts: the last reading while it is fresh, else a new one. Calls during a reading join it. */
@@ -261,7 +300,92 @@ export async function accountsView({ refresh = false }: { refresh?: boolean } = 
   const mine = await ownAccounts({ force: refresh });
   const self = outbox.machineId();
   const synced = !!self && !!activeWorker();
-  return { machines: [viewOf(mine, true), ...(synced ? otherRecords(self).map((r) => viewOf(r, false)) : [])], synced };
+  return { machines: [viewOf(mine, true), ...(synced ? otherRecords(self).map((r) => viewOf(r, false)) : [])], synced, usage: accountUsages() };
+}
+
+// ---------- plan usage per account ----------
+
+/** The kv key of an account's usage: the account hashed, so the key carries no email. */
+export const accountUsageKey = (harness: string, identity: string) =>
+  `${ACCOUNT_USAGE_PREFIX}${harness}.${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
+
+/** Every account's last usage reading, from any machine. */
+export const accountUsages = (): AccountUsage[] => kv.list<unknown>(ACCOUNT_USAGE_PREFIX).flatMap(([, v]) => parseAccountUsage(v) ?? []);
+
+/** Fill the windows a partial reading leaves out from the reading before it, as Codex's rate-limit updates expect. */
+export function fillWindows<U extends PlanUsage>(u: U, prev: PlanUsage | null | undefined): U {
+  const out = { ...u };
+  if (!out.five_hour && prev?.five_hour) out.five_hour = prev.five_hour;
+  if (!out.seven_day && prev?.seven_day) out.seven_day = prev.seven_day;
+  return out;
+}
+
+/** A reading waiting to be filed: the latest per harness, and who the harness ran as when it came in. */
+const pending = new Map<HarnessId, { usage: PlanUsage | null; partial: boolean; before: string | null | undefined }>();
+const draining = new Map<HarnessId, Promise<void>>();
+
+/** Who this machine last knew the harness to run as: an identity key, null when not signed in, undefined before any reading. */
+function knownIdentity(harness: string): string | null | undefined {
+  const r = own?.record ?? storedOwn();
+  if (!r) return undefined;
+  const a = r.accounts.find((x) => x.harness === harness);
+  const who = a && identityOf(a);
+  return who ? identityKey(who) : null;
+}
+
+function file(harness: HarnessId, p: { usage: PlanUsage | null; partial: boolean; before: string | null | undefined }, a: RecordedAccount): AccountUsage | null {
+  const who = identityOf(a);
+  const key = who && identityKey(who);
+  if (!who || !key) return null;
+  // Signed in as someone else than when the reading came in: a switch landed around it, so whose it is is unknown.
+  if (p.before !== undefined && p.before !== key) return null;
+  const r = own?.record ?? storedOwn();
+  if (!r) return null;
+  const k = accountUsageKey(harness, key);
+  const usage = p.partial && p.usage ? fillWindows(p.usage, parseAccountUsage(kv.get<unknown>(k))?.usage) : p.usage;
+  const record: AccountUsage = { harness, label: who.label, org: who.org, plan: who.plan, machine: r.id, machineName: r.name, at: new Date().toISOString(), usage };
+  kv.set(k, record);
+  publishFeed({ type: 'account_usage', usage: record });
+  return record;
+}
+
+async function drain(harness: HarnessId) {
+  try {
+    while (pending.has(harness)) {
+      const p = pending.get(harness)!;
+      pending.delete(harness);
+      // A check that starts after the reading came in: a reading is never filed on what was known before it.
+      file(harness, p, await checkHarness(harness));
+    }
+  } catch (err) {
+    pending.delete(harness);
+    console.error('[accounts] could not file the usage reading:', (err as Error).message);
+  } finally {
+    draining.delete(harness);
+  }
+}
+
+/**
+ * File a plan reading under the account the harness runs as here. The harness's account is checked again after the
+ * reading came in, and the reading is filed only when that check names the account this machine knew before it: a
+ * switch around the reading (`claude auth login` while a turn runs) leaves it unfiled rather than on either account.
+ * Not signed in, it is not filed at all. Readings that come in during a check wait for the next one, and only the
+ * latest is filed. `partial`: the reading leaves out windows that have not changed (Codex's rate-limit updates), so
+ * they are taken from that account's own last reading, never another account's.
+ */
+export function attributeUsage(harness: HarnessId, usage: PlanUsage | null, { partial = false }: { partial?: boolean } = {}): void {
+  const had = pending.get(harness);
+  pending.set(harness, {
+    usage: had?.usage && partial && usage ? fillWindows(usage, had.usage) : usage,
+    partial: partial && (had ? had.partial : true),
+    before: had ? had.before : knownIdentity(harness),
+  });
+  if (!draining.has(harness)) draining.set(harness, drain(harness));
+}
+
+/** For tests: every reading handed to attributeUsage so far is filed or dropped. */
+export async function usageFiled(): Promise<void> {
+  while (draining.size) await Promise.all(draining.values());
 }
 
 const refused = (message: string, status: number) => Object.assign(new Error(message), { status });
