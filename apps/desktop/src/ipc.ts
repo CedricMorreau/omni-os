@@ -1,6 +1,7 @@
 // The IPC between the preload (the page's `window.omniDesktop`) and the main process. One table of channels, so
 // the preload and each feature that answers one agree on names and shapes.
 import type {
+  DesktopLayout,
   DesktopPlatform,
   DesktopServerInfo,
   DesktopSettings,
@@ -20,6 +21,8 @@ export interface Bootstrap {
 
 export const BOOTSTRAP = 'omni:bootstrap';
 export const EVENT = 'omni:event';
+/** Main to page: `(id, url, deadline)`, a link for the page to open itself if it can before `deadline` (bridge `routeLinks`). */
+export const LINK = 'omni:link';
 
 /** Request and reply, through ipcRenderer.invoke and ipcMain.handle. */
 export interface InvokeChannels {
@@ -27,6 +30,7 @@ export interface InvokeChannels {
   'omni:settings:set': { args: [DesktopSettingsPatch]; result: DesktopSettings };
   'omni:updates:get': { args: []; result: DesktopUpdateView };
   'omni:updates:check': { args: []; result: DesktopUpdateView };
+  'omni:updates:download': { args: []; result: DesktopUpdateView };
   'omni:server:info': { args: []; result: DesktopServerInfo };
   'omni:quick-prompt:status': { args: []; result: QuickPromptStatus };
   'omni:native-browser:capture': { args: [webContentsId: number]; result: NativeBrowserShot };
@@ -36,7 +40,13 @@ export interface InvokeChannels {
 export interface SendChannels {
   'omni:open-window': [route: string];
   'omni:focus': [];
+  'omni:pair-again': [route?: string];
   'omni:appearance': [mode: 'system' | 'light' | 'dark'];
+  'omni:layout': [layout: DesktopLayout];
+  /** The page takes links (`routeLinks`), or stopped. */
+  'omni:links:routing': [on: boolean];
+  /** The page's answer to a LINK: it opened the link itself, or the browser should. */
+  'omni:links:answer': [id: number, routed: boolean];
   'omni:quick-prompt:done': [route?: string];
   'omni:quick-prompt:open': [];
   'omni:quick-prompt:resize': [height: number];

@@ -16,7 +16,10 @@ export type ThreadView = (typeof THREAD_VIEWS)[number];
 const isThreadView = (s: string | undefined): s is ThreadView => (THREAD_VIEWS as readonly string[]).includes(s ?? '');
 
 export type Route =
+  /** Overview: the Conductor composer, the counts, the machines and usage. */
   | { name: 'home' }
+  /** The Inbox: the rail's Inbox disc opens it, its shelves in the list panel and the Overview dashboard beside them. */
+  | { name: 'inbox' }
   /** The phone layout's Channels tab. The desktop lists channels in the sidebar and shows Home here. */
   | { name: 'channels' }
   | { name: 'channel'; id: string; tab: ChannelTab; pr?: number }
@@ -30,7 +33,8 @@ export type Route =
    * result's entry (@omni/shared/settings-catalog.ts) to scroll to.
    */
   | { name: 'settings'; section?: SettingsSection; focus?: string }
-  | { name: 'artifacts' }
+  /** `source: 'claude'`: Ben's claude.ai Artifacts (components/ClaudeArtifacts.tsx) in place of the files threads made. */
+  | { name: 'artifacts'; source?: 'claude' }
   /** Every channel's pull requests in one list: the phone's PRs tab, a Workspace page on the desktop. */
   | { name: 'prs' }
   | { name: 'new-channel' }
@@ -74,6 +78,7 @@ export function parseHash(hash: string): Route {
     };
   }
   if (a === 'channels' && !b) return { name: 'channels' };
+  if (a === 'inbox' && !b) return { name: 'inbox' };
   if (a === 'search') return { name: 'search', q: q.get('q') ?? '' };
   if (a === 'automations' && !b) return { name: 'automations' };
   if (a === 'roles' && !b) return { name: 'roles' };
@@ -85,17 +90,20 @@ export function parseHash(hash: string): Route {
     if (section) return { name: 'settings', section, focus: q.get('focus') || undefined };
   }
   if (a === 'artifacts' && !b) return { name: 'artifacts' };
+  if (a === 'artifacts' && b === 'claude' && !c) return { name: 'artifacts', source: 'claude' };
   if (a === 'prs' && !b) return { name: 'prs' };
   if (a === 'new-channel' && !b) return { name: 'new-channel' };
   if (a === 'quick-prompt' && !b) return { name: 'quick-prompt' };
   return { name: 'notfound', path: pathPart };
 }
 
-/** The window title's page name: "Home" shows as plain "Omni". */
+/** The window title's page name. A thread's own title comes from the page (usePageTitle), "Thread" only until it loads. */
 export function pageTitle(route: Route, channelName: (id: string) => string | undefined) {
   switch (route.name) {
     case 'home':
-      return 'Home';
+      return 'Overview';
+    case 'inbox':
+      return 'Inbox';
     case 'channels':
       return 'Channels';
     case 'channel':
@@ -155,7 +163,9 @@ export function navigate(to: string, opts: { replace?: boolean } = {}) {
 }
 
 export const href = {
+  /** Overview, the landing page. */
   home: () => '#/',
+  inbox: () => '#/inbox',
   channel: (id: string) => `#/c/${encodeURIComponent(id)}`,
   prs: (id: string) => `#/c/${encodeURIComponent(id)}/prs`,
   pr: (id: string, n: number) => `#/c/${encodeURIComponent(id)}/prs/${n}`,
@@ -173,6 +183,8 @@ export const href = {
   /** One Settings section: General, Workspace, Machines or Secrets. */
   settingsSection: (section: SettingsSection, focus?: string) => settingsHash(section, focus),
   artifacts: () => '#/artifacts',
+  /** The claude.ai list on the Artifacts page (the phone's Library). */
+  claudeArtifacts: () => '#/artifacts/claude',
   /** Every channel's PRs. One channel's is `prs(id)`. */
   pullRequests: () => '#/prs',
   newChannel: () => '#/new-channel',

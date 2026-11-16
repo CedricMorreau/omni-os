@@ -1,15 +1,37 @@
 import { useEffect, useState } from 'react';
 import type { DesktopBridge, DesktopUpdateView } from '@omni/shared/desktop-bridge.ts';
 import { api, errorText, useApi, type UpdateView } from '../api.ts';
-import { appUpdateNotice } from '../app-update-notice.ts';
+import { appUpdateNotice, appUpdateWords } from '../app-update-notice.ts';
 import { desktop } from '../desktop.ts';
-import { useFeed } from '../store.tsx';
+import { useApp, useFeed } from '../store.tsx';
 import { clearUpdateMark, markUpdateStarted, reloadAfterUpdate, updateNotice } from '../update-notice.ts';
 import { Loader } from './brand.tsx';
-import { Button, Icon } from './ui.tsx';
+import { Button, Icon, IconButton } from './ui.tsx';
+
+const DISMISSED_KEY = 'omni.update.dismissed';
+
+/** The app update notice Ben dismissed, by its key. Per browser, and only a convenience: it shows again for the next state. */
+function useDismissed(): [string | null, (key: string) => void] {
+  const [dismissed, setDismissed] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(DISMISSED_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const dismiss = (key: string) => {
+    setDismissed(key);
+    try {
+      localStorage.setItem(DISMISSED_KEY, key);
+    } catch {
+      // Private mode: dismissed for this page only.
+    }
+  };
+  return [dismissed, dismiss];
+}
 
 /** GET /api/update, fresh on every update and reconnect message. Reloads the page once an Update it started lands. */
-function useUpdate() {
+export function useUpdate() {
   const res = useApi<UpdateView>('/update');
   const { data, reload, setData } = res;
   useFeed((e) => {
@@ -36,10 +58,12 @@ export function UpdateNotice({ className = '' }: { className?: string }) {
   );
 }
 
-/** The desktop app's updater (desktop.updates): a download under way, one ready for Relaunch, or a failure. */
+/** The desktop app's updater (desktop.updates): one to download, a download under way, one ready for Relaunch, or a failure. */
 function AppUpdateNotice({ bridge, className }: { bridge: DesktopBridge; className: string }) {
   const [{ view, afterDownload }, setShown] = useState<{ view: DesktopUpdateView | null; afterDownload: boolean }>({ view: null, afterDownload: false });
   const [retrying, setRetrying] = useState(false);
+  const [dismissed, dismiss] = useDismissed();
+  const running = useApp().status?.running ?? 0;
   useEffect(() => {
     let live = true;
     const show = (next: DesktopUpdateView) =>
@@ -56,11 +80,13 @@ function AppUpdateNotice({ bridge, className }: { bridge: DesktopBridge; classNa
   }, [bridge]);
 
   const notice = appUpdateNotice(view, afterDownload);
-  if (!notice) return null;
+  if (!notice || (notice.key && notice.key === dismissed)) return null;
   const { action } = notice;
   const run = () => {
     if (!action) return;
     if (action.kind === 'install') bridge.updates.install();
+    // The answer comes back as update events: the download's progress, then ready.
+    else if (action.kind === 'fetch') void bridge.updates.download();
     // The app opens a page outside Omni in the default browser.
     else if (action.kind === 'download') window.open(action.url, '_blank', 'noopener,noreferrer');
     else {
@@ -76,10 +102,12 @@ function AppUpdateNotice({ bridge, className }: { bridge: DesktopBridge; classNa
         <span className="min-w-0 flex-1 text-[12px] leading-[1.35] text-fg" title={notice.detail}>
           {notice.text}
         </span>
+        {notice.key && <IconButton icon="x" label="Dismiss" size={13} className="-my-1 -mr-1.5" onClick={() => dismiss(notice.key!)} />}
       </div>
-      {/* Its own row: the sidebar is too narrow for the text and "Relaunch to Update" side by side. */}
+      {action?.kind === 'install' && running > 0 && <p className="mt-1 pl-[22px] text-[11.5px] leading-[1.35] text-fg-3">{appUpdateWords.running(running)}</p>}
+      {/* Its own row: the sidebar is too narrow for the text and "Relaunch to update" side by side. */}
       {action && (
-        <Button size="sm" variant={action.kind === 'install' ? 'primary' : 'ghost'} busy={action.kind === 'retry' && retrying} onClick={run} className="mt-2 w-full">
+        <Button size="sm" variant={action.kind === 'install' || action.kind === 'fetch' ? 'primary' : 'ghost'} busy={action.kind === 'retry' && retrying} onClick={run} className="mt-2 w-full">
           {action.label}
         </Button>
       )}

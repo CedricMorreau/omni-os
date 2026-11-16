@@ -1,8 +1,7 @@
 // The sidebar's Inbox view, T3 Code's default thread list: every thread in one list across channels, split into
 // shelves by what it waits on. Pure, so the rules are tested on their own (apps/web/tests/inbox.test.ts).
-import type { NeedsYouBlocker, NeedsYouItem, ThreadStub } from './api.ts';
-import type { Glyph } from './components/ui.tsx';
-import { isWorking, showsRunning } from '@omni/shared/delegate-count.ts';
+import type { NeedsYouItem, ThreadStub } from './api.ts';
+import { isWorking } from '@omni/shared/delegate-count.ts';
 
 export type InboxThread = ThreadStub & { pinned_at?: string | null; source?: string; archived?: number | boolean };
 
@@ -39,38 +38,6 @@ export function shelfView(list: InboxThread[], { open, openId, limit = Infinity 
     rows: open ? [...list.slice(0, limit), ...list.slice(limit).filter(isOpenThread)] : list.filter(isOpenThread),
     more: open ? Math.min(DONE_PAGE, Math.max(0, list.length - limit)) : 0,
   };
-}
-
-/** What a card says on its right in place of the time, T3's status label. Null: nothing to say, so it shows the time. */
-export interface RowStatus {
-  glyph: Glyph;
-  label: string;
-}
-
-const BLOCKER_LABEL: Record<NeedsYouBlocker['kind'], string> = {
-  question: 'Input',
-  setup: 'Setup failed',
-  limited: 'Limited',
-  uncertain: 'Resume',
-  recovered: 'Resume',
-};
-
-/** A blocker first, as T3 puts approvals and input ahead of work; then work in progress; then an unread result. */
-export function rowStatus(t: ThreadStub, need: NeedsYouItem | undefined, agents = 0): RowStatus | null {
-  const b = need?.blockers[0];
-  if (b) return { glyph: 'needs', label: BLOCKER_LABEL[b.kind] };
-  if (t.status === 'queued') return { glyph: 'queued', label: 'Queued' };
-  if (showsRunning(t) || agents > 0) return { glyph: 'running', label: 'Working' };
-  if (t.waiting_on && t.status === 'done') return { glyph: 'settled', label: 'Waiting' };
-  switch (need?.result?.status) {
-    case 'failed':
-      return { glyph: 'needs', label: 'Failed' };
-    case 'done':
-      return { glyph: 'done', label: 'Finished' };
-    case 'stopped':
-      return { glyph: 'settled', label: 'Stopped' };
-  }
-  return null;
 }
 
 const at = (t: InboxThread) => t.updated_at ?? t.created_at;

@@ -55,12 +55,19 @@
         "effect",
         "expo-status-bar",
         "babel-plugin-react-compiler",
-        "expo-updates",
-        "expo-system-ui"
+        "expo-system-ui",
+        "expo-symbols"
       ]
     },
     "apps/web": {
       "entry": [
+        "tests/**/*.test.ts"
+      ]
+    },
+    "apps/cli": {
+      "entry": [
+        "src/main.ts",
+        "scripts/*.ts",
         "tests/**/*.test.ts"
       ]
     },

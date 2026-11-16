@@ -11,9 +11,15 @@ import { startNewThread, useRoute } from './router.ts';
 import { Page } from './pages/Page.tsx';
 import { AppProvider, readPref, useApp, useIsMobile, usePageTitle, useSyncOnReturn, writePref } from './store.tsx';
 import { FolderDeleteDialog, FolderProvider } from './folders.tsx';
+import { DoneConfirmProvider } from './done-confirm.tsx';
 import { MobileShell } from './mobile/MobileShell.tsx';
 import { desktop } from './desktop.ts';
 import { QuickPromptPage } from './pages/QuickPrompt.tsx';
+import { ChannelRail } from './components/rail/ChannelRail.tsx';
+import { ListPanel } from './components/rail/ListPanel.tsx';
+import { useLayout } from './layout-pref.ts';
+import { usePullRequestLinks } from './pr-links.ts';
+import { cameFromInbox, listMode, railSelection } from './rail-model.ts';
 
 const SIDEBAR_WIDTH = 252;
 const SIDEBAR_MIN = 200;
@@ -105,7 +111,43 @@ function Shell() {
   useSyncOnReturn();
   usePageTitle(route);
 
-  return (
+  const layout = useLayout();
+  // A thread opened from the Inbox keeps it in the panel; one opened from a channel shows that channel.
+  const [lastFromInbox, setLastFromInbox] = useState(() => readPref('rail.inbox', false));
+  const fromInbox = cameFromInbox(route, lastFromInbox);
+  useEffect(() => {
+    if (fromInbox === lastFromInbox) return;
+    setLastFromInbox(fromInbox);
+    writePref('rail.inbox', fromInbox);
+  }, [fromInbox, lastFromInbox]);
+  const selection = railSelection(route, openThread, fromInbox);
+  // The desktop app puts its macOS traffic lights where this layout leaves room for them (apps/desktop windows.ts).
+  // The rail also swaps the type faces (index.css :root[data-layout]); the phone layout keeps Apple's.
+  useEffect(() => {
+    desktop?.setLayout?.(layout);
+    document.documentElement.dataset.layout = layout;
+    return () => {
+      delete document.documentElement.dataset.layout;
+    };
+  }, [layout]);
+
+  return layout === 'rail' ? (
+    <div className="desktop-shell rail-shell flex h-full min-h-0 flex-row bg-bg">
+      <ChannelRail selection={selection} />
+      <ListPanel mode={listMode(selection)} onSearch={openPalette} />
+      <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
+        <Page route={route} />
+      </main>
+
+      <CommandPalette open={palette} onClose={closePalette} />
+      <Onboarding />
+      <ThreadNotifier />
+      <BrowserNotifier />
+      <ContextMenuHost />
+      <ContinueSheetHost />
+      <FolderDeleteDialog />
+    </div>
+  ) : (
     <div className="desktop-shell flex h-full min-h-0 flex-col md:flex-row md:bg-[var(--chrome)] md:py-2 md:pr-2">
       {/* Desktop sidebar */}
       <SidebarPane>
@@ -127,9 +169,13 @@ function Shell() {
   );
 }
 
-/** Below the md breakpoint the phone layout (apps/web/src/mobile) replaces the sidebar shell. */
+/**
+ * Below the md breakpoint the phone layout (apps/web/src/mobile) replaces the desktop shell, which is the channel rail
+ * with its list panel, or the classic sidebar when Settings, Appearance says so.
+ */
 function Shells() {
   const mobile = useIsMobile();
+  usePullRequestLinks();
   return (
     <>
       <DesktopHooks />
@@ -146,7 +192,9 @@ export function App() {
     <AppProvider>
       <ToastProvider>
         <FolderProvider>
-          <Shells />
+          <DoneConfirmProvider>
+            <Shells />
+          </DoneConfirmProvider>
         </FolderProvider>
       </ToastProvider>
     </AppProvider>

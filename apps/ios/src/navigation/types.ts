@@ -1,4 +1,5 @@
-import type { Artifact } from '@omni/client-core';
+import type { Artifact, ChannelAction } from '@omni/client-core';
+import type { SettingsSectionId } from '@omni/shared/settings-catalog.ts';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 /** Every tab's stack takes these routes: its own root, and the detail routes any tab can push. */
@@ -15,14 +16,22 @@ export type RootStackParamList = {
   Thread: { id: string };
   Changes: { id: string };
   PullRequest: { id: string };
-  /** Starts a thread. Opens on the channel it was asked from, else the Conductor. */
-  NewThread: { channel?: string } | undefined;
+  /** Starts a thread. Opens on the channel it was asked from, else the Conductor. `prompt` fills the box to start, as an open item's + does. */
+  NewThread: { channel?: string; prompt?: string } | undefined;
   /** A file the crew made. Any tab can push it, through `openArtifact`. */
   Artifact: { artifact: Artifact };
   /** Forks a thread onto another harness: a new, linked thread that picks up from it. Presented as a modal over the thread. */
   Continue: { id: string };
   Search: undefined;
   Settings: undefined;
+  /** One section of Settings. `focus`: the setting a search found in it. */
+  SettingsSection: { section: SettingsSectionId; focus?: string };
+  /** A channel's settings, from its header, a long press in Channels, or Settings › Channels. Without an id it makes a new channel. */
+  ChannelSettings: { id?: string };
+  /** One of a channel's actions, new without `action`. Presented as a modal over Channel Settings. */
+  ChannelAction: { channel: string; action?: ChannelAction };
+  /** Secret names and a form to add one. With a channel, what that channel's threads get. */
+  Secrets: { channel?: string } | undefined;
   Devices: undefined;
   Automations: undefined;
   /** The channel's named actions, run in this thread's checkout. Pushed from a thread's header. */

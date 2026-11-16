@@ -7,6 +7,8 @@ import type { CrewRole } from '../crew.ts';
 import { isProviderHarness } from '../harness/types.ts';
 import { getProfile, objectPronoun, userName, userPossessive } from '../profile.ts';
 import { TOOL_FAILURE_POLICY } from '../tool-failure-policy.ts';
+import { accessSync, closeSync, constants, openSync, readSync, statSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 
 /** Claude Code's Artifact tool publishes to claude.ai. Omni links a publish to its file and keeps the URL per channel. */
 function publishedLines(channelId: string) {
@@ -18,6 +20,66 @@ function publishedLines(channelId: string) {
     ...(pages.length
     ? ['Pages this channel already published, newest first:', ...pages.map((a) => `- ${a.name}: ${a.url} (thread "${a.thread_title}")`)]
     : []),
+  ];
+}
+
+/** On the shim the desktop app writes for the `omni` command (apps/desktop/src/cli-shim.ts SHIM_MARK). */
+const OMNI_SHIM_MARK = '# omni-cli-shim';
+
+function isOmniShim(file: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = openSync(file, 'r');
+    const head = Buffer.alloc(512);
+    return head.subarray(0, readSync(fd, head, 0, head.length, 0)).toString('utf8').includes(OMNI_SHIM_MARK);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/** The `omni` a shell runs from this PATH: the first executable file by that name, or null. */
+function resolveOmni(path: string): string | null {
+  for (const dir of path.split(delimiter)) {
+    if (!dir) continue;
+    const file = join(dir, 'omni');
+    try {
+      if (!statSync(file).isFile()) continue;
+      accessSync(file, constants.X_OK);
+      return file;
+    } catch {
+      // Not there, or not executable: a shell looks further too.
+    }
+  }
+  return null;
+}
+
+let omniCommand: { path: string; found: boolean } | null = null;
+
+/**
+ * Whether threads have the `omni` command (apps/cli): the desktop app writes it into its bin folder, which is on
+ * this server's PATH and so on the harnesses' (ADR 0014). It counts only when it is the `omni` PATH resolves to: the
+ * app appends its folder last (apps/desktop/src/backend/index.ts), so another program named omni earlier wins.
+ */
+export function hasOmniCommand(path = process.env.PATH ?? ''): boolean {
+  if (omniCommand?.path !== path) {
+    const file = resolveOmni(path);
+    omniCommand = { path, found: !!file && isOmniShim(file) };
+  }
+  return omniCommand.found;
+}
+
+/**
+ * The `omni` command for a thread without the Conductor's MCP tools, so an agent in any local harness messages and
+ * starts threads with one command instead of curl.
+ */
+function commandLineLines(thread: Thread, role?: CrewRole) {
+  if (isProviderHarness(thread.harness) || role?.mcp.includes('omni') || !hasOmniCommand()) return [];
+  return [
+    '',
+    '## Omni from the shell',
+    `The \`omni\` command reaches this Omni from your shell in any harness. \`omni send parent "…"\` messages the thread that started you (or any thread by id), \`omni new "…" -c <channel> -r <role>\` starts a thread under yours, \`omni show <id>\` reads one and \`omni threads --needs-you\` lists what waits on ${userName()}. Use it instead of curl against OMNI_URL; \`omni --help\` has the rest.`,
   ];
 }
 
@@ -50,7 +112,7 @@ function workspaceLines(thread: Thread, channel: Channel) {
             '',
             '## Browser',
             config.browser
-              ? `The "omni-browser" MCP is this thread's browser. It keeps this channel's logins between threads.${config.browserLive ? ` ${name} sees it live in the thread's Browser panel and can click and type in it too, so ask ${objectPronoun()} to take over there when a page needs a login or a captcha.` : ''} Omit the screenshot filename to save in ${browserOutDir(thread.id)} and show it in the thread. An explicit relative filename saves in the working directory instead. Read or copy the exact path returned by the tool; do not assume a named screenshot is in the browser folder. The browser refuses paths outside its output folder and working directory, including the artifacts folder and /tmp, so copy the file afterwards if you need it elsewhere. It blocks file: URLs too: to look at a local HTML file, serve its folder over http on a free port and open that. browser_find searches for a \`text\` substring or a \`regex\`; it ignores any other argument name and then fails.`
+              ? `The "omni-browser" MCP is this thread's browser. It keeps this channel's logins between threads.${config.browserLive ? ` ${name} sees it live in the thread's Browser panel and can click and type in it too, so ask ${objectPronoun()} to take over there when a page needs a login or a captcha.` : ''} Omit the screenshot filename to save in ${browserOutDir(thread.id)} and show it in the thread. An explicit relative filename saves in the working directory instead. Read or copy the exact path returned by the tool; do not assume a named screenshot is in the browser folder. The browser refuses paths outside its output folder and working directory, including the artifacts folder and /tmp, so copy the file afterwards if you need it elsewhere. It blocks file: URLs too: to look at a local HTML file, serve its folder over http on a free port and open that. Start that server in the background and stop it by its PID: \`pkill -f\` with its command line also matches your own shell and kills it. browser_find searches for a \`text\` substring or a \`regex\`; it ignores any other argument name and then fails. browser_click, browser_type, browser_hover and browser_select_option take the snapshot ref as \`target\`, not \`ref\`.`
               : '',
           ]),
   ];
@@ -102,11 +164,12 @@ export function buildSystemPrompt(thread: Thread, channel: Channel, role?: CrewR
       ? [
           '',
           '## Thread delegation',
-          `${role.delegateOnly ? delegateOnlyRule(name) : `Use Omni's delegate tool when ${name} asks you to hand work to another crew role.`} For work that has independent parts, use delegate_team so the member threads run in parallel and the lead returns one combined report. First call list_crew and list_channels when you need valid ids. Give each delegated thread a self-contained brief because it cannot see this conversation. Delegated threads appear in Omni as separate, linked threads, and their reports return here automatically; do not poll for them.`,
+          `${role.delegateOnly ? delegateOnlyRule(name) : `Use Omni's delegate tool when ${name} asks you to hand work to another crew role.`} First call list_crew and list_channels when you need valid ids. Write each brief as Goal, Done when and Proof back; the delegated thread cannot see this conversation. Delegated threads appear in Omni as separate, linked threads, and their reports return here automatically; do not poll for them.`,
           SESSION_CACHE_RULE,
         ]
       : []),
     ...(hands ? workspaceLines(thread, channel) : []),
+    ...commandLineLines(thread, role),
     '',
     ...(cloud
       ? [

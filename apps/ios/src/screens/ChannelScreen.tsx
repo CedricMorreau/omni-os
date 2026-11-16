@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/Text';
 
 import { channelThreads, threadSections, type ThreadRow } from '../live/channel-model';
-import { useChannels, useHandoffOpen, useLiveHub, usePullRefresh } from '../live/react';
+import { useChannels, useChannelThreadPages, useHandoffOpen, useLiveHub, usePullRefresh } from '../live/react';
+import { ChannelAvatar } from '../components/ChannelAvatar';
 import { FolderHeader } from '../components/FolderHeader';
 import { HandoffRowView } from '../components/HandoffRowView';
 import { ListHeading } from '../components/ListHeading';
@@ -11,6 +12,7 @@ import { StatusLine } from '../components/StatusLine';
 import { ThreadMenuSheet } from '../components/thread/ThreadMenuSheet';
 import { ThreadSwipeRow } from '../components/ThreadSwipeRow';
 import type { RootScreenProps } from '../navigation/types';
+import { EmptyState } from '../ui/EmptyState';
 import { fontSize, space, useOmniTheme, weight } from '../theme';
 
 export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>) {
@@ -21,17 +23,20 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
   const { channels } = useChannels();
   const channel = channels?.find((c) => c.id === id) ?? null;
   const name = channel?.name ?? null;
+  const icon = channel?.icon ?? null;
   const [menuId, setMenuId] = useState<string | null>(null);
+  // Every thread in the channel, paged from the server; the sidebar previews stand in until the first page lands.
+  const paged = useChannelThreadPages(id);
 
   useEffect(() => {
-    if (name) navigation.setOptions({ title: name });
-  }, [name, navigation]);
+    if (name) navigation.setOptions({ title: name, headerTitle: () => <ChannelTitle name={name} icon={icon} avatarBg={channel?.avatar_bg} conductor={id === 'conductor'} /> });
+  }, [id, name, icon, channel?.avatar_bg, navigation]);
 
   const sections = useMemo(() => {
     if (!channel) return [];
     const nameOf = (channelId: string) => channels?.find((c) => c.id === channelId)?.name ?? channelId;
-    return threadSections(channelThreads(channel, Date.now(), nameOf));
-  }, [channel, channels]);
+    return threadSections(channelThreads(channel, Date.now(), nameOf, paged.threads ?? undefined));
+  }, [channel, channels, paged.threads]);
 
   const toggleFolder = async (folderId: string, collapsed: boolean) => {
     const failure = await hub.setFolderCollapsed(folderId, collapsed);
@@ -64,14 +69,13 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
           </View>
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={[styles.emptyTitle, { color: colors.fg }]}>
-              {channels === null ? 'Loading threads' : channel ? 'No threads yet' : 'Channel not found'}
-            </Text>
-            {channel === null && channels !== null ? (
-              <Text style={[styles.emptyBody, { color: colors.fg3 }]}>It may have been archived or removed on the server.</Text>
-            ) : null}
-          </View>
+          channels === null ? (
+            <EmptyState icon="hash" title="Loading threads" />
+          ) : channel ? (
+            <EmptyState icon="message" title="No threads yet" body="Start one with the + button above." action={{ label: 'New thread', onPress: () => navigation.navigate('NewThread', { channel: id }) }} />
+          ) : (
+            <EmptyState icon="alert" title="Channel not found" body="It may have been archived or removed on the server." />
+          )
         }
         renderSectionHeader={({ section }) =>
           section.folder ? (
@@ -88,6 +92,9 @@ export function ChannelScreen({ route, navigation }: RootScreenProps<'Channel'>)
         }
         renderItem={({ item }) => <ChannelThreadRow row={item} onOpen={open} onMenu={setMenuId} />}
         stickySectionHeadersEnabled={false}
+        onEndReached={() => void paged.loadMore()}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={paged.more ? <ActivityIndicator style={styles.more} color={colors.fg3} /> : undefined}
       />
       <ThreadMenuSheet target={menuTarget} folders={channel?.folders ?? []} onClose={() => setMenuId(null)} onChanged={() => {}} />
     </>
@@ -101,21 +108,35 @@ function ChannelThreadRow({ row, onOpen, onMenu }: { row: ThreadRow; onOpen: (th
   return <HandoffRowView row={{ ...row, handoff: row.handoff }} open={open} onToggle={toggle} onOpenThread={onOpen} onMenu={() => onMenu(row.id)} />;
 }
 
+function ChannelTitle({ name, icon, conductor, avatarBg }: { avatarBg?: string | null; name: string; icon: string | null; conductor: boolean }) {
+  const { colors } = useOmniTheme();
+  return (
+    <View style={styles.title} accessibilityRole="header" accessibilityLabel={name}>
+      <ChannelAvatar name={name} icon={icon} avatarBg={avatarBg} conductor={conductor} size={24} />
+      <Text numberOfLines={1} style={[styles.titleText, { color: colors.fg }]}>
+        {name}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  title: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s4,
+    maxWidth: 240,
+  },
+  titleText: {
+    flexShrink: 1,
+    fontSize: fontSize.heading,
+    fontWeight: weight.medium,
+  },
   header: {
     paddingHorizontal: space.s9,
     paddingTop: space.s2,
   },
-  empty: {
-    paddingHorizontal: space.s9,
-    paddingTop: space.s11,
-    gap: space.s4,
-  },
-  emptyTitle: {
-    fontSize: fontSize.heading,
-    fontWeight: weight.semibold,
-  },
-  emptyBody: {
-    fontSize: fontSize.body,
+  more: {
+    paddingVertical: space.s9,
   },
 });

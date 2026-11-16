@@ -7,7 +7,9 @@ import { ActionsScreen } from '../screens/ActionsScreen';
 import { ArtifactScreen } from '../screens/ArtifactScreen';
 import { AutomationsScreen } from '../screens/AutomationsScreen';
 import { ChangesScreen } from '../screens/ChangesScreen';
+import { ChannelActionScreen } from '../screens/ChannelActionScreen';
 import { ChannelScreen } from '../screens/ChannelScreen';
+import { ChannelSettingsScreen } from '../screens/ChannelSettingsScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
 import { ContinueScreen } from '../screens/ContinueScreen';
 import { NewThreadScreen } from '../screens/NewThreadScreen';
@@ -16,7 +18,9 @@ import { NotificationsIntroScreen } from '../screens/NotificationsIntroScreen';
 import { DevicesScreen } from '../screens/DevicesScreen';
 import { PullRequestScreen } from '../screens/PullRequestScreen';
 import { SearchScreen } from '../screens/SearchScreen';
+import { SecretsScreen } from '../screens/SecretsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { SettingsSectionScreen } from '../screens/SettingsSectionScreen';
 import { ServersScreen } from '../screens/ServersScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
 import { space, type ColorTokens } from '../theme';
@@ -24,12 +28,16 @@ import type { RootStackParamList } from './types';
 
 export const Stack = createNativeStackNavigator<RootStackParamList>();
 
+const BACK_CHEVRON = require('../../assets/back-chevron.png') as number;
+
 export function stackOptions(colors: ColorTokens): NativeStackNavigationOptions {
   return {
     headerStyle: { backgroundColor: colors.bg },
     headerTintColor: colors.fg,
     headerTitleStyle: { color: colors.fg },
     headerShadowVisible: false,
+    // The design system's back chevron: one 1.75pt stroke, the weight of every other icon, lighter than the system's.
+    headerBackImageSource: BACK_CHEVRON,
     contentStyle: { backgroundColor: colors.bg },
   };
 }
@@ -37,18 +45,13 @@ export function stackOptions(colors: ColorTokens): NativeStackNavigationOptions 
 type Navigate = Pick<NativeStackNavigationProp<RootStackParamList>, 'navigate'>;
 
 /**
- * Search on the left and Settings on the right of a tab's root screen. Neither tab root has a back button to take the
- * left. Servers sits inside Settings. Channels also carries New, so a thread can start from the list.
+ * A tab's root screen: Search on the left and Settings on the right as icon buttons. Neither tab root has a back button
+ * to take the left. Servers sits inside Settings. New thread is the last item in the tab bar.
  */
-export function rootHeader(navigation: Navigate, { newThread = false }: { newThread?: boolean } = {}) {
+export function rootHeader(navigation: Navigate) {
   return {
-    headerLeft: () => <HeaderButton label="Search" onPress={() => navigation.navigate('Search')} />,
-    headerRight: () => (
-      <View style={styles.actions}>
-        <HeaderButton label="Settings" onPress={() => navigation.navigate('Settings')} />
-        {newThread ? <HeaderButton label="New" accessibilityLabel="New thread" onPress={() => navigation.navigate('NewThread')} /> : null}
-      </View>
-    ),
+    headerLeft: () => <HeaderButton label="Search" icon="search" onPress={() => navigation.navigate('Search')} />,
+    headerRight: () => <HeaderButton label="Settings" icon="settings" onPress={() => navigation.navigate('Settings')} />,
   };
 }
 
@@ -62,7 +65,12 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
         options={({ navigation, route }) => ({
           title: 'Channel',
           headerBackTitle: backTitle,
-          headerRight: () => <HeaderButton label="New" accessibilityLabel="New thread" onPress={() => navigation.navigate('NewThread', { channel: route.params.id })} />,
+          headerRight: () => (
+            <View style={styles.actions}>
+              <HeaderButton label="Channel settings" icon="sliders" onPress={() => navigation.navigate('ChannelSettings', { id: route.params.id })} />
+              <HeaderButton label="New thread" icon="plus" onPress={() => navigation.navigate('NewThread', { channel: route.params.id })} />
+            </View>
+          ),
         })}
       />
       <Stack.Screen name="NewThread" component={NewThreadScreen} options={{ title: 'New thread', presentation: 'modal' }} />
@@ -71,6 +79,10 @@ export function detailScreens({ backTitle }: { backTitle: string }) {
       <Stack.Screen name="Artifact" component={ArtifactScreen} options={{ title: 'Artifact', headerBackTitle: 'Back' }} />
       <Stack.Screen name="Search" component={SearchScreen} options={{ title: 'Search', headerBackTitle: backTitle }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', headerBackTitle: backTitle }} />
+      <Stack.Screen name="SettingsSection" component={SettingsSectionScreen} options={{ title: 'Settings', headerBackTitle: 'Settings' }} />
+      <Stack.Screen name="ChannelSettings" component={ChannelSettingsScreen} options={{ title: 'Channel settings', headerBackTitle: 'Back' }} />
+      <Stack.Screen name="ChannelAction" component={ChannelActionScreen} options={{ title: 'Action', presentation: 'modal' }} />
+      <Stack.Screen name="Secrets" component={SecretsScreen} options={{ title: 'Secrets', headerBackTitle: 'Back' }} />
       <Stack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Devices', headerBackTitle: 'Settings' }} />
       <Stack.Screen name="Automations" component={AutomationsScreen} options={{ title: 'Automations', headerBackTitle: 'Settings' }} />
       <Stack.Screen name="Changes" component={ChangesScreen} options={{ title: 'Changes', headerBackTitle: 'Thread' }} />

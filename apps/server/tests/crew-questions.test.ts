@@ -145,6 +145,60 @@ describe('a delegated thread asks', () => {
     expect(await asking()).toContain(conductor.id);
   });
 
+  it('shows the crew questions of the thread it continues on the continued thread too, and clears them on both', T, async () => {
+    const { continuations } = await import('../db.ts');
+    const first = await idle('be the conductor');
+    const child = await busy('pick a market', { parent_id: first.id, title: 'Pick a market' });
+    const next = await idle('be the conductor, continued');
+    continuations.link(next.id, first.id);
+    const qid = await ask(child.id);
+
+    for (const where of [first.id, next.id]) expect((await crew(where)).map((c) => [c.thread_id, c.question.id])).toEqual([[child.id, qid]]);
+    // Needs you shows it on the continued thread, where Ben works now, not the one it continues.
+    expect(await asking()).toContain(next.id);
+    expect(await asking()).not.toContain(first.id);
+    // Only forward: what the continued thread delegates does not ask on the one it continues.
+    const later = await busy('pick a channel', { parent_id: next.id });
+    const qid2 = await ask(later.id);
+    expect((await crew(next.id)).map((c) => c.question.id)).toEqual([qid, qid2]);
+    expect((await crew(first.id)).map((c) => c.question.id)).toEqual([qid]);
+
+    const [shown] = await crew(next.id);
+    expect((await answer(shown.thread_id, shown.question.id, [{ selected: ['NL'], other: null }])).status).toBe(200);
+    expect((await crew(first.id)).map((c) => c.question.id)).toEqual([]);
+    expect((await crew(next.id)).map((c) => c.question.id)).toEqual([qid2]);
+  });
+
+  it('brings the continued thread back out of done for a question, and leaves the one it continues done', T, async () => {
+    const { continuations } = await import('../db.ts');
+    const first = await idle('be the conductor');
+    const child = await busy('pick a market', { parent_id: first.id });
+    const next = await idle('be the conductor, continued');
+    continuations.link(next.id, first.id);
+    for (const t of [first, next]) await ok('PATCH', `/threads/${t.id}`, { done: true });
+    await ask(child.id);
+    expect(h.thread(next.id).done_at).toBeNull();
+    expect(h.thread(first.id).done_at).not.toBeNull();
+    expect(await asking()).toContain(next.id);
+  });
+
+  it('lists the question on the live end of a continued chain whose middle and start are archived', T, async () => {
+    const { continuations } = await import('../db.ts');
+    const a = await idle('be the conductor');
+    const child = await busy('pick a market', { parent_id: a.id });
+    const b = await idle('be the conductor, continued');
+    const c = await idle('be the conductor, continued again');
+    continuations.link(b.id, a.id);
+    continuations.link(c.id, b.id);
+    for (const t of [a, b]) await ok('PATCH', `/threads/${t.id}`, { archived: true });
+    const qid = await ask(child.id);
+    const needs = await asking();
+    expect(needs).toContain(c.id);
+    expect(needs).not.toContain(a.id);
+    expect(needs).not.toContain(b.id);
+    expect((await crew(c.id)).map((q) => q.question.id)).toEqual([qid]);
+  });
+
   it('keeps a thread nobody delegated as it was: its question waits on itself', T, async () => {
     const solo = await busy('plan alone');
     await ask(solo.id);
@@ -174,5 +228,23 @@ describe('ask_user_question from a delegated agent', () => {
     expect(h.texts(child.id, 'assistant_text').at(-1)).toBe(`ack: ASK_ONE plan the quarter | ${said}`);
     expect(h.thread(child.id).status).toBe('done');
     expect(await crew(conductor.id)).toEqual([]);
+  });
+
+  it('clears the card on the delegating thread when Ben answers in the delegated one, and the agent goes on', { timeout: 60_000 }, async () => {
+    const conductor = await idle('be the conductor');
+    const child = await h.start('ASK_ONE plan the quarter', { parent_id: conductor.id });
+    await h.until('the question card', () => h.byKind(child.id, 'question')[0], 25_000);
+    expect((await crew(conductor.id)).map((c) => c.thread_id)).toEqual([child.id]);
+    expect(await asking()).toContain(conductor.id);
+
+    await sleep(1000);
+    const qid = h.byKind(child.id, 'question')[0]!.p.id as string;
+    expect((await answer(child.id, qid, [{ selected: ['KE go-live'], other: null }])).body).toEqual({ state: 'answered', via: 'tool' });
+    expect(await crew(conductor.id)).toEqual([]);
+    expect(await asking()).not.toContain(conductor.id);
+    await h.untilResults(child.id, 1);
+    expect(h.texts(child.id, 'assistant_text').at(-1)).toContain('"Which Q4 goal should get the most of your time between now and December?"="KE go-live"');
+    // The card on the delegating thread is gone, so a late answer from it is refused rather than sent twice.
+    expect((await answer(child.id, qid, [{ selected: ['Acne POC'], other: null }])).status).toBe(409);
   });
 });

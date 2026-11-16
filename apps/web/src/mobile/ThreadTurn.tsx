@@ -1,3 +1,4 @@
+import { PHASE, type TurnPhase } from '@omni/shared/status.ts';
 import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { useApi, type Artifact, type BranchChanges, type Channel, type Thread } from '../api.ts';
 import { Attachments, SwitchLine } from '../components/Transcript.tsx';
@@ -7,6 +8,8 @@ import { CloudAgentCard } from '../components/thread/CloudAgentCard.tsx';
 import { ClippedNote } from '../components/thread/HistoryEdgeRow.tsx';
 import type { useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { OmniMark } from '../components/brand.tsx';
+import { Avatar } from '../components/ui.tsx';
+import { hasOwnLook } from '@omni/shared/channel-icon.ts';
 import { ThinkingLine } from '../components/thread/ThinkingLine.tsx';
 import { ContextChips, hasContext } from '../message-context/ContextChips.tsx';
 import { changesView } from '@omni/shared/changes-view.ts';
@@ -17,9 +20,9 @@ import { HtmlRender } from '../components/HtmlRender.tsx';
 import { ArtifactCard, ChangesCard, Clamped, Delegation, MoProse, NowLine, Outcome, Plan, Report, StepsRow, type TurnView } from './ThreadCards.tsx';
 import { MoBubble } from './parts.tsx';
 import { shortTime } from './rows.ts';
+import { limitLabel } from '../limits.ts';
 import type { useShell, useThread } from './shell.tsx';
 import type { ThreadView as ThreadOf } from '@omni/shared/thread-view.ts';
-import { showsRunning } from '@omni/shared/delegate-count.ts';
 
 /** A worktree thread's changes since its base, again whenever a turn starts or ends. */
 export function useBranchChanges(thread: Thread | null, busy: boolean) {
@@ -44,18 +47,22 @@ export type TurnCtx = {
   files: Artifact[];
   history: ReturnType<typeof useThread>['history'];
   conductor: boolean;
+  /** The Conductor's channel, for its saved icon and background on the turns it answered. */
+  conductorChannel: Channel | undefined;
   crew: Thread[];
   ch: Channel | undefined;
   changes: ReturnType<typeof useBranchChanges>;
-  pr: ReturnType<typeof useThreadPR>;
+  pr: ReturnType<typeof useThreadPR>[0];
   now: number;
   shell: ReturnType<typeof useShell>;
   /** The running turn's latest status (`statusLabel`), null for the default. */
   status: string | null;
+  /** What the running turn is doing (`turnPhase`), for the thinking line's dot. */
+  turn: TurnPhase | null;
 };
 
 function TurnBody({ t, last, c }: { t: TurnView; last: boolean; c: TurnCtx }) {
-  const { view, conductor, crew, ch, thread, changes, pr, now, shell } = c;
+  const { view, conductor, conductorChannel, ch, thread, changes, pr, now, shell } = c;
   const steps = (t: TurnView) => shell.open(href.threadView(thread.id, 'steps', t.key));
   const viewer = (a: Artifact) => shell.open(href.thread(thread.id, a.id));
     const delegated = t.children.length > 0 && <Delegation kids={t.children} />;
@@ -65,7 +72,7 @@ function TurnBody({ t, last, c }: { t: TurnView; last: boolean; c: TurnCtx }) {
           {t.status === 'queued' ? (
             <NowLine now={{ verb: 'Waiting for a free slot', target: '' }} />
           ) : (
-            <ThinkingLine label={c.status ?? 'Thinking'} since={t.at || thread.created_at} className="rounded-2xl bg-surface px-3.5 py-3 text-[14px]" />
+            <ThinkingLine label={c.status ?? (c.turn === 'starting' ? PHASE.starting.label : 'Thinking')} phase={c.turn ?? 'working'} since={t.at || thread.created_at} className="rounded-2xl bg-surface px-3.5 py-3 text-[14px]" />
           )}
           {view.plan && <Plan plan={view.plan} />}
           {t.cloud && <CloudAgentCard p={t.cloud} />}
@@ -74,17 +81,22 @@ function TurnBody({ t, last, c }: { t: TurnView; last: boolean; c: TurnCtx }) {
         </>
       );
     }
-    // The Conductor's answer introduces what it delegated, so it reads before the card, under its own name.
+    // The Conductor's answer introduces what it delegated, so it reads before the card, under its own name and face:
+    // the icon and background saved for it, else the Omni mark.
     const quiet = conductor && t.status === 'done';
     return (
       <>
         {quiet && (t.prose || delegated) ? (
           <div className="flex items-center gap-2 text-[12.5px] leading-none text-fg-3">
-            <OmniMark size={20} state={crew.some(showsRunning) ? 'delegating' : 'idle'} />
+            {conductorChannel && hasOwnLook(conductorChannel) ? (
+              <Avatar name={conductorChannel.name} omni channelIcon={conductorChannel.icon} avatarBg={conductorChannel.avatar_bg} size={20} />
+            ) : (
+              <OmniMark size={20} />
+            )}
             Conductor
           </div>
         ) : (
-          (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={t.harness} />
+          (t.result || t.error || t.status !== 'done') && <Outcome t={t} harness={t.harness} limit={last ? limitLabel(thread, now) : null} />
         )}
         {t.error && <Clamped text={t.error} />}
         {t.cloud && <CloudAgentCard p={t.cloud} />}

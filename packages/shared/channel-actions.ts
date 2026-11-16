@@ -24,6 +24,12 @@ export interface ChannelAction {
    * agent starts, which waits for it to succeed, or `background` alongside the agent. Null on every other action.
    */
   setup: SetupMode | null;
+  /**
+   * Set on the one action the channel runs in a thread's worktree right before Omni removes it (a cleanup in
+   * Settings > Worktrees or the retention pass), to stop a preview or delete a preview theme. A failure or a run past
+   * the time limit is recorded on the thread, and the worktree is removed anyway.
+   */
+  teardown: boolean;
   position: number;
   created_at: string;
   updated_at: string;
@@ -45,6 +51,8 @@ export interface ChannelActionInput {
   port?: number | null;
   /** Make it the channel's setup action, or not. Setting it on one action takes it off any other. */
   setup?: SetupMode | null;
+  /** Make it the channel's teardown action, or not. Setting it on one action takes it off any other. */
+  teardown?: boolean;
 }
 
 export type ActionRunState = 'running' | 'succeeded' | 'failed' | 'stopped';
@@ -73,6 +81,14 @@ export interface ActionRun {
   ended_at: string | null;
 }
 
+/** A clone of the channel's GitHub repo that a preparing thread waits on (apps/server/repo-clone.ts). */
+export interface RepoClone {
+  /** owner/name on GitHub. */
+  repo: string;
+  /** The folder it goes to, with the home folder as "~". */
+  into: string;
+}
+
 /** GET /api/threads/:id/actions: the channel's actions, the thread's latest runs, and why none can run now. */
 export interface ThreadActions {
   actions: ChannelAction[];
@@ -84,6 +100,8 @@ export interface ThreadActions {
    * has none. While the thread is preparing it is the step between the checkout and the agent.
    */
   setup_run: ActionRun | null;
+  /** While the thread is preparing: the clone of the channel's repo it waits on, the step before the checkout. */
+  clone: RepoClone | null;
 }
 
 /** How many characters of a run's output are kept: the end, where a failure says why. */
@@ -111,3 +129,71 @@ export function withRun(data: ThreadActions, run: ActionRun): ThreadActions {
   const runs = data.runs.some((r) => r.id === run.id) ? data.runs.map((r) => (r.id === run.id ? run : r)) : [run, ...data.runs];
   return { ...data, runs, setup_run: data.setup_run?.id === run.id ? run : data.setup_run };
 }
+
+// ---------- the channel settings editor ----------
+
+export type PortMode = 'none' | 'free' | 'fixed';
+
+/** The editor's fields as typed. `port` is the fixed port's text, kept while another mode is picked. */
+export interface ActionDraft {
+  name: string;
+  command: string;
+  secrets: string;
+  portMode: PortMode;
+  port: string;
+  setup: SetupMode | null;
+  teardown: boolean;
+}
+
+export function draftOf(a?: ChannelAction): ActionDraft {
+  return {
+    name: a?.name ?? '',
+    command: a?.command ?? '',
+    secrets: a?.secrets.join(', ') ?? '',
+    portMode: a?.port == null ? 'none' : a.port === 0 ? 'free' : 'fixed',
+    port: a?.port ? String(a.port) : '',
+    setup: a?.setup ?? null,
+    teardown: a?.teardown ?? false,
+  };
+}
+
+/** Secret names as typed: comma or space separated, upper-cased, each once. */
+export const parseSecrets = (text: string) => [...new Set(text.toUpperCase().split(/[\s,]+/).filter(Boolean))];
+
+/**
+ * What POST or PATCH sends, always with `setup` and `teardown`: PATCH replaces the whole action, so leaving it out would clear it.
+ * The server checks the rest; this only catches a fixed port with no number, which would read as 0.
+ */
+export function actionInput(d: ActionDraft): { input: ChannelActionInput } | { error: string } {
+  let port: number | null = null;
+  if (d.portMode === 'free') port = 0;
+  if (d.portMode === 'fixed') {
+    if (!/^\d+$/.test(d.port.trim()) || Number(d.port) === 0) return { error: 'Give the fixed port a number, like 9292.' };
+    port = Number(d.port);
+  }
+  return { input: { name: d.name.trim(), command: d.command.trim(), secrets: parseSecrets(d.secrets), port, setup: d.setup, teardown: d.teardown } };
+}
+
+/** What each "Run in new worktrees" choice does, under the editor's picker. */
+export const ACTION_SETUP_HINT: Record<SetupMode | 'off', string> = {
+  off: "Runs only from a thread's Actions tab. One action in the channel can also run in each new worktree.",
+  blocking:
+    'Runs once in each new worktree and holds the agent until it succeeds. If it fails, the thread stops at Setup failed with Retry setup. Never on Hermes, Cursor Cloud or a shared checkout.',
+  background: 'Runs once in each new worktree while the agent starts. If it fails, the thread says so and the agent keeps going. Never on Hermes, Cursor Cloud or a shared checkout.',
+};
+
+/** How long a teardown action may run before Omni stops it and removes the worktree anyway. */
+export const TEARDOWN_LIMIT_MINUTES = 5;
+
+/** What each "Run before removal" choice does, under the editor's picker. */
+export const ACTION_TEARDOWN_HINT: Record<'off' | 'on', string> = {
+  off: 'One action in the channel can run in a worktree right before Omni removes it, to stop a preview or delete a preview theme.',
+  on: `Runs in the worktree right before a cleanup or the retention pass removes it. If it fails or runs past ${TEARDOWN_LIMIT_MINUTES} minutes, the thread's Actions tab says so and the worktree is removed anyway.`,
+};
+
+/** What each port choice does, under the editor's picker. */
+export const ACTION_PORT_HINT: Record<PortMode, string> = {
+  none: 'The command serves nothing.',
+  free: 'Omni picks a free port each run, so two threads can preview at once. The command reads it as $OMNI_PORT.',
+  fixed: 'Always this port. A second run while it is taken is refused.',
+};

@@ -7,7 +7,9 @@ import { startRunner } from './runner-boot.ts';
 const r = await startRunner();
 const { askQuestion } = await import('../runner/questions.ts');
 const { failSetup } = await import('../runner/setup.ts');
-const { installPushSender, noopPushSender, notifyCrewReport, notifyEnded } = await import('../push-sender.ts');
+const { alertFor, installPushSender, noopPushSender, notifyCrewReport, notifyEnded, notifyPRAttention, payloadFor } = await import('../push-sender.ts');
+const { bus } = await import('../bus.ts');
+type FeedEvent = import('../bus.ts').FeedEvent;
 type PushEvent = import('../push-sender.ts').PushEvent;
 type ThreadStatus = import('../db.ts').ThreadStatus;
 
@@ -22,14 +24,22 @@ const Q = {
 };
 
 let sent: PushEvent[] = [];
+/** The feed's `alert` events: what the Web UI and the desktop app notify for, beside the phone's push. */
+let feed: Extract<FeedEvent, { type: 'alert' }>['alert'][] = [];
+const onFeed = (e: FeedEvent) => void (e.type === 'alert' && feed.push(e.alert));
 beforeEach(() => {
   sent = [];
-  installPushSender({ configured: true, send: (event) => void sent.push(event) });
+  feed = [];
+  bus.on('feed', onFeed);
+  installPushSender({ configured: true, send: (event) => void sent.push(event), close() {} });
 });
-afterEach(() => installPushSender(noopPushSender));
+afterEach(() => {
+  bus.off('feed', onFeed);
+  installPushSender(noopPushSender);
+});
 
 let n = 0;
-function thread(over: { channel?: string; parent?: string | null } = {}) {
+function thread(over: { channel?: string; parent?: string | null; task?: string | null } = {}) {
   const id = `trigger-${++n}`;
   r.db.threads.create({
     id,
@@ -42,7 +52,7 @@ function thread(over: { channel?: string; parent?: string | null } = {}) {
     cwd: r.tmp,
     branch: null,
     parent_id: over.parent ?? null,
-    task_id: null,
+    task_id: over.task ?? null,
     source: 'manual',
     automation: null,
   });
@@ -53,21 +63,82 @@ describe('a thread needs input', () => {
   it('alerts when the agent asks a question, with the thread and its channel', () => {
     const id = thread({ channel: 'scratch' });
     askQuestion(id, [Q]);
-    expect(sent).toEqual([{ kind: 'needsInput', threadId: id, channelId: 'scratch' }]);
+    expect(sent).toEqual([{ kind: 'needsInput', threadId: id, channelId: 'scratch', title: id, text: Q.question }]);
+  });
+
+  it("opens a delegated thread's question on the thread Ben delegated from, naming the thread that asked", () => {
+    const conductor = thread({ channel: 'conductor' });
+    const lead = thread({ channel: 'scratch', parent: conductor });
+    const member = thread({ channel: 'scratch', parent: lead, task: 'T-ASK' });
+    askQuestion(member, [Q]);
+    expect(sent).toEqual([{ kind: 'needsInput', threadId: conductor, channelId: 'conductor', title: conductor, text: Q.question, from: `T-ASK · ${member}`, askerId: member }]);
+    expect(alertFor(sent[0]!)).toEqual({ title: conductor, subtitle: `Needs your answer: T-ASK · ${member}`, body: Q.question });
+  });
+
+  it('opens it on the newest thread that continues the delegating one, never an archived one', () => {
+    const conductor = thread({ channel: 'conductor' });
+    const child = thread({ parent: conductor, task: 'T-CONT' });
+    const next = thread({ channel: 'conductor' });
+    const newest = thread({ channel: 'conductor' });
+    const shelved = thread({ channel: 'conductor' });
+    r.db.continuations.link(next, conductor);
+    r.db.continuations.link(newest, next);
+    r.db.continuations.link(shelved, newest);
+    r.db.threads.update(shelved, { archived: 1 });
+    askQuestion(child, [Q]);
+    expect(sent).toEqual([{ kind: 'needsInput', threadId: newest, channelId: 'conductor', title: newest, text: Q.question, from: `T-CONT · ${child}`, askerId: child }]);
+    expect(JSON.parse(payloadFor(sent[0]!)).omni).toEqual({ kind: 'needsInput', threadId: newest, channelId: 'conductor', askerId: child });
+  });
+
+  it('follows the continuations through archived threads to the live one after them', () => {
+    const a = thread({ channel: 'conductor' });
+    const child = thread({ parent: a });
+    const b = thread({ channel: 'conductor' });
+    const c = thread({ channel: 'conductor' });
+    r.db.continuations.link(b, a);
+    r.db.continuations.link(c, b);
+    r.db.threads.update(b, { archived: 1 });
+    expect(r.db.threads.home(child)).toBe(c);
+    // The first thread archived too: still the live one at the end.
+    r.db.threads.update(a, { archived: 1 });
+    askQuestion(child, [Q]);
+    expect(sent.map((e) => e.threadId)).toEqual([c]);
+    // Nothing live along the chain: the thread Ben delegated from, as before.
+    r.db.threads.update(c, { archived: 1 });
+    expect(r.db.threads.home(child)).toBe(a);
+  });
+
+  it("keeps a continued thread's own question on itself: nobody delegated it", () => {
+    const solo = thread();
+    const next = thread();
+    r.db.continuations.link(next, solo);
+    askQuestion(solo, [Q]);
+    expect(sent.map((e) => [e.threadId, e.askerId])).toEqual([[solo, undefined]]);
   });
 });
 
 describe('a turn ends', () => {
-  it('alerts when a thread finishes', () => {
+  it('alerts when a thread finishes, with its title and reply', () => {
     const id = thread();
-    notifyEnded(id, 'done');
-    expect(sent).toEqual([{ kind: 'finished', threadId: id, channelId: 'scratch' }]);
+    notifyEnded(id, 'done', 'All three surfaces pass.');
+    expect(sent).toEqual([{ kind: 'finished', threadId: id, channelId: 'scratch', title: id, text: 'All three surfaces pass.' }]);
   });
 
   it('alerts when a thread fails', () => {
     const id = thread();
     notifyEnded(id, 'failed');
-    expect(sent).toEqual([{ kind: 'failed', threadId: id, channelId: 'scratch' }]);
+    expect(sent).toEqual([{ kind: 'failed', threadId: id, channelId: 'scratch', title: id, text: null }]);
+  });
+
+  it('previews the last reply of the turn, not the narration before it', () => {
+    const id = thread();
+    r.db.events.add(id, 'user', { text: 'Fix it' });
+    r.db.events.add(id, 'assistant_text', { text: 'Let me look at the sender.' });
+    r.db.events.add(id, 'tool_use', { id: 'tu1', name: 'Read', input: {} });
+    r.db.events.add(id, 'assistant_text', { text: 'Fixed: alerts now show a preview.' });
+    expect(r.db.events.lastRunReply(id)).toBe('Fixed: alerts now show a preview.');
+    r.db.events.add(id, 'user', { text: 'Thanks' });
+    expect(r.db.events.lastRunReply(id)).toBe('');
   });
 
   it('stays quiet for a thread Ben stopped or one that is queued', () => {
@@ -82,7 +153,23 @@ describe('a turn ends', () => {
     notifyEnded(child, 'done');
     expect(sent).toEqual([]);
     notifyEnded(child, 'failed');
-    expect(sent).toEqual([{ kind: 'failed', threadId: child, channelId: 'scratch' }]);
+    expect(sent).toEqual([{ kind: 'failed', threadId: child, channelId: 'scratch', title: child, text: null }]);
+  });
+});
+
+describe('a live turn', () => {
+  it('alerts with the thread title and the reply the turn ended on, as plain text', async () => {
+    const t = await r.start('RICH and **bold** with a [link](https://example.com)');
+    await r.untilResults(t.id, 1);
+    const finished = sent.filter((e) => e.threadId === t.id && e.kind === 'finished');
+    expect(finished).toHaveLength(1);
+    const replies = r.texts(t.id, 'assistant_text');
+    expect(finished[0].text).toBe(replies.at(-1));
+    expect(alertFor(finished[0])).toEqual({
+      title: r.thread(t.id).title,
+      subtitle: 'Finished',
+      body: 'ack: RICH and bold with a link',
+    });
   });
 });
 
@@ -90,7 +177,9 @@ describe('a thread that could not be prepared', () => {
   it('alerts as failed when its worktree cannot be made', () => {
     const id = thread();
     failSetup(id, 'git worktree add failed');
-    expect(sent).toEqual([{ kind: 'failed', threadId: id, channelId: 'scratch' }]);
+    expect(sent).toEqual([
+      { kind: 'failed', threadId: id, channelId: 'scratch', title: id, text: "Omni could not prepare this thread's worktree: git worktree add failed" },
+    ]);
   });
 
   it('stays quiet when Ben stopped it while it was being prepared', () => {
@@ -102,12 +191,43 @@ describe('a thread that could not be prepared', () => {
 describe('a crew report', () => {
   it('alerts when it lands in the Conductor', () => {
     const conductorThread = thread({ channel: 'conductor' });
-    notifyCrewReport(conductorThread);
-    expect(sent).toEqual([{ kind: 'crewReport', threadId: conductorThread, channelId: 'conductor' }]);
+    notifyCrewReport(conductorThread, { text: 'PR opened.', title: 'Fix push previews', status: 'done' });
+    expect(sent).toEqual([
+      { kind: 'crewReport', threadId: conductorThread, channelId: 'conductor', title: conductorThread, text: 'PR opened.', from: 'Fix push previews' },
+    ]);
+    expect(feed).toEqual([
+      { id: expect.stringMatching(/^crew:/), kind: 'crewReport', thread_id: conductorThread, channel_id: 'conductor', title: conductorThread, body: 'Fix push previews: PR opened.', at: expect.any(String) },
+    ]);
+  });
+
+  it('gives each report its own feed alert, so a second report is not taken for the first', () => {
+    const conductorThread = thread({ channel: 'conductor' });
+    notifyCrewReport(conductorThread, { text: 'One.' });
+    notifyCrewReport(conductorThread, { text: 'Two.' });
+    expect(feed.map((a) => a.body)).toEqual(['One.', 'Two.']);
+    expect(new Set(feed.map((a) => a.id)).size).toBe(2);
   });
 
   it('does not alert for a report that lands in another channel', () => {
     notifyCrewReport(thread({ channel: 'scratch' }));
+    expect(sent).toEqual([]);
+    expect(feed).toEqual([]);
+  });
+});
+
+describe('a PR needs attention', () => {
+  it('posts a feed alert keyed by the wake, and one phone push aimed at the thread', () => {
+    const id = thread({ channel: 'scratch' });
+    notifyPRAttention(id, '#12 at abc1234. CI failed: CI / build', 'req-1');
+    expect(feed).toEqual([
+      { id: `pr:${id}:req-1`, kind: 'prAttention', thread_id: id, channel_id: 'scratch', title: id, body: '#12 at abc1234. CI failed: CI / build', at: expect.any(String) },
+    ]);
+    expect(sent).toEqual([{ kind: 'prAttention', threadId: id, channelId: 'scratch', title: id, text: '#12 at abc1234. CI failed: CI / build' }]);
+  });
+
+  it('says nothing for a thread that is gone', () => {
+    notifyPRAttention('no-such-thread', '#1', 'req');
+    expect(feed).toEqual([]);
     expect(sent).toEqual([]);
   });
 });

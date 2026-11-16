@@ -1,3 +1,4 @@
+import { tabIcon, type TabIconName } from './tab-icons';
 import {
   createNavigatorFactory,
   TabActions,
@@ -14,6 +15,7 @@ import {
   type TypedNavigator,
 } from '@react-navigation/native';
 import { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { Tabs, type TabsScreenAppearanceIOS } from 'react-native-screens';
 
 import { useOmniTheme } from '../theme';
@@ -21,9 +23,8 @@ import { tabBarHidden } from './tabs-model';
 
 export interface NativeTabOptions {
   title: string;
-  /** SF Symbol names. */
-  icon: string;
-  selectedIcon?: string;
+  /** Shared drawing used by UIKit as a template image. */
+  icon: TabIconName;
   /** Hidden when undefined. */
   tabBadge?: string;
   /** Read in place of the title, as when the badge needs saying. */
@@ -43,7 +44,20 @@ type NativeTabsProps = DefaultNavigatorOptions<
   NativeTabsEventMap,
   NativeTabsNavigationProp<ParamListBase>
 > &
-  TabRouterOptions;
+  TabRouterOptions & {
+    /** An item after the tabs that UIKit never selects: a tap runs `onPress` with the focused tab's route name. */
+    action?: NativeTabAction;
+  };
+
+export interface NativeTabAction {
+  /** Must not match a route name. */
+  key: string;
+  title: string;
+  /** Shared drawing. */
+  icon: TabIconName;
+  accessibilityLabel: string;
+  onPress: (tab: string) => void;
+}
 
 export type NativeTabsNavigationProp<
   ParamList extends ParamListBase,
@@ -56,7 +70,7 @@ export type NativeTabsNavigationProp<
  * UIKit's tab bar driven by React Navigation's tab router. Native owns the selection: JS asks for a tab through
  * `navStateRequest`, quoting the last provenance native confirmed, and follows a tap by jumping its own state there.
  */
-function NativeTabsNavigator({ id, initialRouteName, backBehavior, children, layout, screenListeners, screenOptions, screenLayout, UNSTABLE_router }: NativeTabsProps) {
+function NativeTabsNavigator({ id, initialRouteName, backBehavior, children, layout, screenListeners, screenOptions, screenLayout, UNSTABLE_router, action }: NativeTabsProps) {
   const { state, descriptors, navigation, NavigationContent } = useNavigationBuilder<
     TabNavigationState<ParamListBase>,
     TabRouterOptions,
@@ -67,6 +81,7 @@ function NativeTabsNavigator({ id, initialRouteName, backBehavior, children, lay
   const { scheme, colors } = useOmniTheme();
   const [provenance, setProvenance] = useState(0);
   const focused = state.routes[state.index]!;
+  const hidden = tabBarHidden(state);
 
   const item = (color: string) => ({ tabBarItemTitleFontColor: color, tabBarItemIconColor: color });
   const appearance: TabsScreenAppearanceIOS = {
@@ -78,52 +93,78 @@ function NativeTabsNavigator({ id, initialRouteName, backBehavior, children, lay
 
   return (
     <NavigationContent>
-      <Tabs.Host
-        navStateRequest={{ selectedScreenKey: focused.name, baseProvenance: provenance }}
-        tabBarHidden={tabBarHidden(state)}
-        colorScheme={scheme}
-        nativeContainerStyle={{ backgroundColor: colors.bg }}
-        ios={{ tabBarTintColor: colors.fg, tabBarControllerMode: 'tabBar', tabBarMinimizeBehavior: 'never' }}
-        onTabSelectionRejected={({ nativeEvent }) => setProvenance(nativeEvent.provenance)}
-        onTabSelected={({ nativeEvent }) => {
-          setProvenance(nativeEvent.provenance);
-          if (nativeEvent.actionOrigin === 'programmatic-js') return;
-          const route = state.routes.find((r) => r.name === nativeEvent.selectedScreenKey);
-          if (!route) return;
-          navigation.emit({
-            type: 'tabPress',
-            target: route.key,
-            data: nativeEvent.hasTriggeredSpecialEffect ? { origin: 'native' } : {},
-          });
-          if (route.key !== focused.key) navigation.dispatch({ ...TabActions.jumpTo(route.name), target: state.key });
-        }}
-      >
-        {state.routes.map((route) => {
-          const { options, render } = descriptors[route.key]!;
-          return (
+      <View style={styles.fill}>
+        <Tabs.Host
+          navStateRequest={{ selectedScreenKey: focused.name, baseProvenance: provenance }}
+          tabBarHidden={hidden}
+          colorScheme={scheme}
+          nativeContainerStyle={{ backgroundColor: colors.bg }}
+          ios={{ tabBarTintColor: colors.fg, tabBarControllerMode: 'tabBar', tabBarMinimizeBehavior: 'never' }}
+          onTabSelectionRejected={({ nativeEvent }) => setProvenance(nativeEvent.provenance)}
+          onTabSelectionPrevented={({ nativeEvent }) => {
+            setProvenance(nativeEvent.provenance);
+            if (action && nativeEvent.preventedScreenKey === action.key) action.onPress(focused.name);
+          }}
+          onTabSelected={({ nativeEvent }) => {
+            setProvenance(nativeEvent.provenance);
+            if (nativeEvent.actionOrigin === 'programmatic-js') return;
+            const route = state.routes.find((r) => r.name === nativeEvent.selectedScreenKey);
+            if (!route) return;
+            navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              data: nativeEvent.hasTriggeredSpecialEffect ? { origin: 'native' } : {},
+            });
+            if (route.key !== focused.key) navigation.dispatch({ ...TabActions.jumpTo(route.name), target: state.key });
+          }}
+        >
+          {state.routes.map((route) => {
+            const { options, render } = descriptors[route.key]!;
+            return (
+              <Tabs.Screen
+                key={route.key}
+                screenKey={route.name}
+                title={options.title}
+                badgeValue={options.tabBadge}
+                tabBarItemAccessibilityLabel={options.tabAccessibilityLabel ?? options.title}
+                specialEffects={{ repeatedTabSelection: { popToRoot: true, scrollToTop: true } }}
+                style={{ backgroundColor: colors.bg }}
+                ios={{
+                  icon: tabIcon(options.icon),
+                  standardAppearance: appearance,
+                  scrollEdgeAppearance: appearance,
+                }}
+              >
+                {render()}
+              </Tabs.Screen>
+            );
+          })}
+          {action ? (
             <Tabs.Screen
-              key={route.key}
-              screenKey={route.name}
-              title={options.title}
-              badgeValue={options.tabBadge}
-              tabBarItemAccessibilityLabel={options.tabAccessibilityLabel ?? options.title}
-              specialEffects={{ repeatedTabSelection: { popToRoot: true, scrollToTop: true } }}
+              key={action.key}
+              screenKey={action.key}
+              title={action.title}
+              preventNativeSelection
+              tabBarItemAccessibilityLabel={action.accessibilityLabel}
               style={{ backgroundColor: colors.bg }}
               ios={{
-                icon: { type: 'sfSymbol', name: options.icon },
-                selectedIcon: { type: 'sfSymbol', name: options.selectedIcon ?? options.icon },
+                icon: tabIcon(action.icon),
                 standardAppearance: appearance,
                 scrollEdgeAppearance: appearance,
               }}
             >
-              {render()}
+              <View style={styles.fill} />
             </Tabs.Screen>
-          );
-        })}
-      </Tabs.Host>
+          ) : null}
+        </Tabs.Host>
+      </View>
     </NavigationContent>
   );
 }
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+});
 
 export type NativeTabsTypeBag<ParamList extends ParamListBase = ParamListBase, NavigatorID extends string | undefined = string | undefined> = {
   ParamList: ParamList;

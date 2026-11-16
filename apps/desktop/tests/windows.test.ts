@@ -7,7 +7,10 @@ import {
   linkTarget,
   nextWindowState,
   parseWindowState,
+  plainClick,
   recentGesture,
+  mayPairAgain,
+  PAIR_AGAIN_MS,
   restoreBounds,
   staysInWindow,
   subframeNavigationAllowed,
@@ -15,6 +18,13 @@ import {
 } from '../src/window-rules.ts';
 
 const origins = { app: 'http://127.0.0.1:4747', server: 'http://127.0.0.1:4747' };
+
+describe('plainClick', () => {
+  it('is a plain click or window.open, not a modifier or middle click', () => {
+    expect(plainClick('foreground-tab')).toBe(true);
+    for (const d of ['background-tab', 'new-window', 'default', 'other']) expect(plainClick(d), d).toBe(false);
+  });
+});
 
 describe('linkTarget', () => {
   it('opens a Web UI route in an Omni window', () => {
@@ -35,6 +45,9 @@ describe('linkTarget', () => {
   it('sends the web to the default browser and drops the rest', () => {
     expect(linkTarget('https://github.com/x', origins)).toEqual({ kind: 'external', url: 'https://github.com/x' });
     expect(linkTarget('mailto:a@b.c', origins).kind).toBe('external');
+    // A claude.ai artifact (the Artifacts page's claude.ai list) in either link form.
+    expect(linkTarget('https://claude.ai/artifact/QSdTnbQX1opbT77DCnKk1J', origins)).toEqual({ kind: 'external', url: 'https://claude.ai/artifact/QSdTnbQX1opbT77DCnKk1J' });
+    expect(linkTarget('https://claude.ai/code/artifact/f7567ad1-8b55-4689-b824-1a865c7fe003', origins).kind).toBe('external');
     expect(linkTarget('file:///etc/passwd', origins).kind).toBe('none');
     expect(linkTarget('javascript:alert(1)', origins).kind).toBe('none');
     expect(linkTarget('not a url', origins).kind).toBe('none');
@@ -85,11 +98,19 @@ describe('window state', () => {
 });
 
 describe('trafficLights', () => {
-  it('sits in the sidebar row, or above the phone layout', () => {
-    expect(trafficLights(1320, 1)).toEqual({ x: 18, y: 29 });
+  it('sits in the classic sidebar row, or above the phone layout', () => {
+    expect(trafficLights(1320, 1)).toEqual({ x: 19, y: 15 });
+    expect(trafficLights(1320, 1, 'classic')).toEqual({ x: 18, y: 29 });
     expect(trafficLights(700, 1)).toEqual({ x: 12, y: 7 });
     // 1000 window pixels at 160% are 625 CSS pixels: the phone layout.
     expect(trafficLights(1000, 1.6)).toEqual({ x: 12, y: 7 });
+  });
+
+  it('centres them in the channel rail, which grows with the zoom', () => {
+    expect(trafficLights(1320, 1, 'rail')).toEqual({ x: 19, y: 15 });
+    expect(trafficLights(1320, 1.2, 'rail')).toEqual({ x: 29, y: 15 });
+    expect(trafficLights(1320, 0.8, 'rail')).toEqual({ x: 9, y: 15 });
+    expect(trafficLights(700, 1, 'rail')).toEqual({ x: 12, y: 7 });
   });
 });
 
@@ -145,5 +166,15 @@ describe('gestures', () => {
     expect(recentGesture(5000, 5000 + GESTURE_MS)).toBe(true);
     expect(recentGesture(5000, 5000 + GESTURE_MS + 1)).toBe(false);
     expect(recentGesture(5000, 4000)).toBe(false);
+  });
+});
+
+describe('pairing a window again', () => {
+  it('pairs on the first ask, then waits before another so a refusing server cannot loop the window', () => {
+    expect(mayPairAgain(null, 5000)).toBe(true);
+    expect(mayPairAgain(5000, 5000 + PAIR_AGAIN_MS - 1)).toBe(false);
+    expect(mayPairAgain(5000, 5000 + PAIR_AGAIN_MS)).toBe(true);
+    // A clock that went back never locks the window out.
+    expect(mayPairAgain(5000, 1000)).toBe(true);
   });
 });

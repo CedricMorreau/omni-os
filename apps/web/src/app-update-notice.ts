@@ -1,19 +1,34 @@
 import type { DesktopUpdateView } from '@omni/shared/desktop-bridge.ts';
+import { relTime } from '@omni/shared/format.ts';
 
 /** The words the sidebar notice and Settings > Desktop app both use, so one update state reads the same in both. */
 export const appUpdateWords = {
+  available: (view: { version: string }) => `Omni ${view.version} is available`,
+  download: 'Download',
   downloading: (view: { version: string; percent: number }) => `Downloading Omni ${view.version} (${Math.round(view.percent)}%)`,
   ready: (view: { version: string }) => `Omni ${view.version} is ready`,
-  relaunch: 'Relaunch to Update',
+  relaunch: 'Relaunch to update',
+  check: 'Check for updates',
+  /** The ready notice's line while turns run: Relaunch asks before it stops them (apps/desktop/src/quit.ts). */
+  running: (turns: number) => (turns === 1 ? '1 turn is running. Omni asks before it stops it.' : `${turns} turns are running. Omni asks before it stops them.`),
 } as const;
 
 export interface AppUpdateNotice {
   text: string;
+  /** Names this notice for its Dismiss: the same update in the same state stays dismissed. Null: it cannot be dismissed. */
+  key: string | null;
   /** The updater's own words, as the text's tooltip. */
   detail?: string;
   busy: boolean;
   failed: boolean;
-  action: { kind: 'install'; label: string } | { kind: 'retry'; label: string } | { kind: 'download'; label: string; url: string } | null;
+  action:
+    | { kind: 'install'; label: string }
+    /** Starts the download of an update found while Check automatically is off. */
+    | { kind: 'fetch'; label: string }
+    | { kind: 'retry'; label: string }
+    /** Opens the releases page, to get the build by hand. */
+    | { kind: 'download'; label: string; url: string }
+    | null;
 }
 
 /**
@@ -24,15 +39,18 @@ export interface AppUpdateNotice {
 export function appUpdateNotice(view: DesktopUpdateView | null, afterDownload: boolean): AppUpdateNotice | null {
   if (!view) return null;
   switch (view.state) {
+    case 'available':
+      return { text: appUpdateWords.available(view), key: `available:${view.version}`, busy: false, failed: false, action: { kind: 'fetch', label: appUpdateWords.download } };
     case 'downloading':
-      return { text: appUpdateWords.downloading(view), busy: true, failed: false, action: null };
+      return { text: appUpdateWords.downloading(view), key: null, busy: true, failed: false, action: null };
     case 'ready':
-      return { text: appUpdateWords.ready(view), busy: false, failed: false, action: { kind: 'install', label: appUpdateWords.relaunch } };
+      return { text: appUpdateWords.ready(view), key: `ready:${view.version}`, busy: false, failed: false, action: { kind: 'install', label: appUpdateWords.relaunch } };
     case 'error':
-      if (afterDownload) return { text: 'The update did not download.', detail: view.message, busy: false, failed: true, action: { kind: 'retry', label: 'Retry' } };
+      if (afterDownload) return { text: 'The update did not download.', key: null, detail: view.message, busy: false, failed: true, action: { kind: 'retry', label: 'Retry' } };
       if (view.downloadUrl) {
         return {
           text: 'Omni could not check for updates.',
+          key: `error:${view.message}`,
           detail: view.message,
           busy: false,
           failed: true,
@@ -42,5 +60,48 @@ export function appUpdateNotice(view: DesktopUpdateView | null, afterDownload: b
       return null;
     default:
       return null;
+  }
+}
+
+export interface AppUpdateStatus {
+  title: string;
+  detail: string;
+  /** The detail is the updater's error. */
+  failed: boolean;
+  /** 0 to 1 while a download runs, else null. */
+  progress: number | null;
+  action: { kind: 'check' | 'fetch' | 'install'; label: string } | null;
+  /** The releases page, to get the build by hand while the app cannot update itself. */
+  releasesUrl: string | null;
+}
+
+/**
+ * Settings > Desktop app's Updates card: this copy's version, what the updater is doing, and the one thing to do
+ * next. `current`: the running version.
+ */
+export function appUpdateStatus(view: DesktopUpdateView | null, current: string, now = Date.now()): AppUpdateStatus {
+  const base = { title: `Omni ${current}`, failed: false, progress: null, releasesUrl: null };
+  const check = { kind: 'check', label: appUpdateWords.check } as const;
+  if (!view) return { ...base, detail: '…', action: null };
+  switch (view.state) {
+    case 'unsupported':
+      return { ...base, detail: view.reason, action: null };
+    case 'idle':
+      return { ...base, detail: view.checkedAt ? `Up to date, checked ${relTime(view.checkedAt, now)}` : 'Not checked yet', action: check };
+    case 'checking':
+      return { ...base, detail: 'Checking for updates…', action: null };
+    case 'available':
+      return { ...base, title: appUpdateWords.available(view), detail: `You have ${current}.`, action: { kind: 'fetch', label: appUpdateWords.download } };
+    case 'downloading':
+      return { ...base, title: `Downloading Omni ${view.version}`, detail: `${Math.round(view.percent)}%`, progress: view.percent / 100, action: null };
+    case 'ready':
+      return {
+        ...base,
+        title: appUpdateWords.ready(view),
+        detail: 'It installs as Omni relaunches. With turns running, Omni asks first.',
+        action: { kind: 'install', label: appUpdateWords.relaunch },
+      };
+    case 'error':
+      return { ...base, detail: view.message, failed: true, action: check, releasesUrl: view.downloadUrl ?? null };
   }
 }

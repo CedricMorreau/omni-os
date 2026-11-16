@@ -16,6 +16,8 @@ export function Page({ route }: { route: Route }) {
   switch (route.name) {
     case 'home':
     case 'channels':
+    case 'inbox':
+      // The rail's Inbox disc: the Inbox list sits in the panel beside it, so the page is the dashboard.
       return <HomePage />;
     case 'channel':
       return <ChannelPage key={route.id} id={route.id} tab={route.tab} pr={route.pr} />;
@@ -30,7 +32,7 @@ export function Page({ route }: { route: Route }) {
     case 'settings':
       return <SettingsPage section={route.section} focus={route.focus} />;
     case 'artifacts':
-      return <ArtifactsPage />;
+      return <ArtifactsPage source={route.source} />;
     case 'prs':
       return <AllPRsPage />;
     case 'new-channel':

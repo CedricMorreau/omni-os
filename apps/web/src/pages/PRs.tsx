@@ -1,11 +1,15 @@
 import { useState, type CSSProperties } from 'react';
 import { relTime } from '@omni/shared/format.ts';
 import { api, errorText, useApi, type Channel, type Checks, type PRDetail as PRDetailT, type PRSummary } from '../api.ts';
-import { Button, Chip, StatusDot, Empty, ErrorNote, Icon, IconLink, LinkButton, Loading, Tabs } from '../components/ui.tsx';
+import { Button, Chip, StatusDot, Empty, ErrorNote, Icon, LinkButton, Loading, Tabs } from '../components/ui.tsx';
+import { pageColumn, PageToolbar, RefreshButton } from '../components/ui/feedback.tsx';
+import { prBadge } from '@omni/shared/thread-glance.ts';
+import { pullRequestUrl } from '@omni/shared/pr-links.ts';
 import { href, navigate } from '../router.ts';
-import { PRDetailTabBody, type DetailTab } from './PRDetailTabs.tsx';
+import { DiffStat, PRDetailTabBody, type DetailTab } from './PRDetailTabs.tsx';
 import { PRMergePanel } from './PRMergePanel.tsx';
 import { LinkChannel } from '../link-previews.ts';
+import { RerunNote, useRerunFailedChecks } from '../components/RerunChecks.tsx';
 
 function NoRepo({ channel }: { channel: Channel }) {
   return (
@@ -15,13 +19,15 @@ function NoRepo({ channel }: { channel: Channel }) {
   );
 }
 
+export const hasChecks = (c: Checks) => c.passed + c.failed + c.pending > 0;
+
 export function ChecksSummary({ c }: { c: Checks }) {
-  if (!c.passed && !c.failed && !c.pending) return <span className="text-[12px] text-fg-4">no checks</span>;
+  if (!hasChecks(c)) return <span className="text-[12px] text-fg-3">no checks</span>;
   return (
     <span className="inline-flex items-center gap-2 font-num text-[11.5px] tabular-nums" title={`${c.passed} passed, ${c.failed} failed, ${c.pending} pending`}>
       {c.passed > 0 && <span className="inline-flex items-center gap-1 text-fg-2"><StatusDot status="done" size={7} /> {c.passed}</span>}
       {c.failed > 0 && <span className="inline-flex items-center gap-1 text-fg-2"><StatusDot status="needs" size={7} /> {c.failed}</span>}
-      {c.pending > 0 && <span className="inline-flex items-center gap-1 text-live-text"><StatusDot status="running" size={7} /> {c.pending}</span>}
+      {c.pending > 0 && <span className="inline-flex items-center gap-1 text-fg-2"><StatusDot status="running" phase="checking" size={7} /> {c.pending}</span>}
     </span>
   );
 }
@@ -45,18 +51,20 @@ export function PRList({ channel }: { channel: Channel }) {
   const noRepo = q.error && /no github repo/i.test(q.error);
 
   return (
-    <div className="mx-auto max-w-4xl px-4 pt-6 pb-16 md:px-8">
-      <div className="mb-3 flex items-center justify-between gap-2">
+    <div className={`${pageColumn('measure')} pt-6 pb-16`}>
+      <PageToolbar
+        className="mb-3"
+        right={
+          <>
+            <LinkButton size="sm" variant="ghost" icon="external" href={`https://github.com/${channel.github_repo}/pulls`} target="_blank">
+              GitHub
+            </LinkButton>
+            <RefreshButton onClick={q.reload} busy={q.loading && !!q.data} label="Refresh pull requests" />
+          </>
+        }
+      >
         <Tabs size="sm" tabs={STATES.map((s) => ({ id: s, label: s[0].toUpperCase() + s.slice(1) }))} value={state} onChange={setState} />
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="ghost" icon="refresh" onClick={q.reload} busy={q.loading && !!q.data}>
-            Refresh
-          </Button>
-          <LinkButton size="sm" variant="ghost" icon="external" href={`https://github.com/${channel.github_repo}/pulls`} target="_blank">
-            GitHub
-          </LinkButton>
-        </div>
-      </div>
+      </PageToolbar>
       {noRepo ? (
         <NoRepo channel={channel} />
       ) : q.error ? (
@@ -70,11 +78,11 @@ export function PRList({ channel }: { channel: Channel }) {
       ) : (
         <div className="rise">
           {q.data.map((p, i) => (
-            <a key={p.number} href={href.pr(channel.id, p.number)} style={{ '--i': i } as CSSProperties} className="hov block rounded-[18px] px-3.5 py-3 [--hov:var(--surface)]">
+            <a key={p.number} href={href.pr(channel.id, p.number)} style={{ '--i': i } as CSSProperties} className="hov block rounded-[var(--r-lg)] px-3.5 py-3 [--hov:var(--surface)]">
               <div className="flex min-w-0 items-center gap-2">
-                <Icon name="pr" size={14} className={p.isDraft || p.state === 'CLOSED' ? 'text-fg-4' : p.state === 'MERGED' ? 'text-fg-2' : 'text-live-text'} />
-                <span className="min-w-0 truncate text-[14px] font-medium">{p.title}</span>
-                <span className="shrink-0 font-num text-[11.5px] text-fg-4">#{p.number}</span>
+                <Icon name="pr" size={14} className={p.state === 'MERGED' ? 'text-fg-2' : 'text-fg-3'} />
+                <span className="min-w-0 truncate text-[length:var(--fs-body)] font-medium">{p.title}</span>
+                <span className="shrink-0 font-num text-[length:var(--fs-code)] text-fg-3">#{p.number}</span>
                 {p.isDraft && <Chip tone="outline">Draft</Chip>}
                 <ReviewChip d={p.reviewDecision} />
                 <span className="ml-auto shrink-0">
@@ -84,12 +92,10 @@ export function PRList({ channel }: { channel: Channel }) {
               <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 pl-[22px] text-[12px] text-fg-3">
                 <span>{p.author?.login ?? 'unknown'}</span>
                 <span className="min-w-0 truncate font-mono text-[11.5px]">
-                  {p.headRefName} <span className="text-fg-4">into</span> {p.baseRefName}
+                  {p.headRefName} <span className="text-fg-3">into</span> {p.baseRefName}
                 </span>
-                <span className="font-num text-[11px]">
-                  <span className="text-fg-2">+{p.additions}</span> <span className="text-fg-3">-{p.deletions}</span>
-                </span>
-                <span className="ml-auto font-num text-[11px] text-fg-4">{relTime(p.updatedAt)}</span>
+                <DiffStat additions={p.additions} deletions={p.deletions} />
+                <span className="ml-auto font-num text-[11px] text-fg-3">{relTime(p.updatedAt)}</span>
               </div>
             </a>
           ))}
@@ -104,6 +110,7 @@ export function PRDetail({ channel, n }: { channel: Channel; n: number }) {
   const [tab, setTab] = useState<DetailTab>('conversation');
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const rerun = useRerunFailedChecks(channel.id, n, q.data?.checkRuns, !q.data?.state || q.data.state === 'OPEN');
 
   if (!channel.github_repo) return <NoRepo channel={channel} />;
   const back = (
@@ -112,22 +119,27 @@ export function PRDetail({ channel, n }: { channel: Channel; n: number }) {
     </a>
   );
   if (q.error && !q.data) {
+    // A PR link brings Ben here instead of GitHub (pr-links.ts), so when gh cannot answer, GitHub is one click away.
     return (
-      <div className="mx-auto max-w-4xl space-y-3 px-4 pt-6 md:px-8">
+      <div className={`${pageColumn('page')} space-y-3 pt-6`}>
         {back}
         <ErrorNote onRetry={q.reload}>{q.error}</ErrorNote>
+        <LinkButton size="sm" variant="ghost" icon="external" href={pullRequestUrl(channel.github_repo, n)} target="_blank" external>
+          Open on GitHub
+        </LinkButton>
       </div>
     );
   }
   if (!q.data) {
     return (
-      <div className="mx-auto max-w-4xl px-4 pt-6 md:px-8">
+      <div className={`${pageColumn('page')} pt-6`}>
         {back}
         <Loading label="Loading pull request" />
       </div>
     );
   }
   const p = q.data;
+  const badge = prBadge(p);
 
   const askReview = async () => {
     setReviewBusy(true);
@@ -142,62 +154,71 @@ export function PRDetail({ channel, n }: { channel: Channel; n: number }) {
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pt-6 pb-16 md:px-8">
+    <div className={`${pageColumn('page')} pt-6 pb-16`}>
       {back}
-      <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-display text-[22px] leading-[1.2]">
-            {p.title} <span className="font-num text-[15px] text-fg-4">#{p.number}</span>
+      {/* The actions sit beside the title when the page is wide enough, else after the related threads, review first. */}
+      <div className="@container mt-3">
+        <header className="grid grid-cols-1 gap-y-2.5 @3xl:grid-cols-[minmax(0,1fr)_auto] @3xl:gap-x-6">
+          <h2 className="font-display text-[length:var(--fs-title)] leading-[1.15] text-balance @3xl:col-start-1 @3xl:row-start-1">
+            {p.title} <span className="font-num whitespace-nowrap text-fg-3">#{p.number}</span>
           </h2>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-fg-3">
-            {p.state && <Chip tone={p.state === 'OPEN' ? 'live' : p.state === 'MERGED' ? 'done' : 'outline'}>{p.state.toLowerCase()}</Chip>}
-            {p.isDraft && <Chip tone="outline">Draft</Chip>}
-            <ReviewChip d={p.reviewDecision} />
-            <span>{p.author?.login}</span>
-            <span className="rounded-full bg-surface-2 px-2 font-mono text-[11px] leading-5">
-              {p.headRefName} <span className="text-fg-4">into</span> {p.baseRefName}
+          <div className="order-last flex flex-row-reverse items-center justify-end gap-1.5 @3xl:order-none @3xl:col-start-2 @3xl:row-start-1 @3xl:flex-row @3xl:self-start">
+            <LinkButton size="sm" variant="ghost" icon="external" href={p.url} target="_blank" external>
+              GitHub
+            </LinkButton>
+            {rerun.can && (
+              <Button size="sm" icon="refresh" onClick={() => void rerun.run()} busy={rerun.busy} title="Runs gh run rerun --failed for each failing workflow run. No agent turn.">
+                Rerun failed checks
+              </Button>
+            )}
+            <Button size="sm" icon="delegate" onClick={askReview} busy={reviewBusy}>
+              Ask builder to review
+            </Button>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[length:var(--fs-small)] text-fg-3 @3xl:col-span-2">
+            <span className="inline-flex items-center gap-1.5">
+              <Chip tone={badge.tone}>{badge.label}</Chip>
+              <ReviewChip d={p.reviewDecision} />
             </span>
-            <ChecksSummary c={p.checks} />
-            <span className="font-num text-[11.5px]">
-              <span className="text-fg-2">+{p.additions}</span> <span className="text-fg-3">-{p.deletions}</span>
+            {p.author?.login && <span>{p.author.login}</span>}
+            <span className="min-w-0 truncate font-mono text-[length:var(--fs-code)]" title={`${p.headRefName} into ${p.baseRefName}`}>
+              {p.headRefName} <span className="text-fg-3">→</span> {p.baseRefName}
             </span>
+            {hasChecks(p.checks) && <ChecksSummary c={p.checks} />}
+            <DiffStat additions={p.additions} deletions={p.deletions} />
           </div>
           {p.thread && (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 @3xl:col-span-2">
               {p.thread.parent && (
-                <LinkButton size="sm" href={href.thread(p.thread.parent.id)} icon="arrowUpRight">
-                  <span className="max-w-[320px] truncate" title={`The thread that delegated this work: ${p.thread.parent.title}`}>
+                <LinkButton size="sm" href={href.thread(p.thread.parent.id)} icon="arrowUpRight" className="max-w-full min-w-0">
+                  <span className="truncate" title={`The thread that delegated this work: ${p.thread.parent.title}`}>
                     {p.thread.parent.title || 'Parent thread'}
                   </span>
                 </LinkButton>
               )}
-              <LinkButton size="sm" href={href.thread(p.thread.id)} icon="message">
-                <span className="max-w-[320px] truncate" title={`The thread that opened this PR: ${p.thread.title}`}>
+              <LinkButton size="sm" href={href.thread(p.thread.id)} icon="message" className="max-w-full min-w-0">
+                <span className="truncate" title={`The thread that opened this PR: ${p.thread.title}`}>
                   {p.thread.parent ? 'Delegated thread' : p.thread.title || 'Open thread'}
                 </span>
               </LinkButton>
             </div>
           )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <IconLink href={p.url} icon="external" label="Open on GitHub" newTab />
-          <Button icon="layers" onClick={askReview} busy={reviewBusy}>
-            Ask builder to review
-          </Button>
-        </div>
+        </header>
       </div>
       {reviewError && <ErrorNote className="mt-2">{reviewError}</ErrorNote>}
+      <RerunNote outcome={rerun.outcome} className="mt-3" />
 
       <PRMergePanel channel={channel} p={p} n={n} onMerged={q.reload} />
       <Tabs
         className="mt-6"
+        size="sm"
         value={tab}
         onChange={setTab}
         tabs={[
           { id: 'conversation', label: 'Conversation' },
-          { id: 'checks', label: 'Checks', badge: <span className="font-num text-[10.5px] text-fg-4">{p.checkRuns.length}</span> },
-          { id: 'files', label: 'Files', badge: <span className="font-num text-[10.5px] text-fg-4">{p.files?.length ?? 0}</span> },
-          { id: 'diff', label: 'Diff' },
+          { id: 'checks', label: 'Checks', badge: <span className="font-num text-[10.5px] text-fg-3">{p.checkRuns.length}</span> },
+          { id: 'files', label: 'Files', badge: <span className="font-num text-[10.5px] text-fg-3">{p.files?.length ?? 0}</span> },
+          { id: 'diff', label: 'Diff', badge: <span className="font-num text-[10.5px] text-fg-3">+{p.additions} −{p.deletions}</span> },
         ]}
       />
 

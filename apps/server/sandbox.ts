@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { tokenPath } from './api-token.ts';
 import { chromeBinary } from './browser-page.ts';
 import { userName } from './user-config.ts';
+import { fillWorktree, type WorktreeExtras } from './worktree-include.ts';
 import { RENDER_SERVER } from '@omni/shared/html-render.ts';
 import { config, paths, threadDir, artifactsDir, browserOutDir, designSystemFile, nodeChildEnv } from './config.ts';
 import type { Channel } from './db.ts';
@@ -135,8 +136,10 @@ async function switchBack(dir: string, branch: string, on: string | null): Promi
  * earlier try made is checked and kept, a branch it made is checked out again, a clean worktree its agent moved to
  * another branch is switched back, and a folder that is in the way is never deleted. A new branch is cut from the
  * commit `base` names (worktree-base.ts), asked only once the repo and folder checks pass, or from HEAD without one.
+ * A worktree made here gets the repo's `.worktreeinclude` files and the channel's own (`extras`) copied in, and the
+ * channel's shared folders linked (worktree-include.ts).
  */
-export async function prepareWorktree(repo: string | null, dir: string, branch: string, base?: () => Promise<string>): Promise<void> {
+export async function prepareWorktree(repo: string | null, dir: string, branch: string, base?: () => Promise<string>, extras?: WorktreeExtras): Promise<void> {
   if (!repo) throw new Error('The channel has no repository set.');
   if (!existsSync(repo)) throw new Error(`The channel's repository is not on this machine: ${repo}`);
   if (!(await isGitRepo(repo))) throw new Error(`${repo} is not a git repository. Turn off "Worktree per thread" in the channel's settings to run threads in it directly.`);
@@ -167,6 +170,7 @@ export async function prepareWorktree(repo: string | null, dir: string, branch: 
     await removeWorktree(repo, dir);
     throw new Error(problem);
   }
+  await fillWorktree(repo, dir, extras);
 }
 
 /** The part of a git failure worth showing: its stderr, without the hint lines. */
@@ -220,9 +224,17 @@ export const TICKET_SERVER = 'omni-ticket';
 /** How long a harness lets an ask_user_question call wait for the user: a day. */
 export const ASK_TIMEOUT_SEC = 86_400;
 
+/** One server entry. `timeout` (ms) is Claude Code's, written only into its own config file (writeMcpConfig). */
+interface McpServer {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  timeout?: number;
+}
+
 /** Per-thread MCP servers, layered on top of the user's normal Claude Code MCP config. Hermes gets none: it runs elsewhere. */
 export function buildMcpConfig(input: McpInput) {
-  const servers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+  const servers: Record<string, McpServer> = {};
   const api = { OMNI_URL: input.omniUrl, OMNI_TOKEN_FILE: tokenPath(), OMNI_THREAD_ID: input.threadId, OMNI_USER: userName(), ...nodeChildEnv };
 
   servers[ASK_SERVER] = { command: paths.mcpRunner, args: [paths.mcpAsk], env: api };
@@ -254,8 +266,13 @@ export function buildMcpConfig(input: McpInput) {
   return { mcpServers: servers };
 }
 
+/**
+ * The Claude Code `--mcp-config` file. Claude Code aborts a stdio MCP call that is silent for 30 minutes unless the
+ * server's own `timeout` (ms) is longer, whatever MCP_TOOL_TIMEOUT says, so ask_user_question gets a day here.
+ */
 export function writeMcpConfig(input: McpInput): string {
   const cfg = buildMcpConfig(input);
+  cfg.mcpServers[ASK_SERVER] = { ...cfg.mcpServers[ASK_SERVER], timeout: ASK_TIMEOUT_SEC * 1000 };
   mkdirSync(threadDir(input.threadId), { recursive: true });
   const file = join(threadDir(input.threadId), 'mcp.json');
   writeFileSync(file, JSON.stringify(cfg, null, 2));
@@ -311,7 +328,7 @@ export function writeCursorDenyConfig(dir: string, userDir: string): string {
  * Check a thread's branch out again at dir, for a worktree thread whose worktree is not on this Mac (it ran on the
  * other one). The branch comes from the repo, else from its origin. Throws, saying why, when neither has it.
  */
-export async function restoreWorktree(repoPath: string, dir: string, branch: string) {
+export async function restoreWorktree(repoPath: string, dir: string, branch: string, extras?: WorktreeExtras) {
   // Never wait on a credential prompt: the turn is waiting.
   const git = (...args: string[]) =>
     run('git', ['-C', repoPath, ...args], { timeout: 30_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
@@ -322,6 +339,7 @@ export async function restoreWorktree(repoPath: string, dir: string, branch: str
   // A worktree removed by hand is still registered until pruned, and add refuses its path.
   await git('worktree', 'prune').catch(() => {});
   await git('worktree', 'add', dir, branch);
+  await fillWorktree(repoPath, dir, extras);
 }
 
 export async function removeWorktree(repoPath: string, dir: string) {

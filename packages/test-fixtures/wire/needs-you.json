@@ -26,6 +26,7 @@
         "suggestion": "Yes, open a PR",
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -36,12 +37,15 @@
         "limit_state": null,
         "limit_resets_at": null,
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000017",
@@ -53,7 +57,8 @@
         {
           "kind": "question",
           "detail": "Which store should the digest cover first?",
-          "count": 1
+          "count": 1,
+          "at": "2026-01-05T09:00:00.000Z"
         }
       ],
       "at": "2026-01-05T09:00:00.000Z"
@@ -84,6 +89,7 @@
         "suggestion": null,
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -94,12 +100,15 @@
         "limit_state": "scheduled",
         "limit_resets_at": "2026-01-05T09:00:00.000Z",
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000020",
@@ -145,6 +154,7 @@
         "suggestion": null,
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -155,12 +165,15 @@
         "limit_state": null,
         "limit_resets_at": null,
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000022",
@@ -208,6 +221,7 @@
         "suggestion": null,
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -218,12 +232,15 @@
         "limit_state": null,
         "limit_resets_at": null,
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000023",
@@ -266,6 +283,7 @@
         "suggestion": "Yes, open a PR",
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -276,12 +294,15 @@
         "limit_state": null,
         "limit_resets_at": null,
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000025",
@@ -318,6 +339,7 @@
         "suggestion": null,
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -328,12 +350,15 @@
         "limit_state": null,
         "limit_resets_at": null,
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000027",
@@ -370,6 +395,7 @@
         "suggestion": "Yes, open a PR",
         "next_title": null,
         "next_prompt": null,
+        "open_items": null,
         "archived": 0,
         "folder_id": null,
         "pinned_at": null,
@@ -380,12 +406,15 @@
         "limit_state": null,
         "limit_resets_at": null,
         "limit_elsewhere": 0,
+        "goal_objective": null,
+        "goal_status": null,
+        "goal_checks": 0,
         "continued_from": null,
+        "created_at": "2026-01-05T09:00:00.000Z",
+        "updated_at": "2026-01-05T09:00:00.000Z",
         "waiting_on": null,
         "draft": null,
-        "draft_kind": null,
-        "created_at": "2026-01-05T09:00:00.000Z",
-        "updated_at": "2026-01-05T09:00:00.000Z"
+        "draft_kind": null
       },
       "result": {
         "uid": "00000000-0000-4000-8000-000000000029",

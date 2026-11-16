@@ -33,6 +33,8 @@ export interface Thread {
   suggestion: string | null;
   next_title: string | null;
   next_prompt: string | null;
+  /** What the last turn left open for Ben, as JSON: read it with readOpenItems (@omni/shared/open-items.ts). */
+  open_items: string | null;
   archived: number;
   folder_id: string | null;
   pinned_at: string | null;
@@ -52,7 +54,9 @@ export interface Thread {
 }
 
 /** The part of a thread the channel list sends for each of its threads. */
-export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at' | 'updated_at' | 'folder_id' | 'harness' | 'pinned_at' | 'done_at' | 'parent_id' | 'source' | 'waiting_on'>;
+export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at' | 'updated_at' | 'folder_id' | 'harness' | 'pinned_at' | 'done_at' | 'parent_id' | 'source' | 'limit_state'> &
+  /** For the thread tree's child rows, and `setup` for the Starting dot. Older servers leave them out. */
+  Partial<Pick<Thread, 'model' | 'branch' | 'setup' | 'waiting_on'>>;
 
 export interface ListThreads {
   channel?: string;
@@ -95,6 +99,10 @@ export interface ThreadPatch {
   folder_id?: string | null;
   pinned?: boolean;
   done?: boolean;
+  /** Null drops every open item, the card under the transcript (@omni/shared/open-items.ts). */
+  open_items?: null;
+  /** Drops the one open item with this text and leaves the rest. */
+  dismiss_open_item?: string;
 }
 
 export function threadsApi(http: HttpClient) {
@@ -110,6 +118,8 @@ export function threadsApi(http: HttpClient) {
     /** A 409 for an archived thread. */
     setPinned: (id: string, pinned: boolean) => patch(id, { pinned }),
     rename: (id: string, title: string) => patch(id, { title }),
+    /** Drops the open item with this text from the card under the transcript, or every one of them without a text. */
+    dismissOpenItems: (id: string, text?: string) => patch(id, text === undefined ? { open_items: null } : { dismiss_open_item: text }),
     /** Archiving also unpins it. */
     setArchived: (id: string, archived: boolean) => patch(id, { archived }),
     /** A folder of the thread's channel, or null for the ungrouped list. A 4xx for another channel's folder. */

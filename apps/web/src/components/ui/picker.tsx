@@ -13,7 +13,10 @@ export interface PickerOption<T extends string> {
   /** Letter avatar seed; defaults to the label. Set `avatar: false` to hide it. */
   avatar?: string | false;
   /** A channel icon for the avatar in place of the letter. */
+  avatarBg?: string | null;
   channelIcon?: string | null;
+  /** The Conductor's channel: its avatar draws the Omni mark until it has an icon of its own. */
+  omni?: boolean;
   /** A mark to lead with instead of the avatar (a HarnessLogo or CrewMark). */
   lead?: ReactNode;
   /** Listed but not pickable now, with `sub` saying why (a machine that is offline). */
@@ -30,6 +33,9 @@ export function Picker<T extends string>({
   disabled,
   className = '',
   align = 'left',
+  size = 'pill',
+  id,
+  describedBy,
 }: {
   value: T;
   options: PickerOption<T>[];
@@ -40,6 +46,10 @@ export function Picker<T extends string>({
   disabled?: boolean;
   className?: string;
   align?: 'left' | 'right';
+  /** `field`: as tall and wide as a text field, for a form; `pill`: a compact pill in a line of text or a toolbar. */
+  size?: 'pill' | 'field';
+  id?: string;
+  describedBy?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [up, setUp] = useState(false);
@@ -106,7 +116,9 @@ export function Picker<T extends string>({
     <div ref={wrap} className={`relative ${className}`}>
       <button
         ref={btn}
+        id={id}
         type="button"
+        aria-describedby={describedBy}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`${label}: ${current?.label ?? 'none'}`}
@@ -118,12 +130,16 @@ export function Picker<T extends string>({
             openMenu();
           }
         }}
-        className="press inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-surface-2 pr-2.5 pl-1 text-[12.5px] text-fg transition-colors hover:bg-surface-3 disabled:opacity-45"
+        className={
+          size === 'field'
+            ? 'press flex h-10 w-full min-w-0 items-center gap-2 rounded-[14px] bg-surface pr-3 pl-2 text-left text-[14px] text-fg shadow-[inset_0_0_0_1px_var(--line)] transition-shadow hover:shadow-[inset_0_0_0_1px_var(--line-strong)] disabled:opacity-45'
+            : 'press inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-surface-2 pr-2.5 pl-1 text-[12.5px] text-fg transition-colors hover:bg-surface-3 disabled:opacity-45'
+        }
       >
         {current?.lead ? (
           <span className="grid h-6 w-6 place-items-center rounded-full bg-bg text-fg">{current.lead}</span>
         ) : current && current.avatar !== false ? (
-          <Avatar name={current.avatar || current.label} icon={current.icon} channelIcon={current.channelIcon} size={24} />
+          <Avatar name={current.avatar || current.label} icon={current.icon} omni={current.omni} channelIcon={current.channelIcon} avatarBg={current.avatarBg} size={24} />
         ) : current?.icon ? (
           <span className="grid h-6 w-6 place-items-center text-fg-3">
             <Icon name={current.icon} size={14} />
@@ -131,9 +147,9 @@ export function Picker<T extends string>({
         ) : (
           <span className="w-1.5" />
         )}
-        {prefix && <span className="-mr-1 text-fg-4">{prefix}</span>}
-        <span className="min-w-0 truncate">{current?.label ?? 'Choose'}</span>
-        <Icon name="chevronDown" size={13} className="pik-chev text-fg-4" />
+        {prefix && <span className="-mr-1 text-fg-3">{prefix}</span>}
+        <span className={`min-w-0 truncate ${size === 'field' ? 'flex-1' : ''}`}>{current?.label ?? 'Choose'}</span>
+        <Icon name="chevronDown" size={13} className="pik-chev text-fg-3" />
       </button>
       {open && (
         <div
@@ -142,7 +158,7 @@ export function Picker<T extends string>({
           onKeyDown={onKey}
         >
           {canSearch && (
-            <label className="mb-1 flex h-10 items-center gap-2 rounded-2xl bg-surface px-3 text-fg-4">
+            <label className="mb-1 flex h-10 items-center gap-2 rounded-2xl bg-surface px-3 text-fg-3">
               <Icon name="search" size={14} />
               <input
                 autoFocus
@@ -175,7 +191,7 @@ export function Picker<T extends string>({
                 {o.lead ? (
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-2 text-fg">{o.lead}</span>
                 ) : o.avatar !== false ? (
-                  <Avatar name={o.avatar || o.label} icon={o.icon} channelIcon={o.channelIcon} size={28} />
+                  <Avatar name={o.avatar || o.label} icon={o.icon} omni={o.omni} channelIcon={o.channelIcon} avatarBg={o.avatarBg} size={28} />
                 ) : o.icon ? (
                   <span className="grid h-7 w-7 place-items-center rounded-full bg-surface-2 text-fg-3">
                     <Icon name={o.icon} size={14} />
@@ -183,14 +199,14 @@ export function Picker<T extends string>({
                 ) : null}
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-[13px] text-fg">{o.label}</span>
-                  {o.sub && <span className="truncate text-[11.5px] text-fg-4">{o.sub}</span>}
+                  {o.sub && <span className="truncate text-[11.5px] text-fg-3">{o.sub}</span>}
                 </span>
                 <span className="pik-mark">
                   {o.value === value && <Icon name="check" size={12} strokeWidth={2.6} />}
                 </span>
               </button>
             ))}
-            {!shown.length && <div className="px-3 py-3 text-[12.5px] text-fg-4">No match</div>}
+            {!shown.length && <div className="px-3 py-3 text-[12.5px] text-fg-3">No match</div>}
           </div>
         </div>
       )}

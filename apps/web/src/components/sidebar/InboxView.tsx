@@ -1,40 +1,52 @@
-import { useRef, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { relTime } from '@omni/shared/format.ts';
+import { ranOnLine } from '@omni/shared/ran-on.ts';
 import { parseChannelIcon } from '@omni/shared/channel-icon.ts';
-import type { Thread, ThreadStub } from '../../api.ts';
+import type { BackgroundTask, Thread } from '../../api.ts';
 import { useInbox } from '../../app/useInbox.ts';
-import type { InboxThread, RowStatus } from '../../inbox.ts';
+import { useDoneKey } from '../../inbox-key.ts';
+import { MARK, blockerMark, markOf, threadPhase, type RowStatus } from '@omni/shared/status.ts';
+import type { InboxThread } from '../../inbox.ts';
 import { canMarkDone } from '../../needs-you.ts';
-import { href, useHash } from '../../router.ts';
-import { useApp, useNow } from '../../store.tsx';
-import { HarnessLogo, Loader, OmniMark } from '../brand.tsx';
-import { ChannelMark, DoneMark, Icon, StatusDot, Thumb, useSlidingThumb } from '../ui.tsx';
-import { DelegateCount, DelegateCountSpace } from '../DelegateCount.tsx';
-import { useRowDelegates } from './SidebarRows.tsx';
+import { href } from '../../router.ts';
+import { useApp, useNeedOf, useNow } from '../../store.tsx';
+import { HarnessLogo, OmniMark } from '../brand.tsx';
+import { Avatar, ChannelMark, DoneMark, Icon, StatusDot } from '../ui.tsx';
+import { useMarkDone } from '../../done-confirm.tsx';
+import { useJobTree, useTreesFold, type TreesFold } from '../../thread-tree.ts';
+import { AgentRows, FoldTrees, TreeRows, TreeToggle, TreeToggleSpace } from '../ThreadTree.tsx';
+import { RunElapsed } from '../RunElapsed.tsx';
 import { WorkspaceLinks } from './SidebarLinks.tsx';
 
 /**
- * The sidebar's Inbox view, T3 Code's default thread list: every channel's threads in one list. Pinned cards, then the
- * threads waiting on Ben, the latest back on top. Working and Done fold away at the bottom. Marking a thread done
- * (the check on hover) moves it to Done, as Settle does in T3.
+ * The sidebar's Inbox view, T3 Code's default thread list: every channel's threads in one list, on four shelves in a
+ * fixed order. Pinned cards on top, then Needs you (a question, a failure, a usage limit) and Finished (turns that
+ * ended), the latest back on top in each, then Working, then Done folded away at the bottom. Marking a thread done
+ * (the check on hover, or E on the selected card) moves it to Done, as Settle does in T3. `links`: the Workspace
+ * links at the foot, which the classic sidebar needs and the rail has discs for.
  */
-export function InboxView({ onNavigate }: { onNavigate?: () => void }) {
-  const hash = useHash();
-  const { channels } = useApp();
-  const { pinned, inbox, working, done, loaded, openId, status, delegates } = useInbox();
-  const listRef = useRef<HTMLDivElement>(null);
+export function InboxView({ onNavigate, links = true }: { onNavigate?: () => void; links?: boolean }) {
+  const { channels, tasks } = useApp();
+  const markDone = useMarkDone();
+  const { pinned, inbox, needs, finished, working, done, loaded, openId, status } = useInbox();
   const channelOf = (id: string) => channels.find((c) => c.id === id);
+  const fold = useTreesFold(working.threads, 'inbox');
+  useDoneKey((focusedId) => {
+    const id = focusedId ?? openId;
+    const t = id ? [...pinned, ...inbox, ...working.rows].find((r) => r.id === id) : undefined;
+    if (!t || !canMarkDone(t.status)) return false;
+    void markDone(t, true).catch(() => {});
+    return true;
+  });
 
-  const rowsKey = [pinned, inbox, working.rows, done.rows].map((l) => l.map((t) => t.id).join()).join('|');
-  const box = useSlidingThumb(listRef, `${hash}:${rowsKey}`, true, '[data-active="true"]');
-
-  const card = (t: InboxThread, pinnedRow = false) => (
+  // Sub-agents show only under a card on the Working shelf, and go when they stop.
+  const card = (t: InboxThread, pinnedRow = false, agents?: BackgroundTask[]) => (
     <InboxCard
       key={t.id}
       t={t}
       channel={channelOf(t.channel_id)}
       status={status(t)}
-      delegated={delegates.get(t.id)}
+      agents={agents}
       active={t.id === openId}
       pinned={pinnedRow}
       onNavigate={onNavigate}
@@ -42,21 +54,31 @@ export function InboxView({ onNavigate }: { onNavigate?: () => void }) {
   );
 
   return (
-    <div ref={listRef} className="relative flex min-h-full flex-col">
-      <Thumb box={box} />
-      <div className="space-y-px">
-        {pinned.map((t) => card(t, true))}
-        {inbox.map((t) => card(t))}
-        {loaded && !pinned.length && !inbox.length && <p className="px-3 py-6 text-center text-[12.5px] text-fg-4">Nothing is waiting on you.</p>}
-      </div>
+    <div className="flex min-h-full flex-col">
+      {pinned.length > 0 && <div className="space-y-px pb-3">{pinned.map((t) => card(t, true))}</div>}
+      {needs.length > 0 && (
+        <div className="space-y-px pb-3">
+          <ShelfLabel label="Needs you" count={needs.length} />
+          {needs.map((t) => card(t))}
+        </div>
+      )}
+      {finished.length > 0 && (
+        <div className="space-y-px pb-3">
+          <ShelfLabel label="Finished" count={finished.length} />
+          {finished.map((t) => card(t))}
+        </div>
+      )}
+      {loaded && !pinned.length && !inbox.length && <p className="px-3 py-6 text-center text-[12.5px] text-fg-3">Nothing is waiting on you.</p>}
+
+      {working.count > 0 && (
+        <div className="space-y-px pt-1">
+          <div aria-hidden className="mx-3 mb-3 border-t border-line" />
+          <Shelf label="Working" count={working.count} open={working.open} onToggle={working.toggle} fold={working.open ? fold : undefined} />
+          {working.rows.map((t) => card(t, false, tasks))}
+        </div>
+      )}
 
       <div className="mt-auto space-y-px pt-4">
-        {working.count > 0 && (
-          <>
-            <Shelf label="Working" count={working.count} open={working.open} onToggle={working.toggle} />
-            {working.rows.map((t) => card(t))}
-          </>
-        )}
         <Shelf label="Done" count={done.count} open={done.open} onToggle={done.toggle} />
         {done.rows.map((t) => (
           <DoneRow key={t.id} t={t} active={t.id === openId} onNavigate={onNavigate} />
@@ -65,49 +87,73 @@ export function InboxView({ onNavigate }: { onNavigate?: () => void }) {
           <button
             type="button"
             onClick={done.showMore}
-            className="hov z-[1] flex h-8 w-full items-center gap-2 rounded-full px-3 text-[12.5px] text-fg-4 transition-colors hover:text-fg-2"
+            className="item flex h-8 w-full items-center gap-2 px-3 text-[12.5px] text-fg-3 hover:text-fg-2"
           >
             <Icon name="chevronDown" size={12} />
             Show {done.more} more
           </button>
         )}
       </div>
-      <div className="pt-4">
-        <WorkspaceLinks onNavigate={onNavigate} />
-      </div>
+      {links && (
+        <div className="pt-4">
+          <WorkspaceLinks onNavigate={onNavigate} />
+        </div>
+      )}
     </div>
   );
 }
 
-/** A shelf's header: its name, how many it holds, and a chevron that turns as it folds. */
-function Shelf({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) {
+/** A shelf that does not fold: Needs you and Finished stay open, so nothing waiting on Ben hides. */
+function ShelfLabel({ label, count }: { label: string; count: number }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={open}
-      title={open ? `Hide ${label.toLowerCase()} threads` : `Show ${label.toLowerCase()} threads`}
-      className="caption flex h-8 w-full items-center gap-2 px-3 text-left transition-colors hover:text-fg-2"
-    >
+    <div className="caption flex h-8 items-center gap-2 px-3">
       {label}
-      <span className="font-num font-normal text-fg-4 tabular-nums">{count}</span>
-      <Icon name="chevronDown" size={11} className={`ml-auto text-fg-4 transition-transform ${open ? '' : '-rotate-90'}`} />
-    </button>
+      <span className="font-num font-normal text-fg-3 tabular-nums">{count}</span>
+    </div>
+  );
+}
+
+/**
+ * A shelf's header: its name, how many it holds, and a chevron that turns as it folds. `fold`: Working's button left
+ * of the chevron that closes every card's tree at once, or opens them all again.
+ */
+function Shelf({ label, count, open, onToggle, fold }: { label: string; count: number; open: boolean; onToggle: () => void; fold?: TreesFold }) {
+  return (
+    <div className="grid grid-cols-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        title={open ? `Hide ${label.toLowerCase()} threads` : `Show ${label.toLowerCase()} threads`}
+        className="caption flex h-8 w-full items-center gap-2 px-3 text-left transition-colors [grid-area:1/1] hover:text-fg-2"
+      >
+        {label}
+        <span className="font-num font-normal text-fg-3 tabular-nums">{count}</span>
+        <Icon name="chevronDown" size={11} className={`ml-auto text-fg-3 transition-transform ${open ? '' : '-rotate-90'}`} />
+      </button>
+      {fold && fold.trees > 0 && <FoldTrees fold={fold} className="mr-7 h-6 w-6 self-center justify-self-end [grid-area:1/1]" size={13} />}
+    </div>
   );
 }
 
 function ChannelLead({ channel }: { channel: ReturnType<typeof useApp>['channels'][number] | undefined }) {
+  if (channel?.avatar_bg) return <Avatar name={channel.name} channelIcon={channel.icon} avatarBg={channel.avatar_bg} omni={channel.id === 'conductor'} size={18} />;
+  if (channel && parseChannelIcon(channel.icon)) return <ChannelMark icon={channel.icon} avatarBg={channel.avatar_bg} size={12} />;
   if (channel?.id === 'conductor') return <OmniMark size={13} />;
-  if (channel && parseChannelIcon(channel.icon)) return <ChannelMark icon={channel.icon} size={12} />;
-  return <span className="font-num text-[11px] leading-none text-fg-4">#</span>;
+  return <span className="font-num text-[11px] leading-none text-fg-3">#</span>;
 }
 
-/** T3's card: the channel on top with the status or the time on its right, the title, then the branch and harness. */
+/**
+ * T3's card: the channel on top with the status or the time on its right, the title, then the machine it runs or ran
+ * on with the run's time, and the harness. The branch and the machines before are in that line's tooltip. A job's
+ * card has its tally there instead of the harness, and its tree under it. `agents`: the live tasks, on the Working
+ * shelf only, so a card there lists what runs under it.
+ */
 function InboxCard({
   t,
   channel,
   status,
-  delegated,
+  agents,
   active,
   pinned,
   onNavigate,
@@ -115,35 +161,46 @@ function InboxCard({
   t: InboxThread & Partial<Pick<Thread, 'branch'>>;
   channel: ReturnType<typeof useApp>['channels'][number] | undefined;
   status: RowStatus | null;
-  delegated: readonly ThreadStub[] | undefined;
+  agents?: BackgroundTask[];
   active: boolean;
   pinned: boolean;
   onNavigate?: () => void;
 }) {
-  const { setDone, setPinned } = useApp();
+  const { setPinned } = useApp();
+  const markDone = useMarkDone();
   const now = useNow(60_000);
-  const delegates = useRowDelegates(t.id, delegated, onNavigate);
+  const tree = useJobTree(t, 'inbox');
+  const own = (agents ?? []).filter((k) => k.thread_id === t.id && k.subagent);
   const title = t.title || 'Untitled';
+  // At work, the card names the phase: Starting, Running, Waiting on crew.
+  const phase = status && (status.glyph === 'running' || status.glyph === 'queued') ? threadPhase(t) : null;
+  // What holds it up names its kind: a question, the crew's question, a held message, a failed setup.
+  const blocker = useNeedOf(t.id)?.blockers[0];
+  const mark = status ? (blocker ? blockerMark(blocker) : markOf(status.glyph, phase)) : null;
+  const said = mark && (blocker || phase) ? MARK[mark].label : status?.label;
   const channelName = channel?.id === 'conductor' ? 'Conductor' : (channel?.name ?? t.channel_id);
-  // Work in progress recedes, as in T3: what waits on Ben stands out.
-  const receded = !active && status?.glyph === 'running';
-  const harness = t.harness && !delegates && (
-    <span className="shrink-0 text-fg-4">
+  // The machine it runs on or last ran on, with the run's time while it runs; the branch only without a machine.
+  const where = ranOnLine(t, now);
+  const label = where.machine ?? where.branch;
+  // A job's tree toggle sits on this line, laid over the link (a link can't hold a button), so a job always has it.
+  const line = !!label || !!t.run_started_at || !!tree;
+  const harness = t.harness && !tree && (
+    <span className="shrink-0 text-fg-3">
       <HarnessLogo harness={t.harness} size={11} />
     </span>
   );
   return (
-    <div className="group/row grid grid-cols-1">
+    <div className="tree-group group/row grid grid-cols-1" data-inbox-thread={t.id}>
       <a
         href={href.thread(t.id)}
         onClick={onNavigate}
-        title={`${title} · ${channelName}${status ? ` · ${status.label}` : ''}`}
+        title={`${title} · ${channelName}${status ? ` · ${said}` : ''}`}
         aria-current={active ? 'page' : undefined}
         data-active={active || undefined}
-        className={`hov z-[1] block rounded-[14px] [grid-area:1/1] px-3 py-2 transition-colors ${active ? '[--hov:transparent]' : ''} ${receded ? 'opacity-70' : ''}`}
+        className="item block [grid-area:1/1] px-3 py-2"
       >
-        <span className="flex h-4 items-center gap-1.5 text-[11.5px] text-fg-4">
-          <span className="grid w-3 shrink-0 place-items-center">
+        <span className="flex h-4 items-center gap-1.5 text-[11.5px] text-fg-3">
+          <span className="grid min-w-3 shrink-0 place-items-center">
             <ChannelLead channel={channel} />
           </span>
           {pinned && <Icon name="pin" size={11} className="shrink-0 text-fg-3" />}
@@ -151,33 +208,41 @@ function InboxCard({
           <span className="flex shrink-0 items-center gap-1.5 md:group-focus-within/row:invisible md:group-hover/row:invisible">
             {status ? (
               <>
-                {status.glyph === 'running' ? <Loader size={10} className="text-live-text" /> : <StatusDot status={status.glyph} size={6} />}
-                <span className="text-fg-3">{status.label}</span>
+                <StatusDot mark={mark} size={phase ? 7 : 6} />
+                <span className="text-fg-3">{said}</span>
               </>
             ) : (
               <span className="font-num tabular-nums">{relTime(t.updated_at ?? t.created_at, now)}</span>
             )}
           </span>
         </span>
-        <span className={`mt-1 flex items-center gap-1.5 text-[13px] leading-5 ${active ? 'font-medium text-fg' : receded ? 'text-fg-3' : 'font-medium text-fg-2'}`}>
+        <span className={`mt-1 flex items-center gap-1.5 text-[13px] leading-5 ${active ? 'font-medium text-fg' : 'font-medium text-fg-2'}`}>
           <span className="min-w-0 flex-1 truncate">{title}</span>
-          {!t.branch && harness}
-          {!t.branch && delegates && <DelegateCountSpace summary={delegates.summary} />}
+          {!line && harness}
         </span>
-        {t.branch && (
-          <span className="mt-0.5 flex h-4 items-center gap-1.5 text-[11.5px] text-fg-4">
-            <Icon name="branch" size={11} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{t.branch}</span>
+        {line && (
+          <span className="mt-0.5 flex h-4 items-center gap-1.5 text-[11.5px] text-fg-3" title={where.title || undefined} data-ran-on={where.machine ?? undefined}>
+            {label && <Icon name={where.machine ? 'monitor' : 'branch'} size={11} className="shrink-0" />}
+            {label && <span className="min-w-0 truncate">{label}</span>}
+            {label && t.run_started_at && <span aria-hidden className="shrink-0">·</span>}
+            <RunElapsed since={t.run_started_at} />
+            <span className="min-w-0 flex-1" />
             {harness}
-            {delegates && <DelegateCountSpace summary={delegates.summary} />}
+            {tree && <TreeToggleSpace tree={tree} />}
           </span>
         )}
       </a>
-      {delegates && <DelegateCount summary={delegates.summary} onOpen={delegates.open} className="z-[2] mr-2 mb-2 self-end justify-self-end [grid-area:1/1]" />}
+      {tree && line && <TreeToggle tree={tree} title={title} className="mr-3 mb-2 self-end justify-self-end [grid-area:1/1]" />}
       <span className="z-[2] mt-1.5 mr-1.5 flex items-center gap-0.5 self-start justify-self-end [grid-area:1/1] opacity-100 transition-opacity md:opacity-0 md:group-focus-within/row:opacity-100 md:group-hover/row:opacity-100">
         {pinned && <RowAction icon="pin" label={`Unpin ${title}`} onClick={() => void setPinned(t, false).catch(() => {})} />}
-        {canMarkDone(t.status) && <RowAction icon="check" label={`Mark ${title} done`} text="Done" onClick={() => void setDone(t.id, true).catch(() => {})} />}
+        {canMarkDone(t.status) && <RowAction icon="check" label={`Mark ${title} done`} text="Done" kbd="E" onClick={() => void markDone(t, true).catch(() => {})} />}
       </span>
+      {(tree || own.length > 0) && (
+        <div className="ml-[18px] [grid-area:2/1]">
+          {own.length > 0 && <AgentRows tasks={own} variant="inbox" onNavigate={onNavigate} />}
+          {tree && <TreeRows tree={tree} variant="inbox" agents={agents} onNavigate={onNavigate} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -195,13 +260,13 @@ function DoneRow({ t, active, onNavigate }: { t: InboxThread; active: boolean; o
         title={`${title} · Marked done`}
         aria-current={active ? 'page' : undefined}
         data-active={active || undefined}
-        className={`hov z-[1] flex h-8 items-center gap-2 rounded-full px-3 text-[12.5px] [grid-area:1/1] transition-colors ${active ? 'font-medium text-fg [--hov:transparent]' : 'text-fg-3 hover:text-fg'}`}
+        className={`item flex h-8 items-center gap-2 px-3 text-[12.5px] [grid-area:1/1] ${active ? 'font-medium text-fg' : 'text-fg-3 hover:text-fg'}`}
       >
         <span className="grid w-3 shrink-0 place-items-center">
           <DoneMark size={7} />
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span className="shrink-0 font-num text-[11px] text-fg-4 tabular-nums md:group-focus-within/row:invisible md:group-hover/row:invisible">
+        <span className="shrink-0 font-num text-[11px] text-fg-3 tabular-nums md:group-focus-within/row:invisible md:group-hover/row:invisible">
           {relTime(t.done_at ?? t.updated_at ?? t.created_at, now)}
         </span>
       </a>
@@ -212,12 +277,13 @@ function DoneRow({ t, active, onNavigate }: { t: InboxThread; active: boolean; o
   );
 }
 
-function RowAction({ icon, label, text, onClick }: { icon: 'check' | 'undo' | 'pin'; label: string; text?: ReactNode; onClick: () => void }) {
+function RowAction({ icon, label, text, kbd, onClick }: { icon: 'check' | 'undo' | 'pin'; label: string; text?: ReactNode; kbd?: string; onClick: () => void }) {
   return (
     <button
       type="button"
       aria-label={label}
-      title={label}
+      aria-keyshortcuts={kbd}
+      title={kbd ? `${label} (${kbd})` : label}
       onClick={onClick}
       className="hov grid h-6 min-w-6 grid-flow-col place-items-center gap-1 rounded-full px-1.5 text-[11.5px] text-fg-3 transition-colors hover:text-fg"
     >

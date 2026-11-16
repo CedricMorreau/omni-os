@@ -3,8 +3,7 @@ import { taskHost, type BackgroundTask, type ChannelWithRunning, type FolderWith
 import { FOLDER_NAME_MAX, drag, draftKey, useFolders } from '../../folders.tsx';
 import { openMenu } from '../ContextMenu.tsx';
 import { plural } from '../../format.ts';
-import { Loader } from '../brand.tsx';
-import { Icon } from '../ui.tsx';
+import { Icon, StatusDot } from '../ui.tsx';
 import { ChannelThreadEntry } from './SidebarRows.tsx';
 
 /** A folder's name being typed: Enter or leaving the field saves, Escape cancels. */
@@ -53,7 +52,7 @@ function accepts(f: FolderWithThreads) {
  * closes it, double-click or F2 renames, Delete asks to delete, and the "…" button or a right-click opens its menu.
  * Drop a thread on it to file it; drop another folder on it to put that one just above.
  */
-export function FolderRow({ f, openId, tasks, handoffs, onNavigate }: { f: FolderWithThreads; openId: string | null; tasks: BackgroundTask[]; handoffs: ChannelWithRunning['handoffs']; onNavigate?: () => void }) {
+export function FolderRow({ f, openId, tasks, onNavigate }: { f: FolderWithThreads; openId: string | null; tasks: BackgroundTask[]; onNavigate?: () => void }) {
   const folders = useFolders();
   const [over, setOver] = useState<'thread' | 'folder' | null>(null);
   const [all, setAll] = useState(false);
@@ -127,12 +126,12 @@ export function FolderRow({ f, openId, tasks, handoffs, onNavigate }: { f: Folde
             aria-expanded={open}
             aria-label={label}
             title={`${label}. Double-click or F2 to rename.`}
-            className="hov z-[1] flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full pr-1 pl-3 text-left text-[13px] text-fg-2 transition-colors hover:text-fg md:h-7 md:text-[12.5px]"
+            className="item flex h-8 min-w-0 flex-1 items-center gap-2 pr-1 pl-3 text-left text-[13px] text-fg-2 hover:text-fg md:h-7 md:text-[12.5px]"
           >
-            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} className="-ml-0.5 shrink-0 text-fg-4" />
+            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} className="-ml-0.5 shrink-0 text-fg-3" />
             <span className="min-w-0 flex-1 truncate">{f.name}</span>
-            {busy && <Loader size={11} className="shrink-0 text-live-text" />}
-            <span className="shrink-0 font-num text-[11px] text-fg-4 tabular-nums transition-opacity md:group-focus-within/folder:opacity-0 md:group-hover/folder:opacity-0">
+            {busy && <StatusDot status="running" size={7} className="shrink-0" />}
+            <span className="shrink-0 font-num text-[11px] text-fg-3 tabular-nums transition-opacity md:group-focus-within/folder:opacity-0 md:group-hover/folder:opacity-0">
               {f.count}
             </span>
           </button>
@@ -151,17 +150,17 @@ export function FolderRow({ f, openId, tasks, handoffs, onNavigate }: { f: Folde
         </div>
       )}
       {shown.map((t) => (
-        <ChannelThreadEntry key={t.id} t={t} active={t.id === openId} tasks={agents(t.id)} handoffs={handoffs} onNavigate={onNavigate} />
+        <ChannelThreadEntry key={t.id} t={t} active={t.id === openId} tasks={agents(t.id)} onNavigate={onNavigate} />
       ))}
       {open && !all && list.length > shown.length && (
-        <button type="button" onClick={() => setAll(true)} className="hov z-[1] ml-[25px] flex h-7 items-center rounded-full pr-3 pl-8 text-[12px] text-fg-4 transition-colors hover:text-fg-2">
+        <button type="button" onClick={() => setAll(true)} className="item ml-[25px] flex h-7 items-center pr-3 pl-8 text-[12px] text-fg-3 hover:text-fg-2">
           {list.length - shown.length} more
         </button>
       )}
       {open && f.count > f.threads.length && all && (
-        <span className="ml-[25px] flex h-7 items-center pr-3 pl-8 text-[12px] text-fg-4">{f.count - f.threads.length} older not shown</span>
+        <span className="ml-[25px] flex h-7 items-center pr-3 pl-8 text-[12px] text-fg-3">{f.count - f.threads.length} older not shown</span>
       )}
-      {open && f.count === 0 && <div className="ml-[25px] truncate pr-3 pl-8 text-[12px] leading-7 text-fg-4">No threads yet</div>}
+      {open && f.count === 0 && <div className="ml-[25px] truncate pr-3 pl-8 text-[12px] leading-7 text-fg-3">No threads yet</div>}
     </div>
   );
 }

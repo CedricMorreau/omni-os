@@ -3,20 +3,21 @@ import { api, errorText, type Artifact, type PendingMsg, type Thread } from '../
 import { harnessLabel } from '../components/brand.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { useSending } from '../sending.ts';
-import { ArtifactThumb } from '../pages/Artifacts.tsx';
+import { ArtifactThumb } from '../components/ArtifactThumb.tsx';
 import { ContextChips, hasContext } from '../message-context/ContextChips.tsx';
 import { Attachments } from '../components/Transcript.tsx';
 import { Button, Icon, StatusDot, StatusPill } from '../components/ui.tsx';
 import { duration, plural } from '../format.ts';
 import { isOmnis, parkedLabel } from '../requests.ts';
-import { useApp, useNow } from '../store.tsx';
+import { useApp, useNeedOf, useNow } from '../store.tsx';
 import { href } from '../router.ts';
 import { needsCard } from './activity.ts';
 import { NeedsActions } from './NeedsCard.tsx';
 import { MoAvatar, MoDiff, MoStripes } from './parts.tsx';
 import { useShell } from './shell.tsx';
+import { forwardedLabel, isForwarded, useSyncTrouble } from '../forwarded.ts';
 import type { NowDoing, PlanView, TurnView as TurnOf } from '@omni/shared/thread-view.ts';
-import { shownStatus } from '@omni/shared/delegate-count.ts';
+import { threadMark } from '@omni/shared/status.ts';
 
 /** The phone's turn, carrying the web's own artifact and thread rows. */
 export type TurnView = TurnOf<Artifact, Thread>;
@@ -29,13 +30,14 @@ export function MoProse({ text, files }: { text: string; files?: Artifact[] }) {
   return <Markdown text={text} files={files} className="text-[15px] leading-[1.6] text-pretty" />;
 }
 
-export function Outcome({ t, harness }: { t: TurnView; harness: string }) {
+/** `limit`: the thread's limit line (limits.ts `limitLabel`) on the turn the usage limit stopped. */
+export function Outcome({ t, harness, limit }: { t: TurnView; harness: string; limit?: string | null }) {
   const took = duration(t.result?.duration_ms);
   const [word, after] = ENDED[t.status] ?? ['Ended', 'Ended after'];
   return (
     <div className="flex items-center gap-2 text-[12.5px] leading-[1.3] text-fg-3 tabular-nums">
-      <StatusDot status={t.status} size={8} />
-      {[took ? `${after} ${took}` : word, t.steps ? plural(t.steps, 'step') : null, harnessLabel(harness)].filter(Boolean).join(' · ')}
+      <StatusDot status={limit ? 'limited' : t.status} size={8} />
+      {[limit ?? (took ? `${after} ${took}` : word), t.steps ? plural(t.steps, 'step') : null, harnessLabel(harness)].filter(Boolean).join(' · ')}
     </div>
   );
 }
@@ -66,7 +68,7 @@ export function StepsRow({ t, live, onClick }: { t: TurnView; live?: boolean; on
           </>
         )}
       </span>
-      <Icon name="chevronRight" size={15} className="text-fg-4" />
+      <Icon name="chevronRight" size={15} className="text-fg-3" />
     </button>
   );
 }
@@ -82,7 +84,7 @@ export function ArtifactCard({ a, sub, onOpen }: { a: Artifact; sub: string; onO
           <span className="truncate font-mono text-[13px] leading-[1.3]">{a.name}</span>
           <span className="truncate text-[12px] leading-[1.3] text-fg-3">{sub}</span>
         </span>
-        <Icon name="chevronRight" size={15} className="text-fg-4" />
+        <Icon name="chevronRight" size={15} className="text-fg-3" />
       </div>
     </button>
   );
@@ -95,7 +97,7 @@ export function ChangesCard({ files, onOpen }: { files: { path: string; add: num
       <button type="button" onClick={onOpen} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[14px] leading-none font-medium">
         Changes <span className="font-normal text-fg-3">{files.length}</span>
         <span className="flex-1" />
-        <Icon name="chevronRight" size={15} className="text-fg-4" />
+        <Icon name="chevronRight" size={15} className="text-fg-3" />
       </button>
       {shown.map((f) => (
         <div key={f.path} className="flex items-center gap-2.5 border-t border-line px-4 py-2.5 font-mono text-[12.5px] leading-[1.3]">
@@ -147,6 +149,11 @@ export function Plan({ plan }: { plan: PlanView }) {
   );
 }
 
+/** A delegated thread's state, a question it asked through its job included. */
+function KidPill({ k }: { k: Thread }) {
+  return <StatusPill mark={threadMark(k, { need: useNeedOf(k.id) })} />;
+}
+
 /** The threads a Conductor turn delegated, each opening its thread, with Needs you's answer under one that waits. */
 export function Delegation({ kids }: { kids: Thread[] }) {
   const shell = useShell();
@@ -165,12 +172,12 @@ export function Delegation({ kids }: { kids: Thread[] }) {
         return (
           <div key={k.id} className="flex flex-col rounded-2xl bg-elev shadow-[var(--shadow-card)]">
             <button type="button" onClick={() => shell.open(href.thread(k.id))} className="flex items-center gap-2.5 px-3 py-2.5 text-left">
-              <MoAvatar role={k.role} channel={k.channel_id} channelIcon={channel(k.channel_id)?.icon} size={32} />
+              <MoAvatar role={k.role} channel={k.channel_id} channelIcon={channel(k.channel_id)?.icon} avatarBg={channel(k.channel_id)?.avatar_bg} size={32} />
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="truncate text-[14px] leading-[1.3]">{k.title || 'Untitled'}</span>
                 <span className="truncate text-[12px] leading-[1.3] text-fg-3">{[k.role, k.task_id, `#${channel(k.channel_id)?.name ?? k.channel_id}`].filter(Boolean).join(' · ')}</span>
               </span>
-              <StatusPill status={card?.glyph === 'needs' ? 'needs' : shownStatus(k)} />
+              <KidPill k={k} />
             </button>
             {card && (
               <div className="px-3 pb-3 pl-[54px]">
@@ -207,6 +214,7 @@ export function Report({ role, taskId, text, dropped, undelivered }: { role?: st
 export function Pending({ thread, items, onPending }: { thread: Thread; items: PendingMsg[]; onPending: (p: PendingMsg[]) => void }) {
   const shell = useShell();
   const [busy, setBusy] = useState<string | null>(null);
+  const trouble = useSyncTrouble(items.some(isForwarded));
   const call = async (key: string, route: 'resume' | 'discard', ids: string[]) => {
     setBusy(key);
     try {
@@ -222,7 +230,7 @@ export function Pending({ thread, items, onPending }: { thread: Thread; items: P
     <>
       {items.map((m) => (
         <div key={m.uuid} className="flex flex-col items-end gap-1.5 opacity-75">
-          <span className="text-[12px] leading-[1.3] text-fg-3">{parkedLabel(m, !!thread.resume_blocked) ?? (m.state === 'held' ? 'Queued for after this turn' : 'Sent, waiting for the agent')}</span>
+          <span className="text-[12px] leading-[1.3] text-fg-3">{isForwarded(m) ? forwardedLabel(m, trouble) : (parkedLabel(m, !!thread.resume_blocked) ?? (m.state === 'held' ? 'Queued for after this turn' : 'Sent, waiting for the agent'))}</span>
           {m.attachments?.length ? <Attachments threadId={thread.id} items={m.attachments} /> : null}
           <ContextChips records={m.context} align="end" className="w-full max-w-[86%]" />
           {(m.text || !hasContext(m.context)) && (

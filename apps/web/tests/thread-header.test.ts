@@ -10,12 +10,12 @@ import { HeaderActions } from '../src/components/thread/HeaderActions.tsx';
 
 const thread = (over: Partial<Thread> = {}) => ({ id: 't1', title: 'A thread', status: 'running', archived: 0, pinned_at: null, done_at: null, ...over }) as Thread;
 
-const render = (t: Thread) =>
+const render = (t: Thread, reconnecting = false) =>
   renderToStaticMarkup(
     createElement(HeaderActions, {
       thread: t,
       meter: null,
-      reconnecting: false,
+      reconnecting,
       onDone: () => {},
       onRestore: () => {},
       restoring: false,
@@ -29,7 +29,7 @@ const render = (t: Thread) =>
 const buttons = (html: string) => [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].map(([, attrs, body]) => /aria-label="([^"]*)"/.exec(attrs)?.[1] ?? body.replace(/<[^>]+>/g, '').trim());
 
 const MENU = 'Thread actions';
-const PANEL = 'Artifacts, changes, browser, terminal, actions, details';
+const PANEL = 'Hide quick actions';
 
 describe('the thread header', () => {
   it('shows the thread menu and the panel toggle, at any width, on any thread', () => {
@@ -48,5 +48,12 @@ describe('the thread header', () => {
   it('leaves pin, reference, hand off and Send to Grok Bot to the thread menu', () => {
     const names = buttons(render(thread({ status: 'done', pinned_at: '2026-10-24T08:00:00Z' })));
     for (const gone of ['Pin thread', 'Unpin thread', 'Reference another thread', 'Hand off to another Mac', 'Send to Grok Bot']) expect(names).not.toContain(gone);
+  });
+
+  it('reads Reconnecting while the live stream is down, not Running', () => {
+    const html = render(thread(), true);
+    expect(html).toContain('Reconnecting…');
+    expect(html).not.toContain('Running');
+    expect(render(thread())).toContain('Running');
   });
 });

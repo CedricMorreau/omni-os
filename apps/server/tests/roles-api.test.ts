@@ -19,29 +19,29 @@ const call = async (method: string, path: string, body?: unknown) => {
   return { status: res.status, body: (await res.json()) as any };
 };
 
-const reviewer = { id: 'reviewer', name: 'Reviewer', description: 'Checks the PR', skills: ['ponytail:ponytail-review', 'code-review'], stages: [5], charter: 'Review only the diff.' };
+const reviewer = { id: 'qa-reviewer', name: 'Reviewer', description: 'Checks the PR', skills: ['ponytail:ponytail-review', 'code-review'], stages: [5], charter: 'Review only the diff.' };
 
 describe('roles', () => {
   it('creates a role in the memory roles folder and lists it with its skills and stages', async () => {
     const made = await call('POST', '/crew', reviewer);
     expect(made.status).toBe(201);
-    expect(made.body).toMatchObject({ id: 'reviewer', name: 'Reviewer', skills: reviewer.skills, stages: [5], charter: 'Review only the diff.', source: 'yours' });
-    expect(readFileSync(join(rolesDir(), 'reviewer.md'), 'utf8')).toContain('ponytail:ponytail-review');
-    expect((await call('GET', '/crew')).body.find((r: any) => r.id === 'reviewer').stages).toEqual([5]);
+    expect(made.body).toMatchObject({ id: 'qa-reviewer', name: 'Reviewer', skills: reviewer.skills, stages: [5], charter: 'Review only the diff.', source: 'yours' });
+    expect(readFileSync(join(rolesDir(), 'qa-reviewer.md'), 'utf8')).toContain('ponytail:ponytail-review');
+    expect((await call('GET', '/crew')).body.find((r: any) => r.id === 'qa-reviewer').stages).toEqual([5]);
     expect((await call('POST', '/crew', reviewer)).status).toBe(409);
   });
 
   it('renames a role and changes its skills, stages and instructions', async () => {
-    const changed = await call('PUT', '/crew/reviewer', { ...reviewer, name: 'PR reviewer', skills: ['code-review'], stages: [5, 9], charter: 'New text.' });
-    expect(changed.body).toMatchObject({ id: 'reviewer', name: 'PR reviewer', skills: ['code-review'], stages: [5, 9], charter: 'New text.' });
+    const changed = await call('PUT', '/crew/qa-reviewer', { ...reviewer, name: 'PR reviewer', skills: ['code-review'], stages: [5, 9], charter: 'New text.' });
+    expect(changed.body).toMatchObject({ id: 'qa-reviewer', name: 'PR reviewer', skills: ['code-review'], stages: [5, 9], charter: 'New text.' });
   });
 
   it('deletes your own role, never the ticket or conductor role', async () => {
     expect((await call('DELETE', '/crew/ticket')).status).toBe(409);
     expect((await call('DELETE', '/crew/conductor')).status).toBe(409);
-    expect((await call('DELETE', '/crew/reviewer')).status).toBe(200);
-    expect(existsSync(join(rolesDir(), 'reviewer.md'))).toBe(false);
-    expect((await call('DELETE', '/crew/reviewer')).status).toBe(404);
+    expect((await call('DELETE', '/crew/qa-reviewer')).status).toBe(200);
+    expect(existsSync(join(rolesDir(), 'qa-reviewer.md'))).toBe(false);
+    expect((await call('DELETE', '/crew/qa-reviewer')).status).toBe(404);
   });
 
   it('refuses a bad id or a stage outside 1 to 10', async () => {

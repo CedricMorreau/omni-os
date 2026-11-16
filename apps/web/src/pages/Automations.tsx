@@ -1,16 +1,20 @@
 import type { Device } from '@omni/shared/handoff.ts';
 import { runOnRows } from '@omni/shared/thread-machine.ts';
 import { runOnOptions } from '../components/RunOnPicker.tsx';
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, errorText, useApi, type Automation, type Thread, type SyncStatus } from '../api.ts';
 import { DeliveryHistory } from '../components/DeliveryHistory.tsx';
-import { Button, Chip, CopyButton, Empty, ErrorNote, Icon, InlineConfirm, Loading, PageHeader, Picker, StatusDot, Toggle } from '../components/ui.tsx';
+import { AutomationEditor, type EditorTarget } from '../components/AutomationEditor.tsx';
+import { Button, Chip, ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, InlineConfirm, Loading, PageHeader, Picker, Segmented, StatusDot, Toggle } from '../components/ui.tsx';
+import { pageColumn, PageToolbar, RefreshButton, SearchField } from '../components/ui/feedback.tsx';
+import { CrewMark, isCrewRole } from '../components/brand.tsx';
+import { statusLabel } from '@omni/shared/status.ts';
 import { describeCron } from '@omni/shared/cron.ts';
 import { relTime } from '@omni/shared/format.ts';
 import { shortPath } from '@omni/shared/short-path.ts';
 import { artifactChannels, describeArtifactSource, describeEvent, describeWebhookSource, nextRunLabel } from '../format.ts';
 import { href, navigate } from '../router.ts';
-import { useApp, useFeed } from '../store.tsx';
+import { useApp, useFeed, useHereName } from '../store.tsx';
 
 const RUN_TONE: Record<string, string> = {
   done: 'var(--done)',
@@ -18,6 +22,7 @@ const RUN_TONE: Record<string, string> = {
   stopped: 'var(--fg-4)',
   running: 'var(--live)',
   queued: 'var(--fg-4)',
+  skipped: 'var(--line-strong)',
 };
 
 /** Recent runs as a row of bars, oldest left: a glance at reliability. */
@@ -27,14 +32,31 @@ function RunStrip({ runs }: { runs: Automation['runs'] }) {
   return (
     <span className="flex h-3.5 items-end gap-[3px]" role="img" aria-label={`${runs.filter((r) => r.status === 'done').length} of ${runs.length} recent runs finished`}>
       {bars.map((r, i) => (
-        <i key={i} title={`${r.status ?? 'removed'} · ${relTime(r.created_at)}`} className={`block w-[5px] rounded-full ${r.status === 'running' ? 'pulse' : ''}`} style={{ height: r.status === 'done' ? '100%' : '70%', background: RUN_TONE[r.status ?? ''] ?? 'var(--line-strong)' }} />
+        <i key={i} title={`${r.status ?? 'removed'} · ${relTime(r.created_at)}`} className={`block w-[5px] rounded-full ${r.status === 'running' ? 'pulse' : ''}`} style={{ height: r.status === 'done' ? '100%' : r.status === 'skipped' ? '35%' : '70%', background: RUN_TONE[r.status ?? ''] ?? 'var(--line-strong)' }} />
       ))}
     </span>
   );
 }
 
+/** A scheduled run skipped before it started (failed precheck, stale catch-up): no thread to open, so the reason shows under it. */
+function SkippedRun({ run }: { run: Automation['runs'][number] }) {
+  return (
+    <li className="flex min-w-0 items-start gap-2.5 px-2 py-1.5 text-[12.5px] text-fg-3">
+      <StatusDot status="idle" size={7} className="mt-[5px]" />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="min-w-0 flex-1 truncate font-num">{relTime(run.created_at)}</span>
+          {run.trigger !== 'cron' && <span className="shrink-0 font-num text-[length:var(--fs-meta)]">{run.trigger}</span>}
+          <span className="shrink-0 text-right text-[length:var(--fs-12)]">Skipped</span>
+        </span>
+        <span className="mt-0.5 block font-mono text-[11px] leading-snug break-words">{run.skip_reason}</span>
+      </span>
+    </li>
+  );
+}
+
 const TRIGGER_CHIP = 'inline-flex h-6 items-center gap-1.5 rounded-full bg-bg px-2.5 whitespace-nowrap';
-const FILTER_CHIP = 'inline-flex min-h-6 max-w-full items-center rounded-[12px] px-2 py-0.5 font-mono text-[11px] leading-snug break-words text-fg-4 shadow-[inset_0_0_0_1px_var(--line)]';
+const FILTER_CHIP = 'inline-flex min-h-6 max-w-full items-center rounded-[12px] px-2 py-0.5 font-mono text-[11px] leading-snug break-words text-fg-3 shadow-[inset_0_0_0_1px_var(--line)]';
 
 /** What starts the automation: its event or schedule, then what it narrows to. */
 function TriggerChips({ a, channelName }: { a: Automation; channelName: (id: string) => string }) {
@@ -142,11 +164,11 @@ function WebhookPanel({ id, webhook, onChanged }: { id: string; webhook: NonNull
               </span>
             )}
             {webhook.secret_set ? (
-              <span className="mt-0.5 block truncate text-[11.5px] text-fg-4" title={webhook.secret}>
+              <span className="mt-0.5 block truncate text-[11.5px] text-fg-3" title={webhook.secret}>
                 Secret <span className="font-mono">{webhook.secret}</span>
               </span>
             ) : (
-              <span className="mt-0.5 block text-[11.5px] text-fg-4">GitHub deliveries are refused until you set the same secret you gave the hook on GitHub.</span>
+              <span className="mt-0.5 block text-[11.5px] text-fg-3">GitHub deliveries are refused until you set the same secret you gave the hook on GitHub.</span>
             )}
           </span>
           {!editing && (
@@ -189,8 +211,20 @@ function WebhookPanel({ id, webhook, onChanged }: { id: string; webhook: NonNull
   );
 }
 
-function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void }) {
+/** Which machine runs it: its own `machine:`, else the shared pick. Null with one machine and nothing picked. */
+function machineChip(a: Automation, devices: Device[] | null | undefined, hereName: string | undefined): { label: string; title: string; missing: boolean } | null {
+  if (!a.machine && !devices?.length) return null;
+  const own = a.machine ? 'Its own pick' : 'Follows Run automations on';
+  if (a.runs_on.isThisMac) return { label: hereName ?? 'This machine', title: `${own}: runs on the machine you talk to`, missing: false };
+  const d = devices?.find((x) => x.id === a.runs_on.owner);
+  if (d) return { label: d.name, title: `${own}: runs on ${d.name}`, missing: false };
+  return { label: a.machine ?? 'Unknown machine', title: 'No synced machine has this name, so it runs nowhere until one does', missing: true };
+}
+
+function AutomationCard({ a, devices, onChanged, onDelete, onEdit }: { a: Automation; devices: Device[] | null | undefined; onChanged: () => void; onDelete: () => void; onEdit: () => void }) {
   const { channel } = useApp();
+  const hereName = useHereName();
+  const machine = machineChip(a, devices, hereName);
   const [enabled, setEnabled] = useState(a.enabled);
   const [toggling, setToggling] = useState(false);
   const [running, setRunning] = useState(false);
@@ -235,14 +269,14 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
   const channelName = (id: string) => channel(id)?.name ?? id;
 
   return (
-    <div className={`rounded-[24px] bg-surface transition-opacity ${a.error ? 'shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--bad)_35%,transparent)]' : ''}`}>
+    <div className={`rounded-[var(--r-xl)] bg-surface transition-opacity ${a.error ? 'shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--bad)_35%,transparent)]' : ''}`}>
       {/* On a phone the details span under the actions too, so the chips are not squeezed into a narrow column. */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 p-4 md:p-5">
-        <span className={`row-span-2 mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-bg transition-colors ${enabled && !a.error ? 'text-fg' : 'text-fg-4'}`}>
+        <span className={`row-span-2 mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-bg transition-colors ${enabled && !a.error ? 'text-fg' : 'text-fg-3'}`}>
           <Icon name="zap" size={16} />
         </span>
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <h2 className="font-display text-[16px]">{a.name}</h2>
+          <h2 className="font-display text-[length:var(--fs-heading)]">{a.name}</h2>
           {!enabled && !a.error && <Chip tone="outline">Paused</Chip>}
           {a.error && <Chip tone="needs">Invalid</Chip>}
         </div>
@@ -255,11 +289,24 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
         <div className="col-[2/4] min-w-0 md:col-[2/3]">
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-fg-2">
             <TriggerChips a={a} channelName={channelName} />
-            <a href={href.channel(a.channel)} className="hov inline-flex h-6 items-center rounded-full bg-bg px-2.5 [--hov:var(--surface-2)]">
-              #{ch?.name ?? a.channel}
+            <a href={href.channel(a.channel)} className="hov inline-flex h-6 items-center gap-1.5 rounded-full bg-bg px-2.5 [--hov:var(--surface-2)]" title={`Runs in #${ch?.name ?? a.channel}`}>
+              <Icon name="hash" size={12} className="text-fg-3" />
+              {ch?.name ?? a.channel}
             </a>
-            {a.role && <span className="inline-flex h-6 items-center rounded-full bg-bg px-2.5">{a.role}</span>}
+            {a.role && (
+              <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-bg px-2.5" title={`Runs as ${a.role}`}>
+                {isCrewRole(a.role) ? <CrewMark role={a.role} size={12} /> : <Icon name="layers" size={12} className="text-fg-3" />}
+                {a.role}
+              </span>
+            )}
+            {machine && (
+              <span className={`inline-flex h-6 items-center gap-1.5 rounded-full bg-bg px-2.5 ${machine.missing ? 'text-warn' : ''}`} title={machine.title}>
+                <Icon name={machine.missing ? 'alert' : 'monitor'} size={12} className={machine.missing ? '' : 'text-fg-3'} />
+                {machine.label}
+              </span>
+            )}
             {a.model && <span className="inline-flex h-6 items-center rounded-full bg-bg px-2.5 font-num text-[11px]">{a.model}</span>}
+            {a.source === 'edited' && <Chip tone="outline" title="Your copy of a shipped automation, in data/automations/">Edited</Chip>}
           </div>
           {enabled && a.on?.event === 'artifact_published' && !a.error && (
             <div className="mt-2.5 text-[12.5px] text-fg-3">
@@ -278,7 +325,19 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
             </div>
           )}
           {enabled && a.on && a.on.event !== 'artifact_published' && a.on.event !== 'github_webhook' && !a.error && (
-            <div className="mt-2.5 text-[12.5px] text-fg-3">{a.poll_error ? <span className="text-fg-2">{a.poll_error}</span> : <>Watching <span className="font-medium text-fg">{a.repo}</span>, one run per event</>}</div>
+            <div className="mt-2.5 text-[12.5px] text-fg-3">
+              {!a.runs_on.isThisMac ? (
+                <>
+                  Watches <span className="font-medium text-fg">{a.repo}</span> from {machine?.missing ? 'the machine it names, once that one syncs' : (machine?.label ?? 'the machine that runs it')}
+                </>
+              ) : a.poll_error ? (
+                <span className="text-fg-2">{a.poll_error}</span>
+              ) : (
+                <>
+                  Watching <span className="font-medium text-fg">{a.repo}</span>, one run per event
+                </>
+              )}
+            </div>
           )}
           {enabled && a.next && !a.error && (
             <div className="mt-2.5 text-[12.5px] text-fg-3">
@@ -292,7 +351,7 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
       {a.error && (
         <div className="mx-4 mb-4 md:mx-5">
           <ErrorNote>
-            {a.error}. Fix it in <span className="font-mono text-[12px]">{shortPath(a.file ?? `automations/${a.id}.yaml`)}</span>.
+            {a.error}. Fix it with Edit, or in <span className="font-mono text-[12px]">{shortPath(a.file ?? `automations/${a.id}.yaml`)}</span>.
           </ErrorNote>
         </div>
       )}
@@ -305,9 +364,19 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
       {a.webhook && !a.error && <WebhookPanel id={a.id} webhook={a.webhook} onChanged={onChanged} />}
 
       <div className="px-2.5 pb-1">
-        <button type="button" onClick={() => setShowPrompt((v) => !v)} aria-expanded={showPrompt} className="hov flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-fg-3 [--hov:var(--surface-2)] hover:text-fg">
-          <Icon name="chevronRight" size={12} className={`transition-transform duration-300 [transition-timing-function:var(--ease-settle)] ${showPrompt ? 'rotate-90' : ''}`} /> Prompt
-        </button>
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" onClick={() => setShowPrompt((v) => !v)} aria-expanded={showPrompt} className="hov flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-fg-3 [--hov:var(--surface-2)] hover:text-fg">
+            <Icon name="chevronRight" size={12} className={`transition-transform duration-300 [transition-timing-function:var(--ease-settle)] ${showPrompt ? 'rotate-90' : ''}`} /> Prompt
+          </button>
+          <span className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" icon="pencil" className="[--hov:var(--surface-2)]" onClick={onEdit} aria-label={`Edit ${a.name}`}>
+              Edit
+            </Button>
+            <Button size="sm" variant="danger" icon="trash" className="[--hov:var(--surface-2)]" onClick={onDelete} aria-label={`Delete ${a.name}`}>
+              Delete
+            </Button>
+          </span>
+        </div>
         {showPrompt && <pre className="fade-in mx-2.5 mt-1 mb-2 rounded-2xl bg-bg px-3.5 py-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-fg-2">{a.prompt || '(empty)'}</pre>}
       </div>
 
@@ -317,7 +386,7 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
             <span className="caption">Deliveries</span>
           </div>
           {a.deliveries.length === 0 ? (
-            <div className="text-[12.5px] text-fg-4">{a.on?.event === 'github_webhook' ? 'No GitHub deliveries since it was turned on.' : 'No pages published since it was turned on.'}</div>
+            <div className="text-[12.5px] text-fg-3">{a.on?.event === 'github_webhook' ? 'No GitHub deliveries since it was turned on.' : 'No pages published since it was turned on.'}</div>
           ) : (
             <DeliveryHistory automation={a.id} latest={a.deliveries} latestMore={a.deliveries_more} onChanged={onChanged} />
           )}
@@ -330,16 +399,19 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
           <RunStrip runs={a.runs} />
         </div>
         {a.runs.length === 0 ? (
-          <div className="text-[12.5px] text-fg-4">Never run.</div>
+          <div className="text-[12.5px] text-fg-3">Never run.</div>
         ) : (
           <ul className="-mx-2">
             {a.runs.map((r, i) => {
+              if (r.skip_reason) return <SkippedRun key={`skip-${r.created_at}-${i}`} run={r} />;
               const inner = (
                 <>
                   <StatusDot status={r.status ?? 'failed'} size={7} />
-                  <span className="min-w-0 flex-1 truncate">{r.title ?? 'Thread removed'}</span>
-                  {r.trigger !== 'cron' && <span className="shrink-0 font-num text-[10.5px] text-fg-4">{r.trigger}</span>}
-                  <span className="w-24 shrink-0 text-right font-num text-[11px] text-fg-4">{relTime(r.created_at)}</span>
+                  <span className="min-w-0 flex-1 truncate font-num" title={r.title ?? undefined}>
+                    {relTime(r.created_at)}
+                  </span>
+                  {r.trigger !== 'cron' && <span className="shrink-0 font-num text-[length:var(--fs-meta)] text-fg-3">{r.trigger}</span>}
+                  <span className="shrink-0 text-right text-[length:var(--fs-12)] text-fg-3">{r.thread_id ? statusLabel(r.status) : 'Thread removed'}</span>
                 </>
               );
               return (
@@ -357,7 +429,42 @@ function AutomationCard({ a, onChanged }: { a: Automation; onChanged: () => void
           </ul>
         )}
       </div>
+
     </div>
+  );
+}
+
+/** Asks before deleting, naming the automation. Rendered by the page, outside the animated list, so its scrim covers the window. */
+function DeleteAutomationDialog({ a, onClose, onDeleted }: { a: Automation | null; onClose: () => void; onDeleted: () => void }) {
+  const { channel } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const close = () => {
+    setError(null);
+    onClose();
+  };
+  const remove = async () => {
+    if (!a) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(`/automations/${encodeURIComponent(a.id)}`);
+      onDeleted();
+      close();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <ConfirmDialog open={!!a} title={`Delete “${a?.name ?? ''}”?`} confirmLabel="Delete automation" danger busy={busy} error={error} onConfirm={() => void remove()} onCancel={close}>
+      <p>
+        <span className="font-medium text-fg">{a?.name}</span> stops running and leaves this list on this machine. Threads it already started stay in #
+        {(a && channel(a.channel)?.name) ?? a?.channel}.
+      </p>
+      <p className="text-[12.5px] text-fg-3">You can’t undo this from Omni.</p>
+    </ConfirmDialog>
   );
 }
 
@@ -390,23 +497,46 @@ function AutomationMachine({ refreshing }: { refreshing: boolean }) {
     }
   };
   return (
-    <div className="relative z-10 rounded-[24px] bg-surface p-4 md:p-5">
+    <div className="relative z-10 rounded-[var(--r-xl)] bg-surface p-4 md:p-5">
       <div className="mb-2 text-[13px] font-medium">Run automations on</div>
       <Picker label="Run automations on" value={pick} options={options} onChange={(v) => void save(v)} disabled={saving || !status.data?.machineId || !devices.data} />
-      <p className="mt-2 text-[12.5px] text-fg-3">Scheduled and event-triggered runs use the machine picked here after sync. It must be awake with Omni running. Run now uses the connected machine.</p>
+      <p className="mt-2 text-[12.5px] text-fg-3">Scheduled and event-triggered runs use the machine picked here after sync, unless an automation picks its own under Edit. It must be awake with Omni running. Run now uses the connected machine.</p>
       {status.data && !status.data.machineId && <p className="mt-2 text-[12.5px] text-fg-3">Sync another machine to choose where automations run.</p>}
       {(error || status.error || devices.error) && <ErrorNote className="mt-2">{error || status.error || devices.error}</ErrorNote>}
     </div>
   );
 }
 
+const TRIGGER_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'schedule', label: 'Scheduled' },
+  { id: 'event', label: 'On an event' },
+] as const;
+type TriggerFilter = (typeof TRIGGER_FILTERS)[number]['id'];
+
+const matchesTrigger = (f: TriggerFilter, a: Automation) => f === 'all' || (f === 'event') === !!a.on;
+
+const matchesSearch = (a: Automation, q: string) => {
+  const t = q.trim().toLowerCase();
+  return !t || a.name.toLowerCase().includes(t) || a.id.toLowerCase().includes(t) || (a.prompt ?? '').toLowerCase().includes(t);
+};
+
 export function AutomationsPage() {
   const res = useApi<Automation[]>('/automations');
-  const { reload } = res;
+  const devices = useApi<Device[]>('/devices');
+  const reloadList = res.reload;
+  const reloadDevices = devices.reload;
+  // The machine chips name devices: a machine that synced since the page opened shows by name.
+  const reload = useCallback(() => {
+    reloadList();
+    reloadDevices();
+  }, [reloadList, reloadDevices]);
+  const [deleting, setDeleting] = useState<Automation | null>(null);
+  const [editing, setEditing] = useState<EditorTarget | null>(null);
   // Keep run and delivery statuses fresh when an automation thread or delivery changes state (debounced, threads update often).
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useFeed((e) => {
-    if (e.type !== 'reconnect' && e.type !== 'automation_delivery' && !(e.type === 'thread' && e.thread.automation)) return;
+    if (e.type !== 'reconnect' && e.type !== 'automation_delivery' && e.type !== 'automations' && !(e.type === 'thread' && e.thread.automation)) return;
     if (timer.current) return;
     timer.current = setTimeout(() => {
       timer.current = undefined;
@@ -415,18 +545,49 @@ export function AutomationsPage() {
   });
   useEffect(() => () => clearTimeout(timer.current), []);
 
+  const [q, setQ] = useState('');
+  const [trigger, setTrigger] = useState<TriggerFilter>('all');
+  const all = res.data ?? [];
+  const found = useMemo(() => all.filter((a) => matchesSearch(a, q)), [all, q]);
+  const list = found.filter((a) => matchesTrigger(trigger, a));
+  const counts = Object.fromEntries(TRIGGER_FILTERS.map((f) => [f.id, found.filter((a) => matchesTrigger(f.id, a)).length])) as Record<TriggerFilter, number>;
+
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <PageHeader width="max-w-3xl"
+      <PageHeader
+        width="page"
         title="Automations"
         subtitle={
           <>
-            Scheduled or event-triggered prompts. Each run becomes a thread in its channel. Definitions live in <span className="font-mono text-[12px]">automations/*.yaml</span> and reload on save.
+            Prompts that run on a schedule or when something happens. Each run becomes a thread in its channel. Edits here write the YAML in <span className="font-mono text-[length:var(--fs-code)] text-fg-2">data/automations/</span>, and hand edits to it or to <span className="font-mono text-[length:var(--fs-code)] text-fg-2">automations/*.yaml</span> reload when you save.
           </>
         }
-        actions={<Button size="sm" variant="ghost" icon="refresh" onClick={reload} busy={res.loading && !!res.data} aria-label="Refresh" />}
       />
-      <div className="rise mx-auto max-w-3xl space-y-3 px-4 pt-2 pb-16 md:px-8">
+      <div className={`${pageColumn('page')} rise space-y-3 pb-16`}>
+        <PageToolbar
+          className="mb-4"
+          right={
+            <span className="flex items-center gap-2">
+              <Button size="sm" variant="primary" icon="plus" onClick={() => setEditing({ id: null })}>
+                New
+              </Button>
+              <RefreshButton onClick={reload} busy={res.loading && !!res.data} label="Reload automations" />
+            </span>
+          }
+        >
+          <SearchField value={q} onChange={setQ} placeholder="Search automations" label="Search automations" />
+          <Segmented
+            label="Trigger"
+            value={trigger}
+            onChange={setTrigger}
+            size="sm"
+            options={TRIGGER_FILTERS.map((f) => ({
+              id: f.id,
+              label: f.label,
+              badge: counts[f.id] ? <span className="font-num text-[10.5px] text-fg-3 tabular-nums">{counts[f.id]}</span> : undefined,
+            }))}
+          />
+        </PageToolbar>
         <AutomationMachine refreshing={res.loading} />
         {res.error ? (
           <ErrorNote onRetry={reload}>{res.error}</ErrorNote>
@@ -434,16 +595,22 @@ export function AutomationsPage() {
           <Loading />
         ) : res.data.length === 0 ? (
           <Empty icon="clock" title="No automations yet">
-            Add a YAML file to <span className="font-mono text-[12px]">automations/</span> with name, cron, channel and prompt. It shows up here right away.
+            Make one with New, or add a YAML file to <span className="font-mono text-[12px]">data/automations/</span> with name, cron, channel and prompt. It shows up here right away.
+          </Empty>
+        ) : list.length === 0 ? (
+          <Empty icon="search" title="No match">
+            No automation matches this search and trigger.
           </Empty>
         ) : (
-          res.data.map((a, i) => (
+          list.map((a, i) => (
             <div key={a.id} style={{ '--i': i } as CSSProperties}>
-              <AutomationCard a={a} onChanged={reload} />
+              <AutomationCard a={a} devices={devices.data} onChanged={reload} onDelete={() => setDeleting(a)} onEdit={() => setEditing({ id: a.id, name: a.name })} />
             </div>
           ))
         )}
       </div>
+      <DeleteAutomationDialog a={deleting} onClose={() => setDeleting(null)} onDeleted={reload} />
+      <AutomationEditor target={editing} onClose={() => setEditing(null)} onSaved={reload} />
     </div>
   );
 }

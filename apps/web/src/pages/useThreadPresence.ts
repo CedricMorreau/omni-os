@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { Thread } from '../api.ts';
 import { shownResult } from '../needs-you.ts';
 import { useApp, usePageVisible } from '../store.tsx';
+import { useSeenUnlisted } from '../app/useSeenUnlisted.ts';
 
 /** What the app knows about the thread on screen: the sidebar lists it, and its newest result counts as read. */
 export function useThreadPresence(id: string, thread: Thread | null) {
@@ -9,8 +10,8 @@ export function useThreadPresence(id: string, thread: Thread | null) {
 
   // The sidebar keeps this thread listed under its channel, with live title and status, even once it stops.
   useEffect(() => {
-    if (thread) setOpenThread({ id: thread.id, channel_id: thread.channel_id, title: thread.title, status: thread.status, created_at: thread.created_at, done_at: thread.done_at });
-  }, [thread?.id, thread?.channel_id, thread?.title, thread?.status, thread?.created_at, thread?.done_at]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (thread) setOpenThread({ id: thread.id, channel_id: thread.channel_id, title: thread.title, status: thread.status, created_at: thread.created_at, done_at: thread.done_at, delegating: thread.delegating, setup: thread.setup, limit_state: thread.limit_state });
+  }, [thread?.id, thread?.channel_id, thread?.title, thread?.status, thread?.created_at, thread?.done_at, thread?.delegating, thread?.setup, thread?.limit_state]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => setOpenThread(null), [setOpenThread]);
 
   // On screen, the thread's newest result is read: exactly the one Needs you listed, so a turn that ends after it
@@ -20,4 +21,6 @@ export function useThreadPresence(id: string, thread: Thread | null) {
   useEffect(() => {
     if (shown && visible) readResult(shown);
   }, [shown, visible, readResult]);
+  // A delegated or team thread's result never lists there: on screen is its read.
+  useSeenUnlisted(id, thread, shown, visible);
 }

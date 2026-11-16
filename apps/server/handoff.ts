@@ -14,7 +14,7 @@ import { requestPhase, type HandoffOffer, type HandoffRequest, type HandoffView,
 import { publishFeed } from './bus.ts';
 import { paths } from './config.ts';
 import { assignments, channels, completions, messageRequests, outbox, resultReads, threads, tx, type Thread } from './db.ts';
-import { holderOf } from './ownership.ts';
+import { holderOf, remoteHolder } from './ownership.ts';
 import { HARNESS_META, isHarnessId, isProviderHarness, type HarnessId } from './harness/types.ts';
 import { needsWorktree, plannedWorktree } from './sandbox.ts';
 import { contextBlock, placeFor } from './message-context/project.ts';
@@ -146,11 +146,12 @@ export async function handOff(threadId: string, to: string): Promise<HandoffResu
 /**
  * Send a thread that has not run anywhere to another machine, to run there from its first message (run-on.ts): the
  * offer goes out ready, since there is no turn to stop, session to upload or worktree to pack. That machine cuts the
- * worktree itself. `to` must be a synced machine; the caller checks it. `files` are in Storage already.
+ * worktree itself, or lays out `bundle` when the offer carries one (a fork's, continue.ts) and runs its setup in it.
+ * `to` must be a synced machine; the caller checks it. `files` and the bundle are in Storage already.
  */
-export function sendNewThread(threadId: string, prompt: string, from: Mac, to: Mac, files: UploadRef[] = []) {
+export function sendNewThread(threadId: string, prompt: string, from: Mac, to: Mac, files: UploadRef[] = [], bundle: WorktreeBundle | null = null, id: string = randomUUID()) {
   writeOffer({
-    id: randomUUID(), thread: threadId, from, to, at: iso(), idle: true, fresh: true, state: 'offered', queued: [prompt], bundle: null, leftBehind: null,
+    id, thread: threadId, from, to, at: iso(), idle: true, fresh: true, state: 'offered', queued: [prompt], bundle, leftBehind: null,
     ...(files.length && { files }),
   });
   void activeWorker()?.syncNow();
@@ -180,7 +181,7 @@ export function takeoverOf(t: Thread): Takeover | null {
   if (!self || !holder || holder === self || inFlight(t.id)) return null;
   const from = { id: holder, name: machineName(holder) };
   const to = { id: self, name: ownName(self) };
-  return { from, to, running: busy(t), refused: activeWorker() ? refusal(t, from.name) : syncProblem(HANDOFF_NEEDS) };
+  return { from, to, running: busy(t), refused: activeWorker() ? refusal(t, from.name) : syncProblem(HANDOFF_NEEDS), forwards: !!remoteHolder(t) };
 }
 
 /**

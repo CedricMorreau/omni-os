@@ -8,6 +8,20 @@ const payload = { aps: { alert: { title: 'Thread' } }, omni: { kind: 'needsInput
 describe('parseAlert', () => {
   it('reads kind, thread and channel', () => {
     expect(parseAlert(payload)).toEqual({ kind: 'needsInput', threadId: 't1', channelId: 'c1' });
+    expect(parseAlert({ omni: { ...payload.omni, askerId: 'crew' } })).toEqual({ kind: 'needsInput', threadId: 't1', channelId: 'c1', askerId: 'crew' });
+    expect(parseAlert({ omni: { ...payload.omni, askerId: '' } })).not.toHaveProperty('askerId');
+  });
+
+  it('reads a pull request alert and the time the server sent it', () => {
+    const at = '2026-11-15T10:00:00.000Z';
+    expect(parseAlert({ omni: { kind: 'prAttention', threadId: 't1', channelId: 'c1', at, sender: 'mac-a' } })).toEqual({
+      kind: 'prAttention',
+      threadId: 't1',
+      channelId: 'c1',
+      at,
+      sender: 'mac-a',
+    });
+    expect(parseAlert({ omni: { kind: 'prAttention', threadId: 't1', at: '' } })).not.toHaveProperty('at');
   });
 
   it('treats a missing or empty channel as none', () => {

@@ -117,12 +117,37 @@ describe('threadRows', () => {
     expect(notes.some((n) => n.startsWith('## Checkout funnel'))).toBe(false);
   });
 
-  it('shows the live turn with its status line, plan and steps so far', () => {
+  it('shows the live turn with its thinking line, plan and steps so far', () => {
     const live = local.find((c) => c.name === 'rich-running')!;
     const rows = threadRows(input(live)).rows;
-    expect(of(rows, 'now')).toHaveLength(1);
+    expect(of(rows, 'thinking')).toHaveLength(1);
+    expect(of(rows, 'now')).toHaveLength(0);
     expect(of(rows, 'steps')[0]).toMatchObject({ live: true, steps: 2 });
     expect(of(rows, 'outcome')).toHaveLength(0);
+  });
+
+  it("labels the thinking line with the agent's status since Ben's last message, else Thinking, timed from the turn", () => {
+    const live = local.find((c) => c.name === 'rich-running')!;
+    const plain = of(threadRows(input(live)).rows, 'thinking')[0];
+    const turn = live.events.findLast((e) => e.kind === 'user')!;
+    expect(plain).toMatchObject({ label: 'Thinking', since: turn.created_at });
+    const status = { kind: 'status', payload: JSON.stringify({ text: 'Compacting the conversation' }), created_at: '2026-11-02T09:09:00Z' };
+    const compacting = of(threadRows(input({ ...live, events: [...live.events, status] })).rows, 'thinking')[0];
+    expect(compacting).toMatchObject({ label: 'Compacting the conversation' });
+  });
+
+  it('drops the thinking line while a question waits on Ben', () => {
+    const asking = local.find((c) => c.name === 'rich-question')!;
+    const rows = threadRows(input({ ...asking, status: 'running' })).rows;
+    expect(of(rows, 'question')).toHaveLength(1);
+    expect(of(rows, 'thinking')).toHaveLength(0);
+  });
+
+  it('waits for a slot instead of thinking while the turn is queued', () => {
+    const live = local.find((c) => c.name === 'rich-running')!;
+    const rows = threadRows(input({ ...live, status: 'queued' })).rows;
+    expect(of(rows, 'thinking')).toHaveLength(0);
+    expect(of(rows, 'now')[0]).toMatchObject({ now: { verb: 'Waiting for a free slot' } });
   });
 
   it('hides a row outside the spans: it informs the fold and never shows', () => {
@@ -155,6 +180,27 @@ describe('threadRows', () => {
   it('keeps the quiet Conductor line for a Conductor answer', () => {
     const { rows } = threadRows(input(rich, { conductor: true }));
     expect(of(rows, 'conductor').length).toBeGreaterThan(0);
+  });
+
+  it("draws the Conductor line with the Omni mark while the Conductor has no look of its own", () => {
+    for (const conductorChannel of [undefined, null, { name: 'Conductor', icon: null, avatar_bg: null }, { name: 'Conductor', icon: 'icon:not-a-glyph' }]) {
+      const { rows } = threadRows(input(rich, { conductor: true, conductorChannel }));
+      expect(of(rows, 'conductor').length).toBeGreaterThan(0);
+      for (const r of of(rows, 'conductor')) expect(r).toMatchObject({ look: null });
+    }
+  });
+
+  it("draws the Conductor line with the icon and background saved for it", () => {
+    const saved = threadRows(input(rich, { conductor: true, conductorChannel: { name: 'Conductor', icon: '🎼', avatar_bg: '#283c62' } })).rows;
+    for (const r of of(saved, 'conductor')) expect(r).toMatchObject({ look: { name: 'Conductor', icon: '🎼', avatar_bg: '#283c62' } });
+    const bgOnly = threadRows(input(rich, { conductor: true, conductorChannel: { name: 'Conductor', icon: null, avatar_bg: '#283c62' } })).rows;
+    for (const r of of(bgOnly, 'conductor')) expect(r).toMatchObject({ look: { icon: null, avatar_bg: '#283c62' } });
+  });
+
+  it('redraws the Conductor line when its look changes, and only that row', () => {
+    const plain = threadRows(input(rich, { conductor: true })).rows;
+    const saved = threadRows(input(rich, { conductor: true, conductorChannel: { name: 'Conductor', icon: 'icon:target', avatar_bg: null } }), plain).rows;
+    for (const [i, r] of saved.entries()) expect(r === plain[i]).toBe(r.kind !== 'conductor');
   });
 
   it('does not rebuild a row that did not change when a call opens', () => {

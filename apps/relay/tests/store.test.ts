@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { RelayError } from '../src/auth.ts';
-import { checkChange, INLINE_MAX, objectPath, RelayStore, type Sql } from '../src/store.ts';
+import { checkChange, objectPath, RelayStore, type Sql } from '../src/store.ts';
 
 // The store on node:sqlite, as it runs on a Durable Object's SQLite.
 function setup() {
@@ -58,12 +58,34 @@ describe('RelayStore', () => {
     expect(two).toMatchObject({ op: 'delete', data: null });
   });
 
-  it('puts a change too big for a SQLite value in blobs, and reads it back', async () => {
-    const { store, blobs } = setup();
-    const big = { out: 'x'.repeat(INLINE_MAX + 10) };
-    await store.push({ changes: [change('a', 't1', big)] });
+  it('keeps change data out of SQLite, one blob per push, so the log grows only by its index', async () => {
+    const { store, blobs, db } = setup();
+    const big = { out: 'x'.repeat(3_000_000) };
+    await store.push({ changes: [change('a', 't1', big), { ...change('a', 't2'), op: 'delete', data: null }, change('a', 't3')] });
+    expect(blobs.size).toBe(1);
     expect([...blobs.keys()][0]).toMatch(/^user_ben\/changes\/.+\.json$/);
-    expect((await store.pull(0, 'b', 10))[0].data).toEqual(big);
+    expect(db.prepare('SELECT count(*) AS n FROM changes WHERE data IS NOT NULL').get()).toEqual({ n: 0 });
+    const pulled = await store.pull(0, 'b', 10);
+    expect(pulled.map((c) => c.data)).toEqual([big, null, { title: 't3' }]);
+  });
+
+  it('moves data written inline before batches out to blobs, resumably, and pulls the same changes after', async () => {
+    const { store, blobs, db } = setup();
+    const insert = db.prepare('INSERT INTO changes (machine_id, entity, entity_id, op, data, blob, ts) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (let i = 1; i <= 5; i++) insert.run('a', 'thread', `t${i}`, 'upsert', JSON.stringify({ title: `t${i}` }), null, '2026-11-01T12:00:00.000Z');
+    blobs.set('user_ben/changes/old.json', JSON.stringify({ title: 'old' }));
+    insert.run('a', 'thread', 'old', 'upsert', null, 'user_ben/changes/old.json', '2026-11-01T12:00:00.000Z');
+    const before = await store.pull(0, 'b', 10);
+
+    let after = 0;
+    after = (await store.moveInline(after, 2))!;
+    expect(after).toBe(2);
+    for (let next = await store.moveInline(after, 2); next !== null; next = await store.moveInline(after, 2)) after = next;
+    expect(after).toBe(5);
+
+    expect(db.prepare('SELECT count(*) AS n FROM changes WHERE data IS NOT NULL').get()).toEqual({ n: 0 });
+    expect(await store.pull(0, 'b', 10)).toEqual(before);
+    expect(await store.moveInline(0)).toBeNull();
   });
 
   it('refuses a malformed batch whole, so nothing half-lands', async () => {
@@ -100,5 +122,33 @@ describe('objectPath', () => {
     for (const ok of ['blobs/ab12', 'manifests/t-1.json', 'sessions/claude/0c9.jsonl', 'sessions/cursor/chat 1/sub dir/notes (1).md', 'handoffs/o-1.bundle'])
       expect(objectPath(ok)).toBe(true);
     for (const bad of ['', '/blobs/x', 'blobs//x', 'blobs/', '../x', 'a/../b', 'a/./b', 'a\u0000b', 'a\nb', 'x'.repeat(901)]) expect(objectPath(bad)).toBe(false);
+  });
+});
+
+describe('RelayStore: a token pushes as one machine (PRD #667, S9)', () => {
+  it('binds a token to the machine it first pushes as, and signs out a push in another machine\'s name', async () => {
+    const { store } = setup();
+    const tokA = await store.addToken('token-a', 'Mac A');
+    const tokB = await store.addToken('token-b', 'Mac B');
+    await store.push({ changes: [change('a', 't1')] }, tokA);
+    await store.push({ changes: [change('a', 't2')] }, tokA);
+    await expect(store.push({ changes: [change('b', 't3')] }, tokA)).rejects.toMatchObject({ status: 401 });
+    await expect(store.push({ changes: [change('a', 't4'), change('b', 't5')] }, tokB)).rejects.toMatchObject({ status: 403 });
+    await store.push({ changes: [change('b', 't6')] }, tokB);
+    await expect(store.push({ changes: [change('a', 't7')] }, tokB)).rejects.toMatchObject({ status: 401 });
+    expect((await store.pull(0, 'nobody', 100)).map((c) => [c.machine_id, c.entity_id])).toEqual([['a', 't1'], ['a', 't2'], ['b', 't6']]);
+  });
+});
+
+describe('RelayStore: a machine that signs in again (PRD #667, S9)', () => {
+  it("takes its machine id over with the new token and signs the old one out", async () => {
+    const { store } = setup();
+    const old = await store.addToken('token-old', 'Mac A');
+    await store.push({ changes: [change('a', 't1')] }, old);
+    const fresh = await store.addToken('token-new', 'Mac A');
+    await store.push({ changes: [change('a', 't2')] }, fresh);
+    await expect(store.checkToken('token-old')).rejects.toMatchObject({ status: 401 });
+    await expect(store.push({ changes: [change('a', 't3')] }, old)).rejects.toMatchObject({ status: 401 });
+    await store.push({ changes: [change('a', 't4')] }, fresh);
   });
 });

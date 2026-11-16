@@ -113,6 +113,11 @@ describe('replies forwarded to the machine running a thread (#398)', () => {
     await both();
     expect(a.byKind(late, 'user').filter((e) => e.p.command === 'late-1')).toHaveLength(1);
     expect(a.db.remoteCommands.openCount(late)).toBe(0);
+    // Record once B's turn for the fresh reply has ended and A heard so, not whichever moment the sync happened to land in.
+    await b.untilResults(late, 2);
+    await waitFor(() => !b.runner.isLive(late), 'the turn to end on B');
+    await both();
+    expect(a.db.threads.get(late)?.status).not.toBe('running');
     fixtures.set('thread-undelivered.json', (await a.json(`/threads/${late}`)).body);
   });
 
@@ -120,10 +125,15 @@ describe('replies forwarded to the machine running a thread (#398)', () => {
     const away = await onBoxB('audit the search');
     // B has been gone past the deadline and the hub's grace: the hub closes the command itself, so Ben sees it.
     repliedEarlier(away, 'the search copy', 'away-1', 2 * 60_000);
+    // Until then the hub lists it as on its way to B, so Ben's step button and transcript show it waiting.
+    const forwarded = async () => ((await a.json(`/threads/${away}`)).body.pending as { request_id?: string; forwarded_to?: string }[]).filter((p) => p.forwarded_to);
+    expect(await forwarded()).toEqual([expect.objectContaining({ request_id: 'away-1', forwarded_to: 'Box B' })]);
     await a.sync();
     await waitFor(() => a.db.remoteCommands.get('away-1')?.state === 'expired', 'the hub to expire it');
     expect(a.db.remoteCommands.get('away-1')).toMatchObject({ acked_by: 'mac-a', reason: TOO_LATE });
     expect(a.byKind(away, 'user').find((e) => e.p.command === 'away-1')?.p).toMatchObject({ dropped: true, undelivered: TOO_LATE });
+    // Expired, it leaves the list: the transcript says it was not delivered, and why.
+    expect(await forwarded()).toEqual([]);
 
     // B comes back and hears the answer, not the order: nothing is sent, and the hub's answer stands.
     await both();

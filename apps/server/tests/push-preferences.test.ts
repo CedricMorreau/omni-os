@@ -32,7 +32,7 @@ async function pairApp(name = 'Ben iPhone') {
 
 const prefRows = () => r.db.db.prepare('SELECT session_id FROM push_preferences').all() as { session_id: string }[];
 
-const ALL_ON = { needsInput: true, finished: true, failed: true, crewReport: true };
+const ALL_ON = { needsInput: true, finished: true, failed: true, crewReport: true, prAttention: true };
 
 beforeEach(() => {
   pairing.resetPairings();
@@ -92,6 +92,24 @@ describe('reading and changing the choices', () => {
     expect(prefRows().map((x) => x.session_id)).toEqual([phone.sessionId]);
     expect((await req('POST', '/auth/signout', {}, as(phone.token))).status).toBe(200);
     expect(prefRows()).toEqual([]);
+  });
+});
+
+describe('what an app build can take', () => {
+  it('sends pull request alerts and one-per-thread collapse only to a token whose app declared them', async () => {
+    const old = await pairApp('old build');
+    const fresh = await pairApp('new build');
+    await req('PUT', '/auth/push-token', { ...PUSH, token: 'aa'.repeat(32) }, as(old.token));
+    await req('PUT', '/auth/push-token', { ...PUSH, token: 'bb'.repeat(32), features: ['collapse', 'prAttention', 'later-thing'] }, as(fresh.token));
+
+    // An older build cannot open or turn off a pull request alert, and keys taps by an identifier collapse would reuse.
+    expect(pushTargets('prAttention').map((t) => t.sessionId)).toEqual([fresh.sessionId]);
+    const byId = Object.fromEntries(pushTargets('finished').map((t) => [t.sessionId, t.collapse]));
+    expect(byId).toEqual({ [old.sessionId]: false, [fresh.sessionId]: true });
+
+    // Registering again without them (a build rolled back) takes them away.
+    await req('PUT', '/auth/push-token', { ...PUSH, token: 'bb'.repeat(32) }, as(fresh.token));
+    expect(pushTargets('prAttention')).toEqual([]);
   });
 });
 

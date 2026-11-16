@@ -1,5 +1,4 @@
 import { relTime } from '@omni/shared/format.ts';
-import { Loader } from './brand.tsx';
 import { useCallback, useEffect, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { api, errorText, useApi, type BranchPRMark, type ChannelWithRunning, type FolderWithThreads, type Thread } from '../api.ts';
 import { folderOf, groupByFolder } from '../folder-groups.ts';
@@ -7,7 +6,7 @@ import { drag, useFolders } from '../folders.tsx';
 import { groupByDay, plural } from '../format.ts';
 import { href } from '../router.ts';
 import { useApp, useFeed, useNow } from '../store.tsx';
-import { Avatar, Button, Chip, DoneMark, Empty, ErrorNote, Icon, Loading, StatusDot, threadGlyph } from './ui.tsx';
+import { Avatar, Button, Chip, Empty, ErrorNote, Icon, Loading, StatusDot, ThreadDot } from './ui.tsx';
 import { ThreadHandoffs } from './ThreadHandoffs.tsx';
 import { isWorking, showsRunning } from '@omni/shared/delegate-count.ts';
 
@@ -67,22 +66,22 @@ export function ThreadRow({ t, showChannel, pr }: { t: Thread; showChannel?: boo
   const mod = mods.findLast((m) => m.thread_id === t.id);
   const preview = t.last_text ? t.last_text.replace(/\s+/g, ' ').slice(0, 240) : showsRunning(t) ? 'Working' : t.status === 'queued' ? 'Waiting for a slot' : '';
   return (
-    <a href={href.thread(t.id)} className="hov group flex items-start gap-3 rounded-[18px] px-3 py-2.5 [--hov:var(--surface)] md:px-3.5">
+    <a href={href.thread(t.id)} className="item group flex items-start gap-3 rounded-[var(--r-sm)] px-3 py-2.5 md:px-3.5">
       {showChannel ? (
         <span className="relative mt-0.5 shrink-0">
-          <Avatar name={t.channel_id} omni={t.channel_id === 'conductor'} channelIcon={channels.find((c) => c.id === t.channel_id)?.icon} size={32} />
+          <Avatar name={t.channel_id} omni={t.channel_id === 'conductor'} channelIcon={channels.find((c) => c.id === t.channel_id)?.icon} avatarBg={channels.find((c) => c.id === t.channel_id)?.avatar_bg} size={32} />
           <span className="absolute -right-0.5 -bottom-0.5 grid h-3.5 w-3.5 place-items-center rounded-full bg-bg">
-            {t.done_at ? <DoneMark size={8} /> : <StatusDot status={threadGlyph(t)} size={8} />}
+            <ThreadDot t={t} pr={pr} size={7} />
           </span>
         </span>
       ) : (
         <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-surface transition-colors group-hover:bg-bg">
-          {t.done_at ? <DoneMark /> : <StatusDot status={threadGlyph(t)} size={10} />}
+          <ThreadDot t={t} pr={pr} size={9} />
         </span>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className={`min-w-0 truncate text-[14px] group-hover:text-fg ${t.done_at ? 'text-fg-4' : 'text-fg-2'}`}>{t.title || 'Untitled'}</span>
+          <span className={`min-w-0 truncate text-[14px] group-hover:text-fg ${t.done_at ? 'text-fg-3' : 'text-fg-2'}`}>{t.title || 'Untitled'}</span>
           {t.done_at && <Chip tone="outline">Done</Chip>}
           {t.role && <Chip>{t.role}</Chip>}
           {source && <Chip tone="outline">{source}</Chip>}
@@ -92,7 +91,6 @@ export function ThreadRow({ t, showChannel, pr }: { t: Thread; showChannel?: boo
         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-fg-3">
           {showChannel && <span className="shrink-0 text-fg-2">#{t.channel_id}</span>}
           {t.branch && <span className="hidden shrink-0 rounded-full bg-surface-2 px-1.5 font-mono text-[10.5px] leading-[18px] text-fg-3 sm:inline">{t.branch}</span>}
-          {!t.last_text && showsRunning(t) && <Loader size={11} className="shrink-0" />}
           {mod && (
             <span className="max-w-[45%] shrink-0 truncate rounded-full bg-surface-2 px-1.5 text-[11px] leading-[18px] text-fg-3" title={`${mod.plugin}: ${mod.text}`}>
               {mod.text}
@@ -199,7 +197,7 @@ function FolderGroups({ threads, channel, prs, handoffs = [] }: { threads: Threa
             (g.threads.length ? (
               <Rows threads={g.threads} prs={prs} draggable handoffs={handoffs} />
             ) : (
-              <div className="px-3.5 pb-1 text-[12.5px] leading-7 text-fg-4">No threads yet. Drag one here or use Move to folder.</div>
+              <div className="px-3.5 pb-1 text-[12.5px] leading-7 text-fg-3">No threads yet. Drag one here or use Move to folder.</div>
             ))}
         </section>
       ))}
@@ -208,7 +206,7 @@ function FolderGroups({ threads, channel, prs, handoffs = [] }: { threads: Threa
         {unfiled.length ? (
           <Rows threads={unfiled} prs={prs} draggable handoffs={handoffs} />
         ) : (
-          <div className="px-3.5 pb-1 text-[12.5px] leading-7 text-fg-4">Every thread is in a folder.</div>
+          <div className="px-3.5 pb-1 text-[12.5px] leading-7 text-fg-3">Every thread is in a folder.</div>
         )}
       </section>
     </div>
@@ -246,11 +244,11 @@ function FolderHeader({ channel, folder, count, running }: { channel: ChannelWit
     <h3 className="sticky top-0 z-[2] bg-bg" onDragOver={onOver} onDragLeave={() => setOver(false)} onDrop={onDrop}>
       {folder ? (
         <button type="button" data-folder-id={folder.id} onClick={() => void folders.toggle(folder.id)} aria-expanded={!folder.collapsed} aria-label={label} title={label} className={`hov ${cls} [--hov:var(--surface)]`}>
-          <Icon name={folder.collapsed ? 'chevronRight' : 'chevronDown'} size={12} className="-ml-0.5 shrink-0 text-fg-4" />
+          <Icon name={folder.collapsed ? 'chevronRight' : 'chevronDown'} size={12} className="-ml-0.5 shrink-0 text-fg-3" />
           <Icon name="folder" size={13} className="shrink-0 text-fg-3" />
           <span className="min-w-0 truncate">{folder.name}</span>
           <span className="text-fg-3">{count}</span>
-          {running && <Loader size={11} className="shrink-0 text-live-text" />}
+          {running && <StatusDot status="running" size={7} className="shrink-0" />}
         </button>
       ) : (
         <div aria-label={label} className={cls}>
@@ -282,7 +280,7 @@ export function ArchivedThreads({ channelId }: { channelId: string }) {
           aria-expanded={open}
           className="hov caption flex w-full items-center gap-2 rounded-full px-3.5 py-2 text-left [--hov:var(--surface)]"
         >
-          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} className="-ml-0.5 shrink-0 text-fg-4" />
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} className="-ml-0.5 shrink-0 text-fg-3" />
           <Icon name="archive" size={13} className="shrink-0 text-fg-3" />
           Archived
           <span className="text-fg-3">{count}</span>

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WIRE_FIXTURES } from '@omni/test-fixtures';
 import type { NeedsYou, NeedsYouItem } from '../src/api.ts';
-import { canMarkDone, coalesced, inChannel, reasonOf, shownResult, withoutResult, withoutThread } from '../src/needs-you.ts';
+import { canMarkDone, coalesced, inChannel, reasonOf, seesUnlisted, shownResult, splitNeeds, withoutResult, withoutThread } from '../src/needs-you.ts';
 
 // The Web UI's side of Needs you (apps/web/src/needs-you.ts), against the recorded server answers
 // (apps/server/tests/wire-fixtures.test.ts records them): every kind of result and blocker, then a read.
@@ -15,10 +15,10 @@ const byTitle = (n: NeedsYou, title: string) => n.items.find((i) => i.thread.tit
 describe('Needs you reasons', () => {
   it('says why each thread is there, a blocker before its result', () => {
     const n = inbox();
-    expect(reasonOf(byTitle(n, 'Fix the widget'))).toMatchObject({ glyph: 'needs', label: 'Worktree could not be prepared' });
+    expect(reasonOf(byTitle(n, 'Fix the widget'))).toMatchObject({ glyph: 'failed', label: 'Worktree could not be prepared' });
     expect(reasonOf(byTitle(n, 'Fix the widget')).detail).toBe(byTitle(n, 'Fix the widget').thread.setup_error);
     expect(reasonOf(byTitle(n, 'Plan the launch'))).toMatchObject({ glyph: 'needs', label: 'A message waits for Resume' });
-    expect(reasonOf(byTitle(n, 'Fix the cart total'))).toMatchObject({ glyph: 'needs', label: 'Failed' });
+    expect(reasonOf(byTitle(n, 'Fix the cart total'))).toMatchObject({ glyph: 'failed', label: 'Failed' });
     expect(reasonOf(byTitle(n, 'Audit the checkout'))).toMatchObject({ glyph: 'done', label: 'Finished' });
   });
 
@@ -28,6 +28,17 @@ describe('Needs you reasons', () => {
     expect(reasonOf(two).label).toBe('2 messages may not have been sent');
     const stopped: NeedsYouItem = { ...base, blockers: [], result: { uid: 'u', status: 'stopped', event_uid: null, at: base.at } };
     expect(reasonOf(stopped)).toMatchObject({ glyph: 'settled', label: 'Stopped' });
+  });
+});
+
+describe('Needs you and Unread', () => {
+  it('puts what Ben must act on under Needs you and a finished result under Unread, each item once', () => {
+    const n = inbox();
+    const { needs, unread } = splitNeeds(n.items);
+    expect(needs.length + unread.length).toBe(n.items.length);
+    expect(needs.map((i) => i.thread.title)).toEqual(expect.arrayContaining(['Fix the widget', 'Plan the launch', 'Fix the cart total']));
+    expect(unread.map((i) => i.thread.title)).toContain('Audit the checkout');
+    expect(unread.every((i) => i.blockers.length === 0 && i.result?.status !== 'failed')).toBe(true);
   });
 });
 
@@ -68,6 +79,24 @@ describe('reading a result', () => {
     const kept = byTitle(withoutResult(n, widget.result!.uid), 'Fix the widget');
     expect(kept.result).toBeNull();
     expect(kept.blockers.map((b) => b.kind)).toEqual(['setup', 'recovered']);
+  });
+
+  it('reads a failed thread under a job from the job\'s blocker, which has no item of its own', () => {
+    const job = byTitle(inbox(), 'Plan the launch');
+    const failing: NeedsYouItem = {
+      ...job,
+      result: null,
+      blockers: [{ kind: 'child_failed', detail: 'Zoom modal a11y pass', count: 2, from: ['member', 'other'], results: ['r-member', 'r-other'] }],
+    };
+    const n: NeedsYou = { items: [failing], unread: 0, blocked: 1 };
+    expect(shownResult(n, 'member', 'failed')).toBe('r-member');
+    expect(shownResult(n, 'other', 'failed')).toBe('r-other');
+    expect(shownResult(n, 'member', 'running')).toBeNull();
+
+    // Read at once: that thread leaves the blocker, and the job leaves with the last one.
+    const one = withoutResult(n, 'r-member');
+    expect(one.items[0].blockers).toEqual([{ kind: 'child_failed', detail: 'Zoom modal a11y pass', count: 1, from: ['other'], results: ['r-other'] }]);
+    expect(withoutResult(one, 'r-other')).toEqual({ items: [], unread: 0, blocked: 0 });
   });
 
   it('drops a thread marked done at once, its result and blockers with it', () => {
@@ -131,5 +160,21 @@ describe('needs_you events', () => {
     await settle();
     failing();
     expect(loads).toBe(4);
+  });
+});
+
+describe('seesUnlisted', () => {
+  // A delegated thread's success and a team member's turn never list in Needs you, so opening one is the only read.
+  it('counts an idle delegated or team thread on screen as seen, when Needs you shows no result for it', () => {
+    expect(seesUnlisted({ status: 'done', parent_id: 'lead', source: 'conductor' }, null, true)).toBe(true);
+    expect(seesUnlisted({ status: 'failed', parent_id: null, source: 'team' }, null, true)).toBe(true);
+  });
+
+  it('leaves it to the normal read when Needs you lists one, and skips a top-level, running or hidden thread', () => {
+    expect(seesUnlisted({ status: 'done', parent_id: 'lead', source: 'conductor' }, 'uid-1', true)).toBe(false);
+    expect(seesUnlisted({ status: 'done', parent_id: null, source: 'manual' }, null, true)).toBe(false);
+    expect(seesUnlisted({ status: 'running', parent_id: 'lead', source: 'conductor' }, null, true)).toBe(false);
+    expect(seesUnlisted({ status: 'done', parent_id: 'lead', source: 'conductor' }, null, false)).toBe(false);
+    expect(seesUnlisted(null, null, true)).toBe(false);
   });
 });

@@ -1,52 +1,22 @@
+import { AvatarColorPicker } from '../components/AvatarColorPicker.tsx';
+import { autoAvatarColor } from '@omni/shared/avatar-color.ts';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, errorText, harnessesPath, useApi, type Channel, type HarnessWithRunning } from '../api.ts';
 import { EffortPicker, ModelPicker } from '../components/ModelPicker.tsx';
 import { AUTO, AUTO_CHOICE, asksAuto } from '@omni/shared/thread-run.ts';
 import { Avatar, Button, ErrorNote, Icon, InlineConfirm, Label, PageHeader, Segmented, StatusDot, Toggle } from '../components/ui.tsx';
-import { CHANNEL_GLYPHS, glyphIcon, parseChannelIcon, readSvgIcon } from '@omni/shared/channel-icon.ts';
+import { CHANNEL_GLYPHS, CONDUCTOR_CHANNEL, glyphIcon, parseChannelIcon, readSvgIcon } from '@omni/shared/channel-icon.ts';
 import { readDesignSystem } from '@omni/shared/design-system.ts';
 import { bytes } from '@omni/shared/format.ts';
-import { lastGrapheme, slugify } from '../format.ts';
+import { lastGrapheme } from '../format.ts';
+import { channelBody, channelForm, channelFormProblem, CHANNEL_ID, CHANNEL_KINDS, slugify, type ChannelForm, type ChannelRun } from '@omni/shared/channel-form.ts';
+import { PR_STEPS, STEP_LABEL, STEP_PROMPTS } from '@omni/shared/thread-glance.ts';
 import { navigate } from '../router.ts';
 import { useApp } from '../store.tsx';
-import { Advanced } from './settings-parts.tsx';
+import { pageColumn } from '../components/ui/feedback.tsx';
+import { Advanced, Card } from './settings-parts.tsx';
 
-interface FormState {
-  id: string;
-  name: string;
-  kind: 'client' | 'internal' | 'personal';
-  repo_path: string;
-  github_repo: string;
-  use_worktree: boolean;
-  base_dir: string;
-  store_domain: string;
-  portal_slug: string;
-  showBrowser: boolean;
-  notes: string;
-  icon: string;
-  /** The default model as a picker choice: model '' is the harness default, model "auto" is Auto. All '' is no default, which runs Auto too. */
-  run: { harness: string; model: string; effort: string };
-}
-
-function fromChannel(c?: Channel): FormState {
-  return {
-    id: c?.id ?? '',
-    name: c?.name ?? '',
-    kind: c && c.kind !== 'system' ? c.kind : 'client',
-    repo_path: c?.repo_path ?? '',
-    github_repo: c?.github_repo ?? '',
-    use_worktree: c ? c.use_worktree === 1 : true,
-    base_dir: c?.base_dir ?? '',
-    store_domain: c?.store_domain ?? '',
-    portal_slug: c?.portal_slug ?? '',
-    showBrowser: c ? c.browser_headless === 0 : false,
-    notes: c?.notes ?? '',
-    icon: c?.icon ?? '',
-    run: { harness: c?.default_harness ?? '', model: c?.default_model ?? '', effort: c?.default_effort ?? '' },
-  };
-}
-
-const orNull = (s: string) => (s.trim() ? s.trim() : null);
+/** Settings' channel scope still imports the card by this name. */
 
 function Field({ label, hint, children, htmlFor }: { label: string; hint?: ReactNode; children: ReactNode; htmlFor?: string }) {
   return (
@@ -80,7 +50,7 @@ function AutoValue({ label, value, note, onEdit }: { label: string; value: strin
 /** Bigger than any SVG that could be kept once cleaned, so it is refused before being read. */
 const SVG_FILE_MAX = 512 * 1024;
 
-function IconPicker({ value, name, onChange }: { value: string; name: string; onChange: (v: string) => void }) {
+function IconPicker({ value, name, avatarBg, omni, onChange }: { avatarBg?: string; value: string; name: string; omni?: boolean; onChange: (v: string) => void }) {
   const mark = parseChannelIcon(value);
   const fileRef = useRef<HTMLInputElement>(null);
   const [svgError, setSvgError] = useState<string | null>(null);
@@ -101,8 +71,8 @@ function IconPicker({ value, name, onChange }: { value: string; name: string; on
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <Avatar name={name} channelIcon={value} size={36} />
+      <div className="flex flex-wrap items-center gap-3">
+        <Avatar name={name} omni={omni} channelIcon={value} avatarBg={avatarBg} size={36} />
         <input
           id="ch-icon"
           className="field w-24 text-center !text-[18px] placeholder:!text-[13px]"
@@ -144,7 +114,7 @@ function IconPicker({ value, name, onChange }: { value: string; name: string; on
               aria-label={g}
               title={g}
               onClick={() => change(on ? '' : glyphIcon(g))}
-              className={`grid h-9 w-9 place-items-center rounded-full transition-colors ${on ? 'bg-fg text-on-ink' : 'hov text-fg-2 [--hov:var(--surface)]'}`}
+              className={`grid h-9 w-9 place-items-center rounded-full transition-colors ${on ? 'bg-fg text-on-ink' : 'hov text-fg-2 [--hov:var(--surface-2)]'}`}
             >
               <Icon name={g} size={17} />
             </button>
@@ -157,7 +127,7 @@ function IconPicker({ value, name, onChange }: { value: string; name: string; on
 
 /** The model and effort a new thread in the channel starts on, unless the thread or its role picks. */
 /** A channel's default model and effort. `noReset`: the caller shows its own Reset (Settings' provenance chip). */
-export function RunDefaultsField({ channel, value, onChange, noReset }: { channel?: string; value: FormState['run']; onChange: (v: FormState['run']) => void; noReset?: boolean }) {
+export function RunDefaultsField({ channel, value, onChange, noReset }: { channel?: string; value: ChannelRun; onChange: (v: ChannelRun) => void; noReset?: boolean }) {
   const { data: harnesses, reload } = useApi<HarnessWithRunning[]>(harnessesPath(channel));
   if (!harnesses) return null;
   const unset = !(value.harness || value.model || value.effort);
@@ -208,7 +178,7 @@ function DesignSystemPicker({ channel, onChange }: { channel: Channel; onChange:
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         {channel.design_system_name && (
-          <span className="inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1.5 text-[13px] text-fg">
+          <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-[13px] text-fg">
             <Icon name="file" size={14} />
             <a className="hov" href={`/api${url}`} target="_blank" rel="noreferrer" title="Open the file">
               {channel.design_system_name}
@@ -241,18 +211,9 @@ function DesignSystemPicker({ channel, onChange }: { channel: Channel; onChange:
   );
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-4 rounded-[24px] p-5 shadow-[inset_0_0_0_1px_var(--line)]">
-      <h2 className="font-display text-[16px]">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
 export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
   const { reloadChannels } = useApp();
-  const [f, setF] = useState<FormState>(() => fromChannel(existing));
+  const [f, setF] = useState<ChannelForm>(() => channelForm(existing));
   const [idTouched, setIdTouched] = useState(!!existing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -260,8 +221,9 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const isNew = !existing;
   const isSystem = existing?.kind === 'system';
+  const isConductor = existing?.id === CONDUCTOR_CHANNEL;
 
-  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => {
+  const set = <K extends keyof ChannelForm>(k: K, v: ChannelForm[K]) => {
     setSaved(false);
     setF((prev) => {
       const next = { ...prev, [k]: v };
@@ -270,7 +232,7 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
     });
   };
 
-  const idValid = /^[a-z0-9-]{2,40}$/.test(f.id);
+  const idValid = CHANNEL_ID.test(f.id);
   // The values Omni works out (#405). Each shows as a field only when detection failed or you asked to change it.
   const [editing, setEditing] = useState<{ id?: boolean; github?: boolean; base?: boolean }>({});
   const hasRepo = !!f.repo_path.trim();
@@ -285,27 +247,12 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!f.name.trim()) return setError('Give the channel a name.');
-    if (isNew && !idValid) return setError('The id needs 2 to 40 lowercase letters, digits or dashes.');
+    const problem = channelFormProblem(f, isNew);
+    if (problem) return setError(problem);
     setBusy(true);
     setError(null);
-    const body: Record<string, unknown> = {
-      name: f.name.trim(),
-      repo_path: orNull(f.repo_path),
-      use_worktree: f.use_worktree ? 1 : 0,
-      base_dir: orNull(f.base_dir),
-      store_domain: orNull(f.store_domain)?.replace(/^https?:\/\//, '').replace(/\/.*$/, '') ?? null,
-      portal_slug: orNull(f.portal_slug),
-      browser_headless: f.showBrowser ? 0 : 1,
-      notes: orNull(f.notes),
-      icon: orNull(f.icon),
-      default_harness: orNull(f.run.harness),
-      default_model: orNull(f.run.model),
-      default_effort: orNull(f.run.effort),
-    };
-    if (!isSystem) body.kind = f.kind;
-    // Left out unless typed, so the server reads it from the repo path: on create, and when the path changes.
-    if (showGithub) body.github_repo = orNull(f.github_repo);
+    // The GitHub repo goes only when typed, so the server reads it from the repo path: on create, and when the path changes.
+    const body = channelBody(f, { system: isSystem, github: showGithub });
     try {
       if (isNew) {
         const ch = await api.post<Channel>('/channels', { id: f.id, ...body });
@@ -314,7 +261,7 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
       } else {
         const ch = await api.patch<Channel>(`/channels/${encodeURIComponent(existing.id)}`, body);
         await reloadChannels();
-        setF(fromChannel(ch));
+        setF(channelForm(ch));
         setEditing({});
         setSaved(true);
       }
@@ -341,12 +288,17 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <Section title="Basics">
+      <Card title="Basics">
         <Field label="Name" htmlFor="ch-name">
           <input id="ch-name" className="field" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="Acme" autoFocus={isNew} />
         </Field>
-        <Field label="Icon" htmlFor="ch-icon" hint="Shown in the sidebar and on the channel. Type an emoji (Ctrl+Cmd+Space opens the picker), upload an SVG or pick an icon. Empty uses the first letter.">
-          <IconPicker value={f.icon} name={f.name || f.id} onChange={(v) => set('icon', v)} />
+        <Field label="Icon" htmlFor="ch-icon" hint={`Shown in the sidebar and on the channel. Type an emoji (Ctrl+Cmd+Space opens the picker), upload an SVG or pick an icon. Empty uses ${isConductor ? 'the Omni mark' : 'the first letter'}.`}>
+          <IconPicker avatarBg={f.avatar_bg} value={f.icon} name={f.name || f.id} omni={isConductor} onChange={(v) => { setSaved(false); setF((prev) => ({ ...prev, icon: v, ...(!prev.avatar_bg_manual ? { avatar_bg: autoAvatarColor(v) ?? '' } : {}) })); }} />
+        </Field>
+        <Field label="Avatar background" hint="Automatic follows the avatar. A custom color stays when you change the icon.">
+          <AvatarColorPicker icon={f.icon} name={f.name || f.id} omni={isConductor} value={f.avatar_bg} manual={!!f.avatar_bg_manual}
+            onChange={(color) => { setSaved(false); setF((prev) => ({ ...prev, avatar_bg: color, avatar_bg_manual: 1 })); }}
+            onAuto={() => { setSaved(false); setF((prev) => ({ ...prev, avatar_bg: autoAvatarColor(prev.icon) ?? '', avatar_bg_manual: 0 })); }} />
         </Field>
         {!isSystem && (
           <Field label="Kind">
@@ -355,11 +307,7 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
               label="Kind"
               value={f.kind}
               onChange={(k) => set('kind', k)}
-              options={[
-                { id: 'client', label: 'Client' },
-                { id: 'internal', label: 'Internal' },
-                { id: 'personal', label: 'Personal' },
-              ]}
+              options={[...CHANNEL_KINDS]}
             />
           </Field>
         )}
@@ -377,15 +325,29 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
         <Field label="Notes" htmlFor="ch-notes" hint="Added to every thread's system prompt in this channel. Keep it short: who the client is, conventions, what not to touch.">
           <textarea id="ch-notes" className="field min-h-[84px] resize-y" value={f.notes} onChange={(e) => set('notes', e.target.value)} />
         </Field>
-      </Section>
+      </Card>
 
-      <Section title="Code">
+      <Card title="Code">
         <Field label="Repo path" htmlFor="ch-repo" hint="Absolute path to a local git repo. Omni reads its GitHub repo from it, and it enables per-thread worktrees and the PRs tab.">
           <input id="ch-repo" className="field font-mono !text-[13px]" value={f.repo_path} onChange={(e) => set('repo_path', e.target.value)} placeholder="~/code/acme-theme" spellCheck={false} />
         </Field>
-      </Section>
+      </Card>
 
-      <Section title="Store">
+      <Card title="Branch steps" subtitle="What the Open PR, Fix conflicts and Fix checks buttons ask the agent in this channel. Empty uses the built-in prompt, shown greyed out.">
+        {PR_STEPS.map((step) => (
+          <Field key={step} label={STEP_LABEL[step]} htmlFor={`ch-step-${step}`}>
+            <textarea
+              id={`ch-step-${step}`}
+              className="field min-h-[84px] resize-y"
+              value={f.prompts[step]}
+              placeholder={STEP_PROMPTS[step]}
+              onChange={(e) => set('prompts', { ...f.prompts, [step]: e.target.value })}
+            />
+          </Field>
+        ))}
+      </Card>
+
+      <Card title="Store">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Store domain" htmlFor="ch-store" hint="The myshopify domain, e.g. acme.myshopify.com">
             <input id="ch-store" className="field font-mono !text-[13px]" value={f.store_domain} onChange={(e) => set('store_domain', e.target.value)} placeholder="acme.myshopify.com" spellCheck={false} />
@@ -394,7 +356,7 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
             <input id="ch-portal" className="field font-mono !text-[13px]" value={f.portal_slug} onChange={(e) => set('portal_slug', e.target.value)} placeholder="acme" spellCheck={false} />
           </Field>
         </div>
-      </Section>
+      </Card>
 
       {/* Id, GitHub repo and base directory fill themselves in; each shows as a field only when Omni could not work
           it out or you choose to change it, and a failure opens the fold (#405). */}
@@ -453,6 +415,38 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
           </div>
           <Toggle checked={f.use_worktree} onChange={(v) => set('use_worktree', v)} label="Worktree per thread" disabled={!hasRepo} />
         </div>
+        {hasRepo && f.use_worktree && (
+          <>
+            <Field
+              label="Copy into new worktrees"
+              htmlFor="ch-wt-include"
+              hint="Ignored files each new worktree gets from the main checkout, one per line in .gitignore syntax, such as .env. Added to the repo's own .worktreeinclude."
+            >
+              <textarea
+                id="ch-wt-include"
+                className="field min-h-[68px] resize-y font-mono !text-[13px]"
+                value={f.worktree_include}
+                onChange={(e) => set('worktree_include', e.target.value)}
+                placeholder={'.env\nshopify.theme.toml'}
+                spellCheck={false}
+              />
+            </Field>
+            <Field
+              label="Shared directories"
+              htmlFor="ch-wt-shared"
+              hint="Folders each new worktree links to in the main checkout instead of installing again, one path per line, such as node_modules. A folder the main checkout lacks is skipped."
+            >
+              <textarea
+                id="ch-wt-shared"
+                className="field min-h-[68px] resize-y font-mono !text-[13px]"
+                value={f.worktree_shared}
+                onChange={(e) => set('worktree_shared', e.target.value)}
+                placeholder="node_modules"
+                spellCheck={false}
+              />
+            </Field>
+          </>
+        )}
         <div className="flex items-start justify-between gap-4 rounded-[18px] bg-surface px-4 py-3">
           <div>
             <div className="text-[13px] font-medium text-fg">Show the browser window</div>
@@ -486,8 +480,8 @@ export function ChannelSettingsForm({ existing }: { existing?: Channel }) {
 export function NewChannelPage() {
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <PageHeader width="max-w-2xl" title="New channel" subtitle="One channel per client or project. Threads, PRs, secrets and the browser profile are scoped to it." />
-      <div className="mx-auto max-w-2xl px-4 pt-2 pb-16 md:px-8">
+      <PageHeader width="measure" title="New channel" subtitle="One channel per client or project. Threads, PRs, secrets and the browser profile are scoped to it." />
+      <div className={`${pageColumn('measure')} pt-2 pb-16`}>
         <ChannelSettingsForm />
       </div>
     </div>

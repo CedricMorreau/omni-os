@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { configPath, omniCheckout, resolved } from './user-config.ts';
+import { TEARDOWN_LIMIT_MINUTES } from '@omni/shared/channel-actions.ts';
 
 /**
  * The repo root: data/, crew/, automations/ and mods/ live here, beside apps/ and packages/. The desktop app ships the
@@ -87,6 +88,8 @@ export const config = {
   maxUploadMb: Number(env.OMNI_MAX_UPLOAD_MB ?? 25),
   /** Read Cursor's plan usage and thread costs from its dashboard (harness/cursor/dashboard.ts). Off in tests. */
   cursorDashboard: (env.OMNI_CURSOR_DASHBOARD ?? '1') !== '0',
+  /** Fetch LiteLLM's list prices for the Inbox dashboard's usage (usage-pricing.ts). Off in tests. */
+  usagePrices: (env.OMNI_USAGE_PRICES ?? '1') !== '0',
   /** Load the repo's Claude Code mods (mods/) into every Claude thread with --plugin-dir. Off until '1'. */
   mods: env.OMNI_MODS === '1',
   /** The user's timezone (user config), OMNI_TZ still wins, else the system's. Automations default to it. */
@@ -99,6 +102,8 @@ export const config = {
   worktreeIdleDays: Number(env.OMNI_WORKTREE_IDLE_DAYS ?? 7),
   /** How long after startup the first retention pass runs (worktree-cleanup.ts). Tests shorten it. */
   retentionFirstPassMs: Number(env.OMNI_RETENTION_FIRST_PASS_MS ?? 60_000),
+  /** How long a channel's teardown action may run before a cleanup stops it and removes the worktree anyway. Tests shorten it. */
+  teardownTimeoutMs: Number(env.OMNI_TEARDOWN_TIMEOUT_MS ?? TEARDOWN_LIMIT_MINUTES * 60_000),
 };
 
 function mcpScript(name: 'omni' | 'ask' | 'render' | 'threads' | 'ticket'): string {

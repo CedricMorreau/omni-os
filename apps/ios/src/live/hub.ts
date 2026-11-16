@@ -9,7 +9,7 @@ import {
   ThreadHistory,
   type AnswerResult,
   type Artifact,
-  type Channel,
+  type BackgroundTask,
   type ChannelWithRunning,
   type Fetch,
   type HarnessInfo,
@@ -17,18 +17,18 @@ import {
   type HttpClient,
   type NeedsYou,
   type OmniApi,
-  type PendingMsg,
   type Recovered,
   type RawResponse,
   type SSEClient,
   type SSEState,
   type SSETransport,
   type Thread,
-  type ThreadOpen,
   type UploadTransport,
 } from '@omni/client-core';
-import type { HandoffView, Takeover } from '@omni/shared/handoff.ts';
-import { earlierCursor, type HistoryPage, type Span } from '@omni/shared/history.ts';
+import type { ClaudeArtifactsSchedule } from '@omni/shared/claude-artifacts.ts';
+import type { HandoffView } from '@omni/shared/handoff.ts';
+import { earlierCursor, type HistoryPage } from '@omni/shared/history.ts';
+import { latestOnly } from '@omni/shared/latest.ts';
 import type { Answer } from '@omni/shared/question.ts';
 import type { OutputChunk } from '@omni/shared/tool-output.ts';
 
@@ -43,50 +43,32 @@ import { createActionsLive, type ActionsLive } from './actions';
 import { createActivityLive, type ActivityState } from './activity';
 import { createFolderCollapse, createPendingFolders } from './folders';
 import { linkOf, type Link } from './connection';
+import { createClaudeArtifactsLive, type ClaudeArtifactsLiveState } from './claude-artifacts';
 import { createLibraryLive, type LibraryState } from './library';
 import type { OmniSession } from './session';
 import { createStore, type Store } from './store';
+import { emptyThreadView, reduceThread, withChanges, withDetail, type ThreadChanges, type ThreadDetail, type ThreadView } from './thread-reducer';
 
-/** Feed messages that change the channel list's counts and rows. Usage and mod lines do not. */
-const LIST_CHANGES = new Set(['thread', 'channel', 'tasks', 'folder']);
+/** Feed messages that change the channel list's counts and rows. Usage and mod lines do not, and `tasks` only sometimes (`taskHostsOf`). */
+const LIST_CHANGES = new Set(['thread', 'channel', 'folder']);
 /** Feed messages that change what waits on Ben: a result arrived or was read, or a blocker came or went. */
 const NEEDS_YOU = 'needs_you';
-/** A burst of feed messages refetches the list once, this long after the last one. */
-export const REFRESH_DEBOUNCE_MS = 300;
+/** A burst of feed messages refetches the lists once, at most this often: a busy server sends several a second. */
+export const REFRESH_DEBOUNCE_MS = 500;
+/** A failed GET /tasks tries again after this, doubling up to TASKS_RETRY_MAX_MS until it loads. */
+export const TASKS_RETRY_MS = 5_000;
+export const TASKS_RETRY_MAX_MS = 60_000;
 
 export interface ChannelsState {
   channels: readonly ChannelWithRunning[] | null;
+  /** True while the first list loads. A refetch with a list on screen leaves it alone. */
   loading: boolean;
   /** The last refetch's failure. The channels it held stay on screen. */
   error: string | null;
   loadedAt: number | null;
 }
 
-export interface ThreadView {
-  threadId: string;
-  status: 'loading' | 'ready' | 'missing' | 'error';
-  error: string | null;
-  thread: Thread | null;
-  channel: Channel | null;
-  parent: Thread | null;
-  children: Thread[];
-  artifacts: Artifact[];
-  pending: PendingMsg[];
-  live: boolean;
-  blocked: string | null;
-  /** The handoff in flight on this thread, from either machine's side. Null when there is none. */
-  handoff: HandoffView | null;
-  /** Another machine holds the thread and this server could take it. Null when this one holds it. */
-  takeover: Takeover | null;
-  /** The loaded rows in order: the newest page, then any older pages Ben loaded. */
-  rows: readonly HistoryEvent[];
-  /** The spans of the loaded history. A row outside them only informs the fold and never shows. */
-  spans: readonly Span[];
-  hasOlder: boolean;
-  loadingOlder: boolean;
-  /** The thread's stream state. Null before it opens. */
-  link: SSEState | null;
-}
+export type { ThreadView } from './thread-reducer';
 
 export interface NeedsYouState {
   /** Unread results and blockers across the server's threads. Null until the first load. */
@@ -122,8 +104,12 @@ export interface LiveHub {
   /** The header's link state, reduced from the feed and the open thread. */
   readonly link: Store<Link>;
   readonly needsYou: Store<NeedsYouState>;
+  /** The sub-agents running now, on every thread, for the thread tree on Activity. Background shells are left out. */
+  readonly tasks: Store<readonly BackgroundTask[]>;
   readonly activity: Store<ActivityState>;
   readonly library: Store<LibraryState>;
+  /** Ben's claude.ai Artifacts, for the Library's claude.ai switch. Loads once the switch is first shown. */
+  readonly claudeArtifacts: Store<ClaudeArtifactsLiveState>;
   refreshChannels(): Promise<void>;
   /** Runs one API call with the session's credentials, retried once after a 401. Rejects with 'Not paired' without a server. */
   request<T>(call: (api: OmniApi) => Promise<T>): Promise<T>;
@@ -134,6 +120,11 @@ export interface LiveHub {
   /** Ben saw this result. The inbox drops it now and the server confirms. */
   markResultRead(uid: string): Promise<void>;
   refreshLibrary(): Promise<void>;
+  /** The claude.ai switch was shown: load the list and ask the server to list again unless it did in the last ten minutes. */
+  openClaudeArtifacts(): Promise<void>;
+  /** Pull to refresh on the claude.ai switch: the server lists again now. */
+  refreshClaudeArtifacts(): Promise<void>;
+  setClaudeArtifactsSchedule(schedule: ClaudeArtifactsSchedule): Promise<void>;
   /** The file's bytes, fetched with the token here and handed on as content. Nothing downstream holds the token. */
   fetchArtifactFile(artifact: Pick<Artifact, 'id' | 'updated_at'>, signal?: AbortSignal): Promise<RawResponse>;
   /** Puts the thread and handoff a handoff, takeover or cancel answer carried into the open thread's view, before the stream repeats them. */
@@ -144,6 +135,8 @@ export interface LiveHub {
   fileSource(threadId: string, name: string, options?: { download?: boolean }): Promise<FileSource | null>;
   /** Opens or closes a folder for every client. Resolves to the failure's message, or null. */
   setFolderCollapsed(folderId: string, collapsed: boolean): Promise<string | null>;
+  /** Hears every feed message while subscribed, for a screen that refetches on its own kind (the Changes screen's review notes). */
+  watchFeed(fn: (message: unknown) => void): () => void;
   openThread(threadId: string): ThreadLive;
   openActions(threadId: string): ActionsLive;
   /** Pauses the streams while the app is in the background, and reconnects and refetches when it returns. */
@@ -179,12 +172,17 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   const channels = createStore<ChannelsState>({ channels: null, loading: false, error: null, loadedAt: null });
   const link = createStore<Link>(linkOf({ paired, foreground: true, feed: null, thread: null }));
   const openThreads = new Set<ThreadLiveImpl>();
+  const feedWatchers = new Set<(message: unknown) => void>();
   const openActions = new Set<ActionsLive>();
   let activeThread: ThreadLiveImpl | null = null;
   let foreground = true;
   let feed: SSEClient | null = null;
   let feedState: SSEState | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** What the scheduled refetch loads. A thread change touches all three; a channel or folder change only the list. */
+  const due = { channels: false, needsYou: false, pinned: false };
+  /** The threads hosting sub-agents, as the last `tasks` message named them. */
+  let taskHosts = '';
 
   function recomputeLink() {
     link.set(linkOf({ paired, foreground, feed: feedState, thread: activeThread?.view.get().link ?? null }));
@@ -202,6 +200,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
 
   const activity = createActivityLive({ api, withAuth, now });
   const library = createLibraryLive({ api, withAuth, now });
+  const claudeArtifacts = createClaudeArtifactsLive({ api, withAuth });
 
   function requireApi(): OmniApi {
     if (!api) throw new Error('Not paired');
@@ -249,7 +248,9 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
 
   const pendingFolders = createPendingFolders();
 
-  // One refetch at a time. A call that arrives meanwhile asks for one more pass, so the last state wins.
+  // One refetch at a time. A call that arrives meanwhile asks for one more pass, so the last state wins. A pass that
+  // started before a local rename, pin or move is not applied: it would show the old row until the next pass lands.
+  const channelReads = latestOnly();
   let refreshing: Promise<void> | null = null;
   let refreshAgain = false;
   function refreshChannels(): Promise<void> {
@@ -258,12 +259,18 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       refreshAgain = true;
       return refreshing;
     }
-    channels.set((s) => ({ ...s, loading: true }));
+    // Only the first load says so: a refetch with the list on screen would redraw every screen that reads it.
+    if (channels.get().channels === null) channels.set((s) => ({ ...s, loading: true }));
     refreshing = (async () => {
       do {
         refreshAgain = false;
         try {
+          const token = channelReads.begin();
           const list = await withAuth(() => requireApi().channels());
+          if (!channelReads.holds(token)) {
+            refreshAgain = true;
+            continue;
+          }
           channels.set({ channels: pendingFolders.apply(list), loading: false, error: null, loadedAt: now() });
         } catch (e) {
           channels.set((s) => ({ ...s, loading: false, error: messageOf(e) }));
@@ -282,9 +289,44 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     const readsAtStart = readsMarked;
     try {
       const data = await withAuth(() => requireApi().needsYou());
-      if (readsAtStart === readsMarked) needsYou.set({ data, error: null });
+      // Most loads answer what is on screen already: setting it again would redraw every screen that reads it.
+      if (readsAtStart === readsMarked && !(needsYou.get().error === null && sameJson(needsYou.get().data, data))) needsYou.set({ data, error: null });
     } catch (e) {
       needsYou.set((s) => ({ ...s, error: messageOf(e) }));
+    }
+  });
+
+  const tasks = createStore<readonly BackgroundTask[]>([]);
+  /** The list has loaded, from GET /tasks or a feed `tasks` message, which always carries the whole list. */
+  let tasksLoaded = false;
+  let tasksRetry: ReturnType<typeof setTimeout> | null = null;
+  let tasksRetryMs = TASKS_RETRY_MS;
+  function cancelTasksRetry() {
+    if (tasksRetry !== null) clearTimeout(tasksRetry);
+    tasksRetry = null;
+  }
+  /** Keeps the sub-agents, and sets the store only when one starts or stops: the feed repeats the list about once a second. */
+  function setTasks(list: readonly unknown[]) {
+    tasksLoaded = true;
+    cancelTasksRetry();
+    tasksRetryMs = TASKS_RETRY_MS;
+    const next = list.filter((t): t is BackgroundTask => isRecord(t) && t.subagent === true && typeof t.thread_id === 'string' && typeof t.task_id === 'string');
+    const key = (l: readonly BackgroundTask[]) => l.map((t) => `${t.thread_id}:${t.task_id}`).join();
+    if (key(next) !== key(tasks.get())) tasks.set(next);
+  }
+  const refreshTasks = coalesced(async () => {
+    if (!api) return;
+    try {
+      setTasks(await withAuth(() => requireApi().tasks()));
+    } catch {
+      // The feed sends `tasks` only when the list changes, so while nothing starts or stops it would never bring the
+      // list. Ask again after a backoff, in the foreground only: coming back to the foreground asks anyway.
+      if (!foreground || tasksRetry !== null) return;
+      tasksRetry = setTimeout(() => {
+        tasksRetry = null;
+        void refreshTasks();
+      }, tasksRetryMs);
+      tasksRetryMs = Math.min(tasksRetryMs * 2, TASKS_RETRY_MAX_MS);
     }
   });
 
@@ -296,12 +338,30 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
   }
   const setFolderCollapsed = createFolderCollapse({ api, withAuth, channels, refresh: refreshChannels, pending: pendingFolders });
 
-  function scheduleRefresh() {
+  function scheduleRefresh(what: typeof due) {
+    due.channels ||= what.channels;
+    due.needsYou ||= what.needsYou;
+    due.pinned ||= what.pinned;
     if (refreshTimer !== null) return;
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
-      void refreshChannels();
+      if (due.channels) void refreshChannels();
+      if (due.needsYou) void refreshNeedsYou();
+      if (due.pinned) void activity.refreshPinned();
+      due.channels = due.needsYou = due.pinned = false;
     }, REFRESH_DEBOUNCE_MS);
+  }
+
+  /**
+   * Whether a `tasks` message changes the list. It comes about once a second while any sub-agent runs, but the list only
+   * shows which threads host one, as on the Web UI (apps/web/src/store.tsx).
+   */
+  function taskHostsChanged(message: unknown): boolean {
+    if (!isRecord(message) || message.type !== 'tasks' || !Array.isArray(message.tasks)) return false;
+    const hosts = taskHostsOf(message.tasks);
+    if (hosts === taskHosts) return false;
+    taskHosts = hosts;
+    return true;
   }
 
   function startFeed(client: HttpClient) {
@@ -311,19 +371,32 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       transport,
       refreshAuth: () => session.refreshAuth(),
       onMessage: (message) => {
-        if (isListChange(message)) scheduleRefresh();
-        if (isNeedsYouChange(message)) void refreshNeedsYou();
+        const thread = isThreadChange(message);
+        if (isListChange(message) || taskHostsChanged(message)) scheduleRefresh({ channels: true, needsYou: thread, pinned: thread });
+        if (isRecord(message) && message.type === NEEDS_YOU) void refreshNeedsYou();
+        if (isRecord(message) && message.type === 'tasks' && Array.isArray(message.tasks)) setTasks(message.tasks);
         activity.applyFeed(message);
         library.applyFeed(message);
+        claudeArtifacts.applyFeed(message);
+        // A thread the open one delegated to started, was renamed or finished, or its parent changed.
+        for (const t of openThreads) t.applyMessage(message);
+        for (const fn of feedWatchers) fn(message);
       },
       // The feed keeps no replay, so every reconnect refetches the list. The open thread catches up through its own stream.
       onReconnect: () => {
         void refreshChannels();
         void refreshNeedsYou();
+        void refreshTasks();
         void activity.refresh();
         void library.refresh();
+        void claudeArtifacts.reload();
       },
       onState: (state) => {
+        // The feed is connected, so the server is up: a list that never loaded asks again now.
+        if (state.kind === 'open' && !tasksLoaded) {
+          cancelTasksRetry();
+          void refreshTasks();
+        }
         feedState = state;
         recomputeLink();
       },
@@ -343,35 +416,17 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
 
     constructor(private readonly threadId: string) {
       this.send = this.applying(senders.for(threadId));
-      this.view = createStore<ThreadView>({
-        threadId,
-        status: 'loading',
-        error: null,
-        thread: null,
-        channel: null,
-        parent: null,
-        children: [],
-        artifacts: [],
-        pending: [],
-        live: false,
-        blocked: null,
-        handoff: null,
-        takeover: null,
-        rows: [],
-        spans: [],
-        hasOlder: false,
-        loadingOlder: false,
-        link: null,
-      });
+      this.view = createStore<ThreadView>(emptyThreadView(threadId));
       // What the stream shows decides whether a message this phone is still sending has already landed.
       this.unwatch = this.view.subscribe(() => {
-        const { pending, rows } = this.view.get();
+        // The server's rows and list: the opening message drawn from its pending row has not been read yet.
+        const { pending, rows } = this.view.get().held;
         this.send.observe({ pending, userRowId: latestUserRowId(rows) });
       });
     }
 
-    private patch(next: Partial<ThreadView>) {
-      this.view.set((v) => ({ ...v, ...next }));
+    private patch(next: ThreadChanges) {
+      this.view.set((v) => withChanges(v, next));
     }
 
     /** The sender, with what each answer says about the thread put on screen before the stream repeats it. */
@@ -409,7 +464,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     private async open(): Promise<void> {
       const id = this.threadId;
       try {
-        const live = await openThreadLive<HistoryEvent, ThreadOpen>({
+        const live = await openThreadLive<HistoryEvent, ThreadDetail>({
           load: () => withAuth(() => requireApi().thread(id)),
           streamUrl: (after) => requireHttp().url(apiPath`/threads/${id}/stream`, { after }),
           token: () => session.token(),
@@ -420,7 +475,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
             this.history = history as ThreadHistory<HistoryEvent>;
             this.publishRows();
           },
-          onOther: (message) => this.applyOther(message),
+          onOther: (message) => this.applyMessage(message),
           onState: (state) => {
             this.patch({ link: state });
             if (activeThread === this) recomputeLink();
@@ -436,36 +491,13 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
       }
     }
 
-    private applyDetail(detail: Partial<ThreadOpen>) {
-      const prev = this.view.get();
-      this.patch({
-        status: 'ready',
-        error: null,
-        thread: detail.thread ?? prev.thread,
-        channel: detail.channel ?? null,
-        parent: detail.parent ?? null,
-        children: detail.children ?? prev.children,
-        artifacts: detail.artifacts ?? prev.artifacts,
-        pending: detail.pending ?? [],
-        live: detail.live ?? false,
-        blocked: detail.blocked ?? null,
-        handoff: detail.handoff ?? null,
-        takeover: detail.takeover ?? null,
-      });
+    private applyDetail(detail: Partial<ThreadDetail>) {
+      this.view.set((v) => withDetail(v, detail));
     }
 
-    /** A status change arrives as a `thread` message on the stream, not as rows. */
-    private applyOther(message: unknown) {
-      if (!isRecord(message) || message.kind !== 'thread' || !isRecord(message.thread)) return;
-      this.patch({
-        status: 'ready',
-        thread: message.thread as unknown as Thread,
-        pending: Array.isArray(message.pending) ? (message.pending as PendingMsg[]) : [],
-        live: message.live === true,
-        blocked: typeof message.blocked === 'string' ? message.blocked : null,
-        handoff: isRecord(message.handoff) ? (message.handoff as unknown as HandoffView) : null,
-        takeover: isRecord(message.takeover) ? (message.takeover as unknown as Takeover) : null,
-      });
+    /** A thread or artifact message from the stream, or a thread message from the feed (thread-reducer.ts). */
+    applyMessage(message: unknown) {
+      if (!this.closed) this.view.set((v) => reduceThread(v, message));
     }
 
     async answerQuestion(questionId: string, answers: Answer[]): Promise<AnswerResult> {
@@ -561,6 +593,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     startFeed(http);
     void refreshChannels();
     void refreshNeedsYou();
+    void refreshTasks();
     void activity.refresh();
     void library.refresh();
   }
@@ -570,26 +603,37 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     channels,
     link,
     needsYou,
+    tasks,
     activity: activity.state,
     library: library.state,
+    claudeArtifacts: claudeArtifacts.state,
     refreshChannels,
     request: (call) => withAuth(() => call(requireApi())),
     uploadLimitMb,
     fileSource,
     applyThread(thread) {
       for (const t of openThreads) t.applyThread(thread);
+      channelReads.edit();
+      activity.applyThread(thread);
       void refreshChannels();
     },
     refreshNeedsYou,
     markResultRead,
     refreshActivity: activity.refresh,
     refreshLibrary: library.refresh,
+    openClaudeArtifacts: claudeArtifacts.open,
+    refreshClaudeArtifacts: claudeArtifacts.refresh,
+    setClaudeArtifactsSchedule: claudeArtifacts.setSchedule,
     fetchArtifactFile: (artifact, signal) => withAuth(() => requireApi().artifactFile(artifact, signal)),
     applyHandoff(thread, handoff) {
       for (const t of openThreads) t.applyHandoff(thread, handoff);
       void refreshChannels();
     },
     setFolderCollapsed,
+    watchFeed(fn) {
+      feedWatchers.add(fn);
+      return () => void feedWatchers.delete(fn);
+    },
     openActions(threadId) {
       const actions = createActionsLive({ api, withAuth, threadId });
       if (!foreground) actions.pause();
@@ -614,6 +658,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     setForeground(active) {
       foreground = active;
       if (!active) {
+        cancelTasksRetry();
         feed?.pause();
         for (const t of openThreads) t.pause();
         for (const a of openActions) a.pause();
@@ -623,6 +668,7 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
         for (const a of openActions) a.resume();
         void refreshChannels();
         void refreshNeedsYou();
+        void refreshTasks();
         void activity.refresh();
         void library.refresh();
       }
@@ -636,6 +682,8 @@ export function createLiveHub(options: LiveHubOptions): LiveHub {
     close() {
       if (refreshTimer !== null) clearTimeout(refreshTimer);
       refreshTimer = null;
+      due.channels = due.needsYou = due.pinned = false;
+      cancelTasksRetry();
       library.close();
       feed?.close();
       feed = null;
@@ -664,11 +712,24 @@ function isListChange(message: unknown): boolean {
   return isRecord(message) && typeof message.type === 'string' && LIST_CHANGES.has(message.type);
 }
 
-/** What can change the inbox: the server says so, or a thread changed, which is how a result lands or a blocker clears. */
-function isNeedsYouChange(message: unknown): boolean {
-  if (!isRecord(message)) return false;
-  if (message.type === NEEDS_YOU) return true;
-  return message.type === 'thread' && isRecord(message.thread) && typeof message.thread.id === 'string';
+/** A thread changed: how a result lands or a blocker clears, and what moves a pinned row. */
+function isThreadChange(message: unknown): boolean {
+  return isRecord(message) && message.type === 'thread' && isRecord(message.thread) && typeof message.thread.id === 'string';
+}
+
+/** The threads a `tasks` message lists sub-agents under: a member's team lead, else its own thread. */
+function taskHostsOf(tasks: unknown[]): string {
+  const hosts = new Set<string>();
+  for (const t of tasks) {
+    if (!isRecord(t)) continue;
+    const host = typeof t.lead_id === 'string' ? t.lead_id : t.thread_id;
+    if (typeof host === 'string') hosts.add(host);
+  }
+  return [...hosts].sort().join();
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function messageOf(e: unknown): string {

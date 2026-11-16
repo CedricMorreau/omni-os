@@ -1,16 +1,23 @@
-// Omni's windows: each one the Web UI, with the bridge's preload. Links to other sites open in the default browser;
+// Omni's windows: each one the Web UI, with the bridge's preload. Links to other sites open in the default browser
+// (a claude.ai artifact in the Claude app when it is installed, open-external.ts);
 // a link to an Omni route opens an Omni window. The main window opens where it was last closed.
-import { app, BrowserWindow, Menu, screen, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, Menu, screen, session, type WebContents } from 'electron';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { clampZoom, ZOOM_STEP } from '@omni/shared/desktop-bridge.ts';
+import { clampZoom, ZOOM_STEP, type DesktopLayout } from '@omni/shared/desktop-bridge.ts';
+import { redactNonce } from './backend/pairing.ts';
 import type { AppContext } from './context.ts';
+import { LINK } from './ipc.ts';
+import { linkRouter } from './link-routing.ts';
 import { editMenuTemplate } from './menu-template.ts';
+import { openExternal } from './open-external.ts';
 import { safeRoute } from './options.ts';
 import {
   appPermissionAllowed,
   isGesture,
   linkTarget,
+  mayPairAgain,
+  plainClick,
   nextWindowState,
   parseWindowState,
   recentGesture,
@@ -62,9 +69,19 @@ export function applyZoom(factor: number): void {
   }
 }
 
+/** The desktop layout each window's page last reported (DesktopBridge.setLayout). The rail, the default, until it says. */
+const layouts = new WeakMap<BrowserWindow, DesktopLayout>();
+
 /** Keeps the traffic lights where the page leaves room for them, which moves when the layout does. */
 function placeTrafficLights(win: BrowserWindow, zoom: number): void {
-  if (MAC) win.setWindowButtonPosition(trafficLights(win.getContentBounds().width, zoom));
+  if (MAC) win.setWindowButtonPosition(trafficLights(win.getContentBounds().width, zoom, layouts.get(win)));
+}
+
+/** The page switched between the classic sidebar and the channel rail: move its window's traffic lights to match. */
+export function setWindowLayout(ctx: AppContext, win: BrowserWindow, layout: DesktopLayout): void {
+  if (layout !== 'classic' && layout !== 'rail') return;
+  layouts.set(win, layout);
+  placeTrafficLights(win, ctx.settings.get().zoom);
 }
 
 export function routeUrl(appUrl: string, route: string | null | undefined): string {
@@ -114,6 +131,22 @@ const failedLoads = new WeakSet<BrowserWindow>();
 export function reloadIfFailed(ctx: AppContext, win: BrowserWindow, route?: string | null): boolean {
   if (!failedLoads.has(win)) return false;
   void load(ctx, win, { kind: ctx.mainWindow() === win ? 'main' : 'secondary', route });
+  return true;
+}
+
+/** When each window last paired again (DesktopBridge.pairAgain). */
+const pairedAgainAt = new WeakMap<BrowserWindow, number>();
+
+/**
+ * Pairs a window again with a fresh nonce, then opens `route`: the page lost its session (the install token rotated,
+ * or the session was revoked). The windows share one session, so this pairs them all. At most once per window per
+ * PAIR_AGAIN_MS; a second ask inside that leaves the page on its own pairing screen.
+ */
+export function pairWindowAgain(ctx: AppContext, win: BrowserWindow, route: string | null): boolean {
+  const now = Date.now();
+  if (win.isDestroyed() || !mayPairAgain(pairedAgainAt.get(win) ?? null, now)) return false;
+  pairedAgainAt.set(win, now);
+  void load(ctx, win, { kind: 'main', route });
   return true;
 }
 
@@ -179,11 +212,25 @@ export function createOmniWindow(ctx: AppContext, input: { kind: WindowKind; rou
     // -3 is a load replaced by another, such as a click while it loads.
     if (isMainFrame && code !== -3) failedLoads.add(win);
   });
-  win.webContents.on('did-navigate', () => failedLoads.delete(win));
+  // Read once: a closed window's webContents can no longer say its id.
+  const contents = win.webContents;
+  const pageId = contents.id;
+  win.webContents.on('did-navigate', () => {
+    failedLoads.delete(win);
+    // A new document takes links only once it says so again (routeLinks).
+    linkRouter.setRouting(pageId, false);
+  });
 
   const origins = () => ({ app: ctx.appUrl(), server: ctx.backend.origin() });
   const gesture = trackGestures(win.webContents);
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  // A link leaving Omni. A plain click on a GitHub pull request link asks this window's page first, which opens the
+  // PR's page in Omni when it has one (link-routing.ts); `routed` runs when it did.
+  const leave = (url: string, plain: boolean, routed?: () => void) => {
+    if (plain && linkRouter.ask(pageId, url, (id, link, deadline) => contents.send(LINK, id, link, deadline), openExternal, routed)) return;
+    openExternal(url);
+  };
+  win.on('closed', () => linkRouter.setRouting(pageId, false));
+  win.webContents.setWindowOpenHandler(({ url, disposition }) => {
     // The Web UI opens windows from a click; an agent's HTML in the page could try on a timer, or in a loop.
     if (!gesture()) return { action: 'deny' };
     const target = linkTarget(url, origins());
@@ -204,7 +251,7 @@ export function createOmniWindow(ctx: AppContext, input: { kind: WindowKind; rou
           },
         };
       case 'external':
-        void shell.openExternal(target.url);
+        leave(target.url, plainClick(disposition));
         return { action: 'deny' };
       case 'none':
         return { action: 'deny' };
@@ -212,16 +259,18 @@ export function createOmniWindow(ctx: AppContext, input: { kind: WindowKind; rou
   });
   win.webContents.on('did-create-window', (child) => {
     const childGesture = trackGestures(child.webContents);
-    child.webContents.setWindowOpenHandler(({ url }) => {
+    // An agent's page in a window of its own: a PR link it opens shows in this Omni window, which comes forward.
+    const routed = () => bringForward(win);
+    child.webContents.setWindowOpenHandler(({ url, disposition }) => {
       const target = linkTarget(url, origins());
-      if (target.kind === 'external' && childGesture()) void shell.openExternal(target.url);
+      if (target.kind === 'external' && childGesture()) leave(target.url, plainClick(disposition), routed);
       return { action: 'deny' };
     });
     child.webContents.on('will-navigate', (event, url) => {
       if (staysInWindow(url, origins())) return;
       event.preventDefault();
       const target = linkTarget(url, origins());
-      if (target.kind === 'external' && childGesture()) void shell.openExternal(target.url);
+      if (target.kind === 'external' && childGesture()) leave(target.url, true, routed);
     });
   });
 
@@ -230,7 +279,7 @@ export function createOmniWindow(ctx: AppContext, input: { kind: WindowKind; rou
     if (staysInWindow(url, origins())) return;
     event.preventDefault();
     const target = linkTarget(url, origins());
-    if (target.kind === 'external' && gesture()) void shell.openExternal(target.url);
+    if (target.kind === 'external' && gesture()) openExternal(target.url);
   });
 
   // Text fields and selections get the system's Cut, Copy and Paste, with spelling suggestions. Electron only hears
@@ -251,14 +300,27 @@ async function load(ctx: AppContext, win: BrowserWindow, input: { kind: WindowKi
   failedLoads.delete(win);
   try {
     if (input.kind === 'main') {
-      // Pairing sets the API cookie for this app's session; the server then sends the window to its UI.
-      await win.loadURL(`${ctx.backend.origin()}/api/auth/desktop-pair`);
+      // Pairing sets the API cookie for this app's session; the server then sends the window to its UI. Each pairing
+      // load takes a fresh nonce from the server (backend/pairing.ts); a renderer reload keeps the cookie and needs none.
+      let pairUrl: string;
+      try {
+        pairUrl = await ctx.backend.desktopPairUrl();
+      } catch (err) {
+        if (win.isDestroyed()) return;
+        // Never desktop-pair without a nonce here: the window stays unpaired, and showMain tries again.
+        failedLoads.add(win);
+        console.error('[omni] could not pair the window:', err instanceof Error ? err.message : err);
+        win.show();
+        return;
+      }
+      if (win.isDestroyed()) return;
+      await win.loadURL(pairUrl);
       if (ctx.appUrl() === ctx.backend.origin() && !input.route) return;
     }
     await win.loadURL(routeUrl(ctx.appUrl(), input.route));
   } catch (err) {
     // A load the user replaced with another (a click while loading) rejects too. A failed one is marked by
     // did-fail-load, and showMain loads the window again once the server is up.
-    if (!win.isDestroyed() && failedLoads.has(win)) console.error('[omni] window load failed:', err);
+    if (!win.isDestroyed() && failedLoads.has(win)) console.error('[omni] window load failed:', redactNonce(err instanceof Error ? err.message : String(err)));
   }
 }

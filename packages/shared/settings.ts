@@ -1,7 +1,7 @@
 // The user config's one contract (data/omni.config.json, GET and PUT /api/setup): every field the person sets, with
 // its label, hint, default and checks, and the types the server and the web import. The server builds its schema from
 // SETTING_FIELDS (apps/server/user-config.ts) and checks a save with `settingProblem`; the web's Settings page draws its
-// General and Workspace forms from them (apps/web/src/pages/Settings.tsx).
+// General, Workspace, Hermes and Network access forms from them (apps/web/src/pages/Settings.tsx).
 //
 // A new text setting is one entry here and its line in omni.config.example.json.
 
@@ -28,8 +28,6 @@ export interface SettingField {
   page: SettingPage | null;
   /** Folded under Advanced. */
   advanced?: boolean;
-  /** Shares its row with the next field that has it too. */
-  half?: boolean;
   /** Under the label. `{fallback}` is this machine's default. */
   hint?: string;
   placeholder?: string;
@@ -50,16 +48,16 @@ export interface SettingField {
 }
 
 /** The Settings sections that show config fields (packages/shared/settings-catalog.ts). */
-export type SettingPage = 'general' | 'workspace' | 'integrations' | 'access';
+export type SettingPage = 'general' | 'workspace' | 'models' | 'access';
 
 /** How each Settings section frames its fields: the card's title and note, and the Advanced fold's summary and note. */
 export const SETTING_PAGES: Record<SettingPage, { title: string; note?: string; advanced?: { summary: string; note: string } }> = {
   general: { title: 'You' },
   workspace: { title: 'Folders' },
-  integrations: { title: 'Integrations', note: 'Optional. Leave a field empty to turn it off.' },
+  models: { title: 'Hermes', note: 'Runs threads through a Hermes server instead of a local CLI. Leave it empty to turn it off.' },
   access: {
     title: 'Network access',
-    note: 'Set in data/omni.config.json or its environment variable, so a page cannot open this Omni wider.',
+    note: 'Set only in files on this machine, so no page can open this Omni wider.',
     advanced: { summary: 'Clerk instance for Google sign-in', note: 'Empty uses the shared instance Omni ships with.' },
   },
 };
@@ -79,14 +77,13 @@ export const SETTING_FIELDS = [
     max: NAME_MAX,
     required: 'Enter a name.',
   },
-  { section: 'user', key: 'pronouns', label: 'Pronouns', input: 'pronouns', page: 'general', half: true, default: 'they/them', max: 40 },
+  { section: 'user', key: 'pronouns', label: 'Pronouns', input: 'pronouns', page: 'general', default: 'they/them', max: 40 },
   {
     section: 'user',
     key: 'timezone',
     label: 'Timezone',
     input: 'timezone',
     page: 'general',
-    half: true,
     hint: "Empty uses the server's: {fallback}.",
     fallback: 'timezone',
     default: '',
@@ -112,7 +109,7 @@ export const SETTING_FIELDS = [
     key: 'hermesUrl',
     label: 'Hermes URL',
     input: 'url',
-    page: 'integrations',
+    page: 'models',
     hint: 'A Hermes API server on your tailnet. Its token is the global secret HERMES_API_KEY.',
     placeholder: 'http://100.64.0.1:8642',
     default: '',
@@ -123,8 +120,8 @@ export const SETTING_FIELDS = [
     key: 'centralBrainDir',
     label: 'Central brain folder',
     input: 'folder',
-    page: 'integrations',
-    hint: 'A git repo of notes that the brain-nightly automation exports thread digests into.',
+    page: 'workspace',
+    hint: 'A git repo of notes. The brain-nightly automation exports thread digests into it. Leave it empty to turn that off.',
     placeholder: '~/central-brain',
     default: '',
     max: 1024,
@@ -186,6 +183,38 @@ export const SETTING_FIELDS = [
     max: 200,
     env: { name: 'OMNI_CLERK_CLIENT_ID', emptyWins: true },
   },
+  {
+    // OAuth clients whose Clerk tokens /mcp takes even when the token names no audience (apps/server/mcp-token.ts),
+    // comma separated client ids. Approving one in Settings does the same per machine; this is for the file.
+    section: 'integrations',
+    key: 'mcpClients',
+    label: 'Approved MCP clients',
+    input: 'text',
+    page: 'access',
+    advanced: true,
+    readonly: true,
+    hint: 'OAuth client ids /mcp accepts, comma separated. Clients whose token names this Omni need no entry.',
+    default: '',
+    max: 2000,
+    env: { name: 'OMNI_MCP_CLIENTS', emptyWins: true },
+  },
+  {
+    // Which synced changes need a valid signature from the machine that sent them (apps/server/sync/verify.ts).
+    // actions: remote commands, assignments, update asks, the automations owner and secret drops; the rest is logged and
+    // applied, so a Mac on an older build keeps syncing. strict: every change. log: nothing is refused for a missing
+    // signature, for a rollout with older Macs still sending commands; a bad signature is still refused.
+    section: 'integrations',
+    key: 'syncSignatures',
+    label: 'Signed sync',
+    input: 'text',
+    page: 'access',
+    advanced: true,
+    readonly: true,
+    hint: 'actions, strict or log. Which synced changes need a signature from the machine that sent them.',
+    default: 'actions',
+    max: 20,
+    env: { name: 'OMNI_SYNC_SIGNATURES' },
+  },
 ] as const satisfies readonly SettingField[];
 
 type Field = (typeof SETTING_FIELDS)[number];
@@ -202,6 +231,8 @@ export const pageFields = (page: SettingPage): readonly SettingField[] => SETTIN
 export interface AutomationOverride {
   enabled?: boolean;
   channel?: string;
+  /** Deleted from the Automations page: a shared automation in automations/ that this machine no longer lists or runs. */
+  deleted?: boolean;
 }
 
 export interface UserConfig {
@@ -215,7 +246,7 @@ export interface UserConfig {
   runOn: { device: string };
   automations: Record<string, AutomationOverride>;
   /** This machine's worktree retention (apps/server/worktree-cleanup.ts). */
-  worktrees: { retention: { enabled: boolean; idleDays: number } };
+  worktrees: { retention: { enabled: boolean; idleDays: number }; slim: { enabled: boolean; idleDays: number } };
 }
 
 /** A partial update: any section, any subset of its fields. Null removes an automation override or onboardedAt. */

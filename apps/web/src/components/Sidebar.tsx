@@ -1,24 +1,27 @@
-import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { taskHost, type ChannelWithRunning, type FolderWithThreads, type ThreadStub } from '../api.ts';
 import { DEFAULT_FOLDER_NAME, draftKey, freeName, useFolders } from '../folders.tsx';
 import { pinnedRows } from '../pins.ts';
 import { opensOnVisit } from '../sidebar-fold.ts';
 import { rowsElsewhere, runningThreadGroups } from '../sidebar-lists.ts';
-import { href, useHash, useRoute } from '../router.ts';
-import { readPref, useApp, writePref } from '../store.tsx';
-import { parseChannelIcon } from '@omni/shared/channel-icon.ts';
-import { delegatesByParent } from '@omni/shared/delegate-count.ts';
+import { href, useRoute } from '../router.ts';
+import { useApp } from '../store.tsx';
+import { CONDUCTOR_CHANNEL, parseChannelIcon } from '@omni/shared/channel-icon.ts';
+import { useJobTree } from '../thread-tree.ts';
 import { OmniMark } from './brand.tsx';
-import { ChannelMark, ErrorNote, Thumb, useSlidingThumb } from './ui.tsx';
+import { Avatar, ChannelMark, ErrorNote } from './ui.tsx';
 import { useUngroupDrop } from './sidebar/channel-lists.ts';
-import { SidebarTop, type SidebarView } from './sidebar/SidebarTop.tsx';
+import { SidebarTop } from './sidebar/SidebarTop.tsx';
 import { InboxView } from './sidebar/InboxView.tsx';
 import { channelFolders, channelThreads, useChannelFold } from './sidebar/channel-lists.ts';
 import { FolderNameField, FolderRow, AddFolderButton } from './sidebar/FolderRows.tsx';
-import { ChannelThreadEntry, NavLink, RunningBadge, SectionLink, ThreadSection, useRowDelegates, useSectionFold } from './sidebar/SidebarRows.tsx';
+import { ChannelThreadEntry, NavLink, RunningBadge, SectionLink, ThreadSection, useSectionFold } from './sidebar/SidebarRows.tsx';
 import { ChannelListLink, WorkspaceLinks } from './sidebar/SidebarLinks.tsx';
 import { UsageCard } from './sidebar/UsageCard.tsx';
 import { UpdateNotice } from './UpdateNotice.tsx';
+import { DiskNotice } from './DiskNotice.tsx';
+import { AccountNotice } from './AccountNotice.tsx';
+import { useSidebarView } from '../sidebar-view.ts';
 
 /** Past this many threads a channel shows "N more" (or "See all threads" when highlighted) and links to its full list. */
 const MAX_THREADS = 5;
@@ -32,17 +35,11 @@ const GROUPS: { kind: string; label: string }[] = [
 // onClose is the mobile drawer's: its X sits in the header beside collapse-all, both at a 44px touch size.
 export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => void; onSearch: () => void; onClose?: () => void }) {
   const route = useRoute();
-  const hash = useHash();
   const { channels, channelsError, openThread, tasks, pinned } = useApp();
   const folders = useFolders();
-  const listRef = useRef<HTMLDivElement>(null);
   const { dropOn, ungroupDrop } = useUngroupDrop(folders);
   const { collapsed, setChannelOpen, foldAll, toggleAll } = useChannelFold(channels, folders);
-  const [view, setView] = useState<SidebarView>(() => (readPref<SidebarView>('sidebar.view', 'projects') === 'inbox' ? 'inbox' : 'projects'));
-  const switchView = (next: SidebarView) => {
-    writePref('sidebar.view', next);
-    setView(next);
-  };
+  const [view, switchView] = useSidebarView(route.name);
 
   // Running and Pinned each fold on their own.
   const [runningClosed, toggleRunning] = useSectionFold('sidebar.runningCollapsed');
@@ -63,32 +60,17 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
   // copy and stays after it stops, so the highlight never jumps out from under you. The highlighted
   // channel also lists its latest threads of any status, so finished ones stay a click away.
   // Threads in a folder are listed under the folder instead.
-  // Threads the Conductor delegated get no row of their own, anywhere: the count on their Conductor thread's row
-  // stands for them, and the channel's running badge still counts the ones at work.
+  // A job's tree nests the threads it delegated and its team under its row, and each also keeps its row in its channel.
   // A thread listed in Running lives there alone while Running is open, so one row holds the highlight.
-  const delegates = delegatesByParent(conductor?.handoffs);
   const openCopy = openThread && openThread.id === openId ? openThread : null;
   const running = runningThreadGroups(channels, openCopy).map((g) => g.thread);
-  const away = rowsElsewhere(channels, running, !runningClosed);
+  const away = rowsElsewhere(running, !runningClosed);
   const elsewhere = (t: ThreadStub) => away.has(t.id);
   const listed = (f: FolderWithThreads) => ({ ...f, threads: f.threads.filter((t) => !elsewhere(t)) });
   const threadsOf = (c: ChannelWithRunning) => channelThreads(c, openIn(c), focused).filter((t) => !elsewhere(t));
   /** The channel's folders, with the open thread under its own even past the listed ones. */
   const foldersOf = (c: ChannelWithRunning) => channelFolders(c, openIn(c)).map(listed);
-  // Rows appearing or leaving above the highlighted one move it, so they re-measure the thumb too.
   const pins = pinnedRows(pinned, openCopy);
-  const sectionKey = (closed: boolean, list: ThreadStub[]) => (closed ? 'closed' : list.map((t) => t.id).join());
-  const sectionsKey = [sectionKey(runningClosed, running), sectionKey(pinsClosed, pins)].join('|');
-  const rowsKey = channels
-    .flatMap((c) =>
-      collapsed.has(c.id)
-        ? [`${c.id}:closed`]
-        : [...foldersOf(c).flatMap((f) => [f.id, f.collapsed, ...f.threads.map((t) => t.id)]), ...threadsOf(c).map((t) => t.id)],
-    )
-    .join();
-  // Agent rows nest under threads, so they move the rows below them too.
-  const agentsKey = tasks.map((k) => k.task_id).join();
-  const box = useSlidingThumb(listRef, `${hash}:${channels.length}:${sectionsKey}:${rowsKey}:${agentsKey}:${folders.editing}`, true, '[data-active="true"]');
 
   const threadLinks = (c: ChannelWithRunning) => {
     const closed = collapsed.has(c.id);
@@ -108,7 +90,7 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
           <div className="min-h-0 space-y-px overflow-hidden">{channelContents(c, closed)}</div>
         </div>
         {closed && open && !elsewhere(open) && (
-          <ChannelThreadEntry t={open} active tasks={agents(open.id)} handoffs={c.handoffs} flush={c.id === 'conductor'} onNavigate={onNavigate} />
+          <ChannelThreadEntry t={open} active tasks={agents(open.id)} flush={c.id === 'conductor'} onNavigate={onNavigate} />
         )}
       </>
     );
@@ -123,7 +105,7 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
     return (
       <>
         {(closed ? (c.folders ?? []).map(listed) : foldersOf(c)).map((f) => (
-          <FolderRow key={f.id} f={f} openId={oid} tasks={tasks} handoffs={c.handoffs} onNavigate={onNavigate} />
+          <FolderRow key={f.id} f={f} openId={oid} tasks={tasks} onNavigate={onNavigate} />
         ))}
         {folders.editing === draftKey(c.id) && (
           <FolderNameField
@@ -133,7 +115,7 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
           />
         )}
         {shown.map((t) => (
-          <ChannelThreadEntry key={t.id} t={t} active={t.id === oid} tasks={agents(t.id)} handoffs={c.handoffs} flush={c.id === 'conductor'} onNavigate={onNavigate} />
+          <ChannelThreadEntry key={t.id} t={t} active={t.id === oid} tasks={agents(t.id)} flush={c.id === 'conductor'} onNavigate={onNavigate} />
         ))}
         {c.id === focused ? (
           <ChannelListLink channelId={c.id} onNavigate={onNavigate}>
@@ -198,24 +180,34 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
       home={!unpin}
       tasks={tasks.filter((k) => taskHost(k) === t.id)}
       unpin={unpin}
-      delegated={unpin ? undefined : delegates.get(t.id)}
       onNavigate={onNavigate}
     />
   );
 
+  // A channel row's lead: its avatar when it has a background, else its bare icon, else # (the Conductor: the Omni mark).
+  const channelLead = (c: ChannelWithRunning) => {
+    const tone = activeChannel === c.id ? 'text-fg-2' : 'text-fg-3';
+    if (c.id === CONDUCTOR_CHANNEL) {
+      return (
+        <span className="grid min-w-[15px] place-items-center">
+          {c.avatar_bg ? <Avatar name={c.name} omni channelIcon={c.icon} avatarBg={c.avatar_bg} size={22} /> : parseChannelIcon(c.icon) ? <span className={`grid ${tone}`}><ChannelMark icon={c.icon} size={14} /></span> : <OmniMark size={17} />}
+        </span>
+      );
+    }
+    if (c.avatar_bg) return <Avatar name={c.name} channelIcon={c.icon} avatarBg={c.avatar_bg} size={20} />;
+    if (parseChannelIcon(c.icon)) {
+      return (
+        <span className={`grid w-[15px] place-items-center ${tone}`}>
+          <ChannelMark icon={c.icon} size={14} />
+        </span>
+      );
+    }
+    return <span className={`w-[15px] text-center font-num text-[12px] ${tone}`}>#</span>;
+  };
+
   const channelLink = (c: ChannelWithRunning) => (
     <Fragment key={c.id}>
-      {channelRow(
-        c,
-        c.name,
-        parseChannelIcon(c.icon) ? (
-          <span className={`grid w-[15px] place-items-center ${activeChannel === c.id ? 'text-fg-2' : 'text-fg-3'}`}>
-            <ChannelMark icon={c.icon} size={14} />
-          </span>
-        ) : (
-          <span className={`w-[15px] text-center font-num text-[12px] ${activeChannel === c.id ? 'text-fg-2' : 'text-fg-4'}`}>#</span>
-        ),
-      )}
+      {channelRow(c, c.name, channelLead(c))}
       {threadLinks(c)}
     </Fragment>
   );
@@ -229,15 +221,14 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
         {view === 'inbox' ? (
           <InboxView onNavigate={onNavigate} />
         ) : (
-          <div ref={listRef} className="relative space-y-4">
-            <Thumb box={box} />
+          <div className="space-y-4">
             <div className="space-y-px">
               <NavLink to={href.home()} icon="home" active={route.name === 'home'} onNavigate={onNavigate}>
-                Home
+                Overview
               </NavLink>
               {conductor && (
                 <>
-                  {channelRow(conductor, 'Conductor', <span className="grid w-[15px] place-items-center"><OmniMark size={17} /></span>)}
+                  {channelRow(conductor, 'Conductor', channelLead(conductor))}
                   {threadLinks(conductor)}
                 </>
               )}
@@ -281,14 +272,16 @@ export function Sidebar({ onNavigate, onSearch, onClose }: { onNavigate?: () => 
       {/* The machine's name moved to Settings, Machines (#405). */}
       <div className="px-3 pt-1 pb-3">
         <UpdateNotice className="mb-2" />
+        <DiskNotice className="mb-2" />
+        <AccountNotice className="mb-2" />
         <UsageCard />
       </div>
     </nav>
   );
 }
 
-/** A Running or Pinned row. A Conductor thread in Running carries its delegate count, in place of the threads it delegated. */
-function SectionEntry({ delegated, ...props }: Omit<Parameters<typeof SectionLink>[0], 'delegates'> & { delegated?: readonly ThreadStub[] }) {
-  const delegates = useRowDelegates(props.t.id, delegated, props.onNavigate);
-  return <SectionLink {...props} delegates={delegates} />;
+/** A Running or Pinned row. A job in Running carries its tree; a Pinned copy leaves it to the thread's own row. */
+function SectionEntry(props: Omit<Parameters<typeof SectionLink>[0], 'tree'>) {
+  const tree = useJobTree(props.t, 'sidebar');
+  return <SectionLink {...props} tree={props.home ? tree : null} />;
 }

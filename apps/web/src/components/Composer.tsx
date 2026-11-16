@@ -2,18 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorText, harnessesPath, useApi, type HarnessWithRunning, type SendMode, type Thread } from '../api.ts';
 import { dropNewThreadPreset, navigate, openNewThread, peekNewThreadPreset } from '../router.ts';
 import { useApp } from '../store.tsx';
-import { ErrorNote, Icon, Picker } from './ui.tsx';
+import { Button, ErrorNote, Icon, Picker } from './ui.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { BasePicker, useBasePick } from './BasePicker.tsx';
 import { RunOnPicker, useRunOn } from './RunOnPicker.tsx';
+import { useToast } from './Toaster.tsx';
+import { sendMessageToGrokBot } from '../grokbot.ts';
+import { GROK_BOT_NOTE, GROK_BOT_PLACEHOLDER, GROK_BOT_SENT, grokBotBlock } from '@omni/shared/thread-machine.ts';
+import { ComposerAccountNotice } from './AccountNotice.tsx';
+import { pickerAccounts, useAccounts } from '../accounts.ts';
+import { accountLine } from '@omni/shared/harness-accounts.ts';
+import { asksAuto } from '@omni/shared/thread-run.ts';
 import { baseRequest } from '../worktree-base.ts';
 import { SlashMenu, useCommands } from './SlashMenu.tsx';
 import { FileMenu, useFileMenu } from './FileMenu.tsx';
 import { replySlash } from '@omni/shared/composer-slash.ts';
+import { STEP_WORKING } from '@omni/shared/thread-glance.ts';
 import { newThreadBody, sameSettings } from '../new-thread-preset.ts';
 import { draftRun, draftRunRequest, type DraftRun } from '@omni/shared/draft-run.ts';
 import { sendKey } from '../requests.ts';
-import { beginSend } from '../sending.ts';
+import { beginSend, keepLocalFiles } from '../sending.ts';
 import type { MessageContext } from '@omni/shared/message-context.ts';
 import { requestIdFor, type PendingRequest } from '@omni/shared/request-id.ts';
 import { ContextChips } from '../message-context/ContextChips.tsx';
@@ -27,6 +35,8 @@ import { joinMenus, useNewThreadMenus, useSlashMenu } from './composer/menus.tsx
 import { pickerOptions } from './composer/pickerOptions.tsx';
 import { finePointer, SteerButton, ThreadRunPills } from './composer/ReplyControls.tsx';
 import { ThreadMachineChip, type MachineHeld } from './composer/MachineChip.tsx';
+import { LivesOnNote, sendRefusal, type SendRefusal } from './thread/LivesOn.tsx';
+import { TakeoverConfirm } from './thread/Takeover.tsx';
 
 export { AttachmentStrip, useAttachments };
 
@@ -76,7 +86,24 @@ export function NewThreadComposer({
 
   const [base, setBase] = useBasePick(channel);
   const runOn = useRunOn();
+  const toast = useToast();
+  // Grok Bot in the Machine chip: the text goes to its webhook and no thread starts, so the run's own pickers step aside.
+  const toGrok = runOn.grokBot;
+  const grokBlock = toGrok ? grokBotBlock(att.files.length) : null;
   const { choice, effort } = draftRun(picked, crew.find((r) => r.id === role), channels.find((c) => c.id === channel), harnesses ?? []);
+  // Who the picked harness runs as on the machine the thread will run on: in the model list, the machine rows, and a
+  // notice when it switched since anyone last looked. Auto picks the harness later, so it shows none.
+  const accounts = useAccounts();
+  const target = pickerAccounts(accounts.data, runOn.pick);
+  const picksHarness = !asksAuto(choice);
+  const accountFor = useCallback(
+    (pick: string) => {
+      const a = picksHarness ? pickerAccounts(accounts.data, pick)?.byHarness[choice.harness] : undefined;
+      return a ? accountLine(a) : null;
+    },
+    [accounts.data, choice.harness, picksHarness],
+  );
+  const switched = picksHarness ? target?.byHarness[choice.harness] : undefined;
 
   // Default the role once crew loads, if the conductor channel is selected. A preset keeps its own.
   useEffect(() => {
@@ -86,8 +113,8 @@ export function NewThreadComposer({
 
   const roleObj = crew.find((r) => r.id === role);
   // The Conductor channel runs the Conductor, and with no crew there is nothing to pick.
-  const showRole = crew.length > 0 && channel !== 'conductor';
-  const ticket = role === 'ticket' && channels.find((c) => c.id === channel)?.kind === 'client';
+  const showRole = crew.length > 0 && channel !== 'conductor' && !toGrok;
+  const ticket = role === 'ticket' && channels.find((c) => c.id === channel)?.kind === 'client' && !toGrok;
   const visibleChannels = channels.filter((c) => !c.archived);
 
   const onRole = (r: string) => {
@@ -113,9 +140,24 @@ export function NewThreadComposer({
 
   const { slashMenu, fileMenu, menus, hint } = useNewThreadMenus({ ref, text, onText: update, choice, channel });
 
+  /** POST /api/grokbot with the text and the channel, the route Send to Grok Bot uses. The box empties once it took it. */
+  const sendToGrok = async (prompt: string) => {
+    // The note under the box already says to remove the attachments.
+    if (grokBlock) return;
+    setBusy(true);
+    setError(null);
+    const result = await sendMessageToGrokBot(prompt, channel);
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    drafts.delete(key);
+    setText('');
+    toast({ title: GROK_BOT_SENT, icon: 'grok' });
+  };
+
   const submit = async () => {
     const prompt = text.trim();
     if (!prompt || busy) return;
+    if (toGrok) return sendToGrok(prompt);
     setBusy(true);
     setError(null);
     try {
@@ -133,6 +175,7 @@ export function NewThreadComposer({
         },
         att.files,
       );
+      keepLocalFiles(t.id, att.files);
       drafts.delete(key);
       setText('');
       att.clear();
@@ -162,16 +205,20 @@ export function NewThreadComposer({
           if (enterKey(e, text, update)) void submit();
         }}
         rows={big ? 3 : 2}
-        placeholder={withKeys(placeholder ?? (channel === 'conductor' ? 'Ask the Conductor anything. It delegates to the crew.' : 'Describe the task'))}
+        placeholder={toGrok ? GROK_BOT_PLACEHOLDER : withKeys(placeholder ?? (channel === 'conductor' ? 'Ask the Conductor anything. It delegates to the crew.' : 'Describe the task'))}
         className={`block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-1 leading-[1.8] outline-none placeholder:text-fg-3 ${big ? 'min-h-[96px] text-[16px]' : 'min-h-[60px] text-[14.5px]'}`}
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         {!channelId && <Picker label="Channel" value={channel} options={channelOptions} onChange={onChannel} />}
         {showRole && <Picker label="Role" value={role} options={roleOptions} onChange={onRole} />}
-        {harnesses && (
+        {harnesses && !toGrok && (
           <ModelPicker
             harnesses={harnesses}
-            onOpen={reloadHarnesses}
+            onOpen={() => {
+              reloadHarnesses();
+              accounts.reload();
+            }}
+            accounts={target}
             defaultOpen={preset?.pickModel}
             value={choice}
             onChange={(c) => {
@@ -180,8 +227,8 @@ export function NewThreadComposer({
             effort={{ value: effort, onChange: (effort) => setPicked({ choice, effort }) }}
           />
         )}
-        <BasePicker channel={channel} harness={choice.harness} value={base} onChange={setBase} />
-        <RunOnPicker rows={runOn.rows} value={runOn.pick} onChange={runOn.setPick} />
+        {!toGrok && <BasePicker channel={channel} harness={choice.harness} value={base} onChange={setBase} />}
+        <RunOnPicker rows={runOn.rows} value={runOn.pick} onChange={runOn.setPick} accountFor={accountFor} />
         <AttachButton onPick={att.add} disabled={busy} />
         {ticket && (
           <button
@@ -195,7 +242,7 @@ export function NewThreadComposer({
             Quick
           </button>
         )}
-        {folder && channel === preset?.channel && (
+        {folder && channel === preset?.channel && !toGrok && (
           <button
             type="button"
             onClick={() => setFolder(null)}
@@ -205,18 +252,21 @@ export function NewThreadComposer({
           >
             <Icon name="folder" size={13} className="text-fg-3" />
             <span className="truncate">{folder.name}</span>
-            <Icon name="x" size={12} className="text-fg-4" />
+            <Icon name="x" size={12} className="text-fg-3" />
           </button>
         )}
         <div className="ml-auto flex items-center gap-2.5">
-          <SendButton armed={!!text.trim()} busy={busy} onClick={submit}>
-            Start
+          <SendButton armed={!!text.trim() && !grokBlock} busy={busy} onClick={submit}>
+            {toGrok ? 'Send' : 'Start'}
           </SendButton>
         </div>
       </div>
       {/* Mounted before it says anything, so a screen reader reads each hint as it appears. */}
-      <div aria-live="polite">{hint && !menus.open && <div className="px-4 pb-2.5 text-[12px] text-fg-3">{hint}</div>}</div>
+      <div aria-live="polite">{hint && !menus.open && !toGrok && <div className="px-4 pb-2.5 text-[12px] text-fg-3">{hint}</div>}</div>
       {showRole && roleObj?.description && <div className="px-4 pb-2.5 text-[12px] text-fg-3">{roleObj.description}</div>}
+      {toGrok && !grokBlock && <div className="px-4 pb-2.5 text-[12px] text-fg-3">{GROK_BOT_NOTE}</div>}
+      {grokBlock && <ErrorNote className="mx-2 mb-2">{grokBlock}</ErrorNote>}
+      {switched?.notice && target && <ComposerAccountNotice machine={{ id: target.id, name: target.machine }} account={switched} onSeen={accounts.setData} />}
       {(att.error || error) && <ErrorNote className="mx-2 mb-2">{att.error ?? error}</ErrorNote>}
     </div>
   );
@@ -234,20 +284,27 @@ export function useReplySend(threadId: string) {
     lastRequest.current = null;
   }, [threadId]);
   return useCallback(
-    async (prompt: string, mode: SendMode | undefined, files: File[], context: readonly MessageContext[] = []) => {
+    /**
+     * `ifAway: 'ask'`: when the thread lives on a machine Tailscale sees asleep, refuse with `lives_on` (Send there,
+     * Take over) instead of leaving the message to wait there. The reply boxes ask; Send there sends without it.
+     */
+    async (prompt: string, mode: SendMode | undefined, files: File[], context: readonly MessageContext[] = [], ifAway?: 'ask') => {
       const ids = context.map((r) => r.id);
       const request = requestIdFor(lastRequest.current, sendKey(prompt, mode, files, ids));
       lastRequest.current = request;
-      const body = { prompt, ...(mode && { mode }), ...(context.length ? { context } : {}), request_id: request.id };
+      const body = { prompt, ...(mode && { mode }), ...(context.length ? { context } : {}), request_id: request.id, ...(ifAway && { if_away: ifAway }) };
       // In the thread at once, files and all, while the upload and the server's checks run (sending.ts).
       const done = beginSend(threadId, request.id, prompt, files);
       try {
         const t = await api.send<Thread>(`/threads/${encodeURIComponent(threadId)}/messages`, body, files);
         lastRequest.current = null;
         settleDraftContext(threadId, ids);
+        // The stream's pending list that takes over lands with the next frame's rows (useThreadHistory's withRows).
+        requestAnimationFrame(done);
         return t;
-      } finally {
+      } catch (e) {
         done();
+        throw e;
       }
     },
     [threadId],
@@ -258,20 +315,32 @@ export function ReplyComposer({
   thread,
   canSteer = true,
   onSent,
+  onSending,
   onChanged,
   stop,
   machine,
+  asking = false,
+  openPR,
   history = [],
 }: {
   thread: Thread;
   history?: readonly string[];
+  /**
+   * The agent waits on a question card. A message steers in as the answer (the server dismisses the question), so the
+   * box reads as a reply: Send, no Stop.
+   */
+  asking?: boolean;
   /** When false (e.g. Cursor), a busy thread offers only Queue and Interrupt; Cmd+Enter queues. */
   canSteer?: boolean;
   /** The thread's handoff state, for the Machine chip next to the model pill. Without it the chip is left out. */
   machine?: MachineHeld;
   /** Set while a turn runs that can be stopped: an empty box shows Stop where Send sits. */
   stop?: { busy: boolean; run: () => void } | null;
+  /** Set when the agent's last reply asks whether to open a PR: Open PR beside the Machine chip answers yes. */
+  openPR?: { busy: boolean; prompt: string; run: () => void } | null;
   onSent?: (t: Thread, mode?: SendMode) => void;
+  /** Called as a message leaves the box, before the server has it: it shows in the thread from now on. */
+  onSending?: () => void;
   /** The thread after `/rename` or a run switch. */
   onChanged?: (t: Thread) => void;
 }) {
@@ -282,6 +351,9 @@ export function ReplyComposer({
   const [text, setText] = useState(() => drafts.get(key) ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A send the server refused with where the thread lives or a raw reason (LivesOn.tsx), and the mode it went with.
+  const [away, setAway] = useState<{ refusal: SendRefusal; mode?: SendMode } | null>(null);
+  const [takingOver, setTakingOver] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const att = useAttachments();
   useWindowDrop(att.dropZone);
@@ -289,14 +361,22 @@ export function ReplyComposer({
   const sendReply = useReplySend(threadId);
   useAutosize(ref, text, 240);
 
+  // Once Take over is asked for (or the thread is here again), the card's offer is past.
+  const takeover = machine?.takeover;
+  useEffect(() => {
+    if (!takeover) setAway((a) => (a?.refusal.livesOn ? null : a));
+  }, [takeover]);
+
   useEffect(() => {
     setText(drafts.get(key) ?? '');
     setError(null);
+    setAway(null);
     att.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   const busyThread = status === 'running' || status === 'queued';
+  const replying = asking && steers;
   // The server's guess at the next reply, shown in the empty box. Tab takes it.
   const suggestion = !busyThread && !text && thread.suggestion ? thread.suggestion : null;
   const latest = useRef(text);
@@ -316,25 +396,30 @@ export function ReplyComposer({
 
   // `mode` only matters while a turn is in progress; an idle thread just starts the next turn.
   const canSend = !!text.trim() || context.length > 0 || att.files.length > 0;
-  const submit = async (mode?: SendMode) => {
+  /** `sendThere`: the card's Send there, which lets the message wait for a machine that is asleep. */
+  const submit = async (mode?: SendMode, sendThere = false) => {
     const raw = text;
     const prompt = raw.trim();
     if (!canSend || busy) return;
     setBusy(true);
     setError(null);
+    setAway(null);
     // The box empties now: the message shows in the thread while it goes, and comes back here if it fails.
     const files = att.files;
     drafts.delete(key);
     setText('');
     att.clear();
+    onSending?.();
     try {
-      const t = await sendReply(prompt, mode, files, context);
+      const t = await sendReply(prompt, mode, files, context, sendThere ? undefined : 'ask');
       onSent?.(t, mode);
     } catch (e) {
       // Unless Ben started a new message meanwhile.
       if (!latest.current || latest.current === raw) update(raw);
       att.add(files);
-      setError(errorText(e));
+      const refusal = sendRefusal(e);
+      if (refusal.livesOn || refusal.detail) setAway({ refusal, mode });
+      else setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -376,6 +461,7 @@ export function ReplyComposer({
     try {
       if (action.kind === 'new-thread') {
         const t = await api.send<Thread>('/threads', newThreadBody(thread, action.prompt), att.files);
+        keepLocalFiles(t.id, att.files);
         sent(raw);
         att.clear();
         navigate(`/t/${t.id}`);
@@ -428,17 +514,26 @@ export function ReplyComposer({
           void submit(busyThread ? busyMode : undefined);
         }}
         rows={1}
-        placeholder={suggestion ? `${suggestion} · ⇥ to use` : withKeys(!busyThread ? 'Reply' : steers ? 'Steer the agent. It reads this at its next step.' : 'Queue a message. It runs after this turn.')}
+        placeholder={suggestion ? `${suggestion} · ⇥ to use` : withKeys(!busyThread || replying ? 'Reply' : steers ? 'Steer the agent. It reads this at its next step' : 'Queue a message. It runs after this turn')}
         className="block max-h-[220px] min-h-[60px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[14.5px] leading-[1.8] outline-none placeholder:text-fg-3"
       />
       <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 pb-2">
         <AttachButton onPick={att.add} disabled={busy} />
         <ThreadRunPills thread={thread} openRequest={pillRequest} onSwitched={(t) => onChanged?.(t)} onError={setError} />
         {machine && <ThreadMachineChip thread={thread} held={machine} disabled={busy} onError={setError} />}
+        {openPR && (
+          <Button size="sm" variant="primary" icon="pr" busy={openPR.busy} title={openPR.prompt} onClick={openPR.run}>
+            {openPR.busy ? STEP_WORKING.open : 'Open PR'}
+          </Button>
+        )}
         <div className="ml-auto flex items-center gap-2.5">
           {omni ? (
             <SendButton armed={slash.armed} busy={busy} onClick={() => void runOmni()}>
               {slash.label ?? 'Send'}
+            </SendButton>
+          ) : replying ? (
+            <SendButton armed={canSend} busy={busy} onClick={() => void submit('steer')}>
+              Send
             </SendButton>
           ) : stop && !canSend && !att.files.length ? (
             <StopButton busy={stop.busy} onClick={stop.run} />
@@ -457,7 +552,28 @@ export function ReplyComposer({
           <div className="px-4 pb-2.5 text-[12px] text-fg-3">{slash.hint}</div>
         )}
       </div>
+      {away && (
+        <LivesOnNote
+          className="mx-2 mb-2"
+          refusal={away.refusal}
+          takeover={machine?.takeover}
+          busy={busy}
+          onSendThere={() => void submit(away.mode, true)}
+          onTakeOver={() => setTakingOver(true)}
+        />
+      )}
       {(att.error || error) && <ErrorNote className="mx-2 mb-2">{att.error ?? error}</ErrorNote>}
+      {takingOver && machine?.takeover && (
+        <TakeoverConfirm
+          threadId={threadId}
+          takeover={machine.takeover}
+          onClose={() => setTakingOver(false)}
+          onChanged={(a) => {
+            setAway(null);
+            machine.onChanged(a);
+          }}
+        />
+      )}
     </div>
   );
 }

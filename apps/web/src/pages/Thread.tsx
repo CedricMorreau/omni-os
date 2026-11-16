@@ -1,3 +1,4 @@
+import { turnPhase } from '@omni/shared/status.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApi, type HarnessWithRunning } from '../api.ts';
 import { ReplyComposer } from '../components/Composer.tsx';
@@ -6,15 +7,18 @@ import { LinkChannel } from '../link-previews.ts';
 import { ThreadIdCtx } from '../components/thread/ToolOutput.tsx';
 import { PanelResizeHandle } from '../components/thread/panel/PanelResizeHandle.tsx';
 import { NextThreadCard } from '../components/thread/NextThreadCard.tsx';
+import { OpenItemsCard } from '../components/thread/OpenItemsCard.tsx';
+import { sameSettings } from '../new-thread-preset.ts';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
 import { CrewQuestions } from '../components/thread/CrewQuestions.tsx';
 import { LimitCard } from '../components/thread/LimitCard.tsx';
+import { GoalLine } from '../components/thread/GoalLine.tsx';
 import { StaleSessionCard } from '../components/thread/StaleSessionCard.tsx';
 import { HandoffCard, type HandoffAnswer } from '../components/thread/Handoff.tsx';
 import { useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { usePRWatch } from '../components/thread/PRWatch.tsx';
 import { useBranchChanges } from '../mobile/ThreadTurn.tsx';
-import { prNext, stepOf, stepUnderway } from '@omni/shared/thread-glance.ts';
+import { prNext, prOffered, stepOf, stepParked, stepPrompts, stepUnderway } from '@omni/shared/thread-glance.ts';
 import { ContextMeter } from '../components/thread/ContextMeter.tsx';
 import { ThreadHeader } from '../components/thread/ThreadHeader.tsx';
 import { ThreadPanel } from '../components/thread/ThreadPanel.tsx';
@@ -22,15 +26,18 @@ import { useTicket } from '../components/thread/RouteCard.tsx';
 import { RoutePanel, useTicketPanels } from '../components/thread/TicketPanels.tsx';
 import { StagePillButton } from '../components/StagePill.tsx';
 import { DraftPanel } from '../components/thread/DraftPanel.tsx';
+import { ThreadQuickCard } from '../components/thread/ThreadQuickCard.tsx';
+import type { PanelTab } from './useThreadSession.ts';
 import { AGENTS_CARD_ID } from '../components/thread/panel/AgentsSection.tsx';
 import { Empty, ErrorNote, Icon, LinkButton, Loading } from '../components/ui.tsx';
-import { href, navigate, type ThreadView } from '../router.ts';
+import { href, navigate, openNewThread, type ThreadView } from '../router.ts';
 import { reportNotes } from '../requests.ts';
 import { canSteer } from '../steer.ts';
 import { teamOf } from '../transcript/delegation.ts';
 import { runningSubagents } from '../subagents.ts';
 import { isAsking } from '@omni/shared/transcript-fold.ts';
-import { useApp } from '../store.tsx';
+import { useApp, useHereName, useNow } from '../store.tsx';
+import { limitLabel } from '../limits.ts';
 import { useThreadActions } from './useThreadActions.ts';
 import { useThreadInterruptKey } from './useThreadInterruptKey.ts';
 import { useThreadPanel } from './useThreadPanel.ts';
@@ -44,7 +51,7 @@ import { blockedNote } from '@omni/shared/thread-machine.ts';
 import { shownDraft } from '../ticket-route.ts';
 
 export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: string; artifact?: number; at?: number; view?: ThreadView }) {
-  const { mods, tasks } = useApp();
+  const { mods, tasks, channel: listedChannel } = useApp();
   const modLines = useMemo(() => mods.filter((m) => m.thread_id === id), [mods, id]);
   // GET /api/harnesses, the same list the reply pills load. Until it arrives, canSteer uses the Cursor fallback.
   const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
@@ -72,6 +79,7 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
     notFound,
     ready,
     queued,
+    listed,
     setQueued,
     warm,
     blocked,
@@ -113,6 +121,8 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
   const reports = useMemo(() => reportNotes(queued), [queued]);
   const asking = useMemo(() => isAsking(events), [events]);
   const sentHistory = useMemo(() => sentTexts(events), [events]);
+  // What the running turn is doing, for the header pill's dot and the quick card's.
+  const turn = useMemo(() => (thread?.status === 'running' ? turnPhase(events) : null), [events, thread?.status]);
   const agents = useMemo(() => runningSubagents(tasks, id), [tasks, id]);
   const selectArtifact = useCallback(
     (artifact: number) => {
@@ -122,6 +132,13 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
     [setSelected, setPanelTab],
   );
   const panel = useThreadPanel({ artifactParam, files, ready, loaded: thread !== null, select: selectArtifact });
+  const hereName = useHereName();
+  const now = useNow(60_000);
+  const workCwd = init?.cwd || thread?.cwd || '';
+  const openFromCard = (tab: PanelTab) => {
+    setPanelTab(tab);
+    panel.show();
+  };
   // A delegate count links here as /details: the panel opens on Details at the agents card, and the address goes back
   // to the thread's own, so the next click on the count lands here again.
   const [toAgents, setToAgents] = useState(false);
@@ -140,13 +157,21 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
     card.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     setToAgents(false);
   }, [toAgents, panelTab, children, panel.open]);
-  const { sending, restoring, ask, restore, toggleDone } = useThreadActions({ id, thread, slotBusy, applyThread, setActionError, pin });
+  // The channel's own step prompts (Channel Settings), from the live channel list so an edit applies without a reload.
+  const ownChannel = (thread && listedChannel(thread.channel_id)) ?? channel;
+  const prompts = useMemo(() => stepPrompts(ownChannel), [ownChannel]);
+  const underway = useMemo(() => stepUnderway(events, queued, slotBusy, prompts), [events, queued, slotBusy, prompts]);
+  // A step prompt that never reached the agent (a restart, or a session download that failed): its button says why, and
+  // pressing it again resumes that message rather than sending a second copy.
+  const parked = useMemo(() => (underway ? null : stepParked(queued, prompts)), [underway, queued, prompts]);
+  const { sending, restoring, ask, restore, toggleDone } = useThreadActions({ id, thread, slotBusy, underway, parked, prompts, applyThread, setQueued, setActionError, pin });
   // The branch's PRs and changes: the PRs tab and the Details tab's branch card read them, and the PRs tab's badge.
-  const prs = useThreadPR(thread, slotBusy);
+  const [prs, reloadPRs] = useThreadPR(thread, slotBusy);
   const watch = usePRWatch(thread?.id, prs);
   const changes = useBranchChanges(thread, slotBusy);
-  const next = prNext(prs?.pr ?? null, !!changes?.files.length);
-  const step = useMemo(() => stepOf(sending) ?? stepUnderway(events, queued, slotBusy), [sending, events, queued, slotBusy]);
+  const next = prNext(prs?.pr ?? null, !!changes?.files.length, prompts);
+  const step = stepOf(sending, prompts) ?? underway;
+  const offered = useMemo(() => prOffered(events, !slotBusy && !queued.length, prs?.pr), [events, slotBusy, queued, prs?.pr]);
 
   useThreadPresence(id, thread);
   useThreadInterruptKey({ slotBusy, interrupting, interrupt });
@@ -174,6 +199,7 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
     );
   }
 
+  const reconnecting = !live && ready;
   const artifactCount = files.length + shots.length + crew.files.length + crew.shots.length;
 
   return (
@@ -200,29 +226,36 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
                 }}
               />
             ),
-            reconnecting: !live && ready,
+            reconnecting,
             onDone: () => void toggleDone(),
             onRestore: () => void restore(),
             restoring,
             panelOpen: panel.open,
+            panelSurface: panel.surface,
             onPanel: panel.toggle,
             artifactCount,
             asking,
+            turn,
+            pr: prs?.pr,
           }}
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col">
           <DraftPanel threadId={thread.id} draft={shownDraft(ticket, thread)} ticketRef={ticket?.ref} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} />
-          {/* transcript */}
-          <div className="relative min-h-0 flex-1">
-            <div ref={scrollRef} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
+          {/* transcript, with the quick card in its own column so it never covers the conversation */}
+          <div className="relative flex min-h-0 flex-1">
+          <div className="relative min-h-0 min-w-0 flex-1">
+            <div ref={scrollRef} onScroll={onScroll} className="scroll-none h-full overflow-y-auto [overflow-anchor:none]">
               <div ref={contentRef} className="mx-auto max-w-4xl px-4 pt-4 pb-10 md:px-6">
                 {/* Queued means waiting for a slot: nothing is working yet. */}
                 <LinkChannel.Provider value={thread.channel_id}>
                   <ThreadIdCtx.Provider value={id}>
-                    <Transcript threadId={id} events={events} running={turnInProgress} cwd={init?.cwd || thread.cwd} known={known} team={members} artifacts={files} reports={reports} history={history} delegated={!!thread.parent_id} />
+                    <Transcript threadId={id} events={events} running={turnInProgress} cwd={init?.cwd || thread.cwd} known={known} team={members} artifacts={files} reports={reports} history={history} delegated={!!thread.parent_id} limit={limitLabel(thread, now)} elsewhere={!!takeover} />
                   </ThreadIdCtx.Provider>
                 </LinkChannel.Provider>
+                <div className="mt-4 empty:hidden">
+                  <GoalLine thread={thread} running={turnInProgress} onSent={(t) => applyThread(t, true)} />
+                </div>
                 <div className="mt-4 empty:hidden">
                   <CrewQuestions threadId={id} />
                 </div>
@@ -252,15 +285,25 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
                 />
                 <HandoffCard thread={thread} handoff={handoff} onChanged={handedOff} />
                 <QueuedMessages items={queued} starting={betweenTurns} threadId={id} onPending={setQueued} setup={thread.setup} sessionBlocked={!!thread.resume_blocked} canSteer={canSteer(thread.harness, harnesses)} />
-                <SendingMessages threadId={id} pending={queued} />
+                <SendingMessages threadId={id} pending={listed} />
                 {!queued.length && (
-                  <NextThreadCard
-                    thread={thread}
-                    onThread={(t, reply) => {
-                      applyThread(t, reply);
-                      if (reply) pin();
-                    }}
-                  />
+                  <>
+                    <OpenItemsCard
+                      thread={thread}
+                      onThread={(t, reply) => {
+                        applyThread(t, reply);
+                        if (reply) pin();
+                      }}
+                      onSpawn={(prompt) => openNewThread({ ...sameSettings(thread), prompt })}
+                    />
+                    <NextThreadCard
+                      thread={thread}
+                      onThread={(t, reply) => {
+                        applyThread(t, reply);
+                        if (reply) pin();
+                      }}
+                    />
+                  </>
                 )}
               </div>
             </div>
@@ -274,34 +317,58 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
               </button>
             )}
           </div>
-
-          {/* composer */}
-          <div className="relative shrink-0 bg-bg px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-4">
-            <div className="mx-auto max-w-4xl">
-              {actionError && <ErrorNote className="mb-2">{actionError}</ErrorNote>}
-              {/* The setup card above says why while the worktree is not ready. */}
-              {note && !thread.setup && <ErrorNote className="mb-2">{note}</ErrorNote>}
-              <ReplyComposer
+          {panel.surface === 'card' && (
+            <div className="absolute top-2 right-2 z-20 w-[17rem] max-w-[calc(100%-1rem)] md:static md:w-72 md:max-w-none md:shrink-0 md:pt-2 md:pr-3 md:pl-1">
+              <ThreadQuickCard
                 thread={thread}
-                canSteer={canSteer(thread.harness, harnesses)}
-                // Nothing runs while the worktree is prepared, so there is nothing to stop.
-                stop={slotBusy && !thread.setup ? { busy: interrupting, run: () => void interrupt() } : null}
-                onSent={(t) => {
-                  applyThread(t, true);
-                  pin();
-                }}
-                // A rename keeps updated_at, so it has to win a tie.
-                onChanged={(t) => applyThread(t)}
-                machine={{ blocked, handoff, takeover, onChanged: handedOff }}
-                history={sentHistory}
+                init={init}
+                warm={warm}
+                slotBusy={slotBusy}
+                prs={prs}
+                step={step}
+                artifactCount={artifactCount}
+                machineName={hereName}
+                cwd={workCwd}
+                onOpen={openFromCard}
+                onOpenPR={(c, n) => navigate(href.pr(c, n))}
+                asking={asking}
+                turn={turn}
+                reconnecting={reconnecting}
               />
             </div>
+          )}
+        </div>
+
+        {/* composer, keeping clear of the quick card's column so it centres under the transcript */}
+        <div className={`relative shrink-0 bg-bg px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-4 ${panel.surface === 'card' ? 'md:pr-[19.5rem]' : ''}`}>
+          <div className="mx-auto max-w-4xl">
+            {actionError && <ErrorNote className="mb-2">{actionError}</ErrorNote>}
+            {/* The setup card above says why while the worktree is not ready. */}
+            {note && !thread.setup && <ErrorNote className="mb-2">{note}</ErrorNote>}
+            <ReplyComposer
+              thread={thread}
+              canSteer={canSteer(thread.harness, harnesses)}
+              // Nothing runs while the worktree is prepared, so there is nothing to stop.
+              stop={slotBusy && !thread.setup ? { busy: interrupting, run: () => void interrupt() } : null}
+              onSending={pin}
+              onSent={(t) => {
+                applyThread(t, true);
+                pin();
+              }}
+              // A rename keeps updated_at, so it has to win a tie.
+              onChanged={(t) => applyThread(t)}
+              machine={{ blocked, handoff, takeover, onChanged: handedOff }}
+              asking={asking}
+              openPR={offered || step === 'open' ? { busy: step === 'open', prompt: prompts.open, run: () => void ask(prompts.open) } : null}
+              history={sentHistory}
+            />
+          </div>
           </div>
         </div>
       </div>
 
       {/* panel */}
-      {panel.open && (
+      {panel.surface === 'inspector' && (
         <aside className="relative shrink-0 py-2 pr-2" style={{ width: panel.width }}>
           <PanelResizeHandle width={panel.width} max={panel.max} onChange={panel.resize} onReset={panel.reset} />
           <div className="panel-in h-full overflow-hidden rounded-[24px] bg-surface shadow-[inset_0_0_0_1px_light-dark(transparent,var(--pane-edge))]">
@@ -314,9 +381,9 @@ export function ThreadPage({ id, artifact: artifactParam, at, view }: { id: stri
               onSelect={setSelected}
               tab={panelTab}
               onTab={setPanelTab}
-              onClose={panel.toggle}
-              details={{ channel, parent, children, init, lastResult, warm, links, agents, onJump: jumpTo, prs, changes, next, step, onAsk: (p) => void ask(p), onTab: setPanelTab }}
-              prs={{ data: prs, watch, next, step, onAsk: (p) => void ask(p) }}
+              onClose={panel.closeInspector}
+              details={{ channel, parent, children, init, lastResult, warm, links, agents, onJump: jumpTo, prs, changes, next, step, parked: parked?.step ?? null, onAsk: (p) => void ask(p), onMerged: () => void reloadPRs(), onTab: setPanelTab }}
+              prs={{ data: prs, watch, next, step, parked: parked?.step ?? null, openPrompt: prompts.open, onAsk: (p) => void ask(p), onMerged: () => void reloadPRs() }}
             />
           </div>
         </aside>

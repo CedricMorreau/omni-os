@@ -2,19 +2,18 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { turnCount } from '@omni/shared/history.ts';
 import { api, artifactUrl, errorText, useApi, type Artifact, type HarnessWithRunning, type PRDetail } from '../api.ts';
-import { HarnessLogo, HarnessMark, harnessLabel, Loader } from '../components/brand.tsx';
+import { HarnessLogo, HarnessMark, harnessLabel } from '../components/brand.tsx';
 import { ArtifactBody } from '../components/ArtifactViewer.tsx';
 import { AnnotateLayer, canAnnotate, useAfterAdd, type AnnotateFrom } from '../components/BrowserAnnotate.tsx';
 import { LiveAnnotateCard, LiveAnnotateOverlay, useLiveAnnotate } from '../components/BrowserAnnotationOverlay.tsx';
 import { BrowserWatch, displayUrl, useChannelBrowser } from '../components/LiveBrowser.tsx';
 import { Markdown } from '../components/Markdown.tsx';
-import { modelOf } from '../components/ModelPicker.tsx';
 import { ChangesTab } from '../components/thread/panel/ChangesTab.tsx';
 import { usePRWatch } from '../components/thread/PRWatch.tsx';
 import { watchCopy } from '@omni/shared/pr-watch.ts';
-import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
+import { useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { ThreadIdCtx, ToolOutput } from '../components/thread/ToolOutput.tsx';
-import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, STATUS_LABEL, StatusDot } from '../components/ui.tsx';
+import { Button, Chip, copyText, ErrorNote, Icon, SlideToConfirm, statusLabel, StatusDot } from '../components/ui.tsx';
 import { cloudAgentUrl } from '@omni/shared/cloud-agent.ts';
 import { carriedText } from '@omni/shared/continue.ts';
 import { relTime } from '@omni/shared/format.ts';
@@ -22,15 +21,19 @@ import { linkName } from '../components/ContinueLinks.tsx';
 import { fullDate, plural } from '../format.ts';
 import { runningSubagents, subagentKind } from '../subagents.ts';
 import { href, type Route } from '../router.ts';
+import { openOnGitHub } from '../pr-links.ts';
+import { RerunNote, useRerunFailedChecks } from '../components/RerunChecks.tsx';
 import { mergeNote } from '@omni/shared/pr-merge.ts';
-import { checkTone, STEP_WORKING, stepUnderway } from '@omni/shared/thread-glance.ts';
+import { checkTone, STEP_WORKING, stepPrompts, stepUnderway } from '@omni/shared/thread-glance.ts';
 import { useApp } from '../store.tsx';
 import { toolLabel, toolSummary, type Item, type ToolCall } from '@omni/shared/transcript-fold.ts';
 import { CrewFileList } from './CrewFiles.tsx';
 import { CrewPRList } from './CrewPRs.tsx';
+import { MoAutoMerge } from './MoAutoMerge.tsx';
 import { MoDiff, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoSection } from './parts.tsx';
 import { useShell, useThread } from './shell.tsx';
 import { threadView } from '@omni/shared/thread-view.ts';
+import { threadRunLabels } from '@omni/shared/thread-run.ts';
 import { holds } from '../thread-history.ts';
 import { hasLiveOutput, outputTarget } from '../tool-output.ts';
 import { isWorking } from '@omni/shared/delegate-count.ts';
@@ -69,7 +72,7 @@ function Step({ c, depth, running, cwd, tails }: { c: ToolCall; depth: number; r
         <StatusDot status={state} size={8} />
         <span className="shrink-0 text-[13px] font-medium">{toolLabel(c.name)}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] leading-[1.3] text-fg-2">{toolSummary(c, cwd)}</span>
-        {tappable && <Icon name="chevronRight" size={14} className={`shrink-0 text-fg-4 transition-transform duration-300 [transition-timing-function:var(--ease-settle)] ${open ? 'rotate-90' : ''}`} />}
+        {tappable && <Icon name="chevronRight" size={14} className={`shrink-0 text-fg-3 transition-transform duration-300 [transition-timing-function:var(--ease-settle)] ${open ? 'rotate-90' : ''}`} />}
       </span>
       {out && !open && <span className={`ml-[18px] block ${OUTPUT_BOX} ${state === 'failed' ? 'text-fg' : 'text-fg-3'}`}>{out}</span>}
     </>
@@ -156,9 +159,10 @@ export function PRScreen() {
   const shell = useShell();
   const { thread, slotBusy, applyThread, events, queued } = useThread();
   const { channel } = useApp();
-  const mark = useThreadPR(thread, slotBusy, true);
+  const [mark] = useThreadPR(thread, slotBusy, true);
   const [asking, setAsking] = useState(false);
-  const opening = asking || stepUnderway(events, queued, slotBusy) === 'open';
+  const prompts = stepPrompts(thread ? channel(thread.channel_id) : null);
+  const opening = asking || stepUnderway(events, queued, slotBusy, prompts) === 'open';
   const watch = usePRWatch(thread?.id, mark);
   const crew = mark?.crew ?? [];
   const [picked, setPicked] = useState<string | null>(null);
@@ -169,6 +173,7 @@ export function PRScreen() {
   const [error, setError] = useState<string | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const p = q.data;
+  const rerun = useRerunFailedChecks(ch?.id, n, p?.checkRuns, !!p && (!p.state || p.state === 'OPEN'));
 
   const merge = async () => {
     setError(null);
@@ -197,7 +202,7 @@ export function PRScreen() {
     if (!thread) return;
     setAsking(true);
     try {
-      applyThread(await api.post(`/threads/${encodeURIComponent(thread.id)}/messages`, { prompt: OPEN_PR_PROMPT, mode: slotBusy ? 'queue' : undefined }), true);
+      applyThread(await api.post(`/threads/${encodeURIComponent(thread.id)}/messages`, { prompt: prompts.open, mode: slotBusy ? 'queue' : undefined }), true);
       shell.toast('Asked for a PR');
       shell.back();
     } catch (e) {
@@ -228,7 +233,7 @@ export function PRScreen() {
                 ? `PR #${n} is open. Set this channel's GitHub repo on the desktop to read it here.`
                 : thread.branch
                   ? opening
-                    ? 'The agent is committing and pushing this branch. The PR shows here once it opens.'
+                    ? 'The agent is pushing this branch. The PR shows up here.'
                     : 'No pull request from this branch yet.'
                   : 'This thread works without a branch, so it has no pull request.'}
             </MoEmpty>
@@ -256,7 +261,7 @@ export function PRScreen() {
         onBack={shell.back}
         title={`#${p.number}`}
         sub={ch?.github_repo ?? undefined}
-        right={<MoRound icon="external" label="Open on GitHub" onClick={() => window.open(p.url, '_blank', 'noopener')} />}
+        right={<MoRound icon="external" label="Open on GitHub" onClick={() => openOnGitHub(p.url)} />}
       />
       <Body className="gap-4">
         <div className="flex flex-col gap-2.5">
@@ -270,6 +275,12 @@ export function PRScreen() {
           </span>
         </div>
         <Button icon="layers" busy={reviewBusy} onClick={() => void review()}>Ask builder to review</Button>
+        {rerun.can && (
+          <Button icon="refresh" busy={rerun.busy} onClick={() => void rerun.run()}>
+            Rerun failed checks
+          </Button>
+        )}
+        <RerunNote outcome={rerun.outcome} />
         {crewPR && (
           <MoGroup className="shrink-0">
             <MoListRow icon={<Icon name="message" size={18} />} label={crewPR.thread_title || 'Untitled'} sub="The delegated thread that opened it" onClick={() => shell.open(href.thread(crewPR.thread_id))} last />
@@ -291,11 +302,12 @@ export function PRScreen() {
             {watch.error && <ErrorNote>{watch.error}</ErrorNote>}
           </div>
         )}
+        {open && <MoAutoMerge channelId={ch!.id} n={p.number} p={p} onChanged={q.reload} />}
         {p.checkRuns.length > 0 && (
           <MoSection title="Checks" count={p.checkRuns.length} pad={false}>
             <MoGroup>
               {p.checkRuns.map((c, i) => (
-                <MoListRow key={`${c.name}:${i}`} icon={<StatusDot status={checkTone(c.state)} size={9} />} label={c.name} right={c.state.toLowerCase().replace(/_/g, ' ')} chevron={false} last={i === p.checkRuns.length - 1} />
+                <MoListRow key={`${c.name}:${i}`} icon={<StatusDot status={checkTone(c.state)} phase={checkTone(c.state) === 'running' ? 'checking' : null} size={9} />} label={c.name} right={c.state.toLowerCase().replace(/_/g, ' ')} chevron={false} last={i === p.checkRuns.length - 1} />
               ))}
             </MoGroup>
           </MoSection>
@@ -431,17 +443,17 @@ function AgentsGroup({ open }: { open: (id: string) => void }) {
   const previous = children.filter((c) => !isWorking(c));
   type R = { key: string; icon: ReactNode; label: ReactNode; sub?: ReactNode; right?: ReactNode; go?: () => void };
   const rows: R[] = [];
-  if (parent) rows.push({ key: `p${parent.id}`, icon: 'arrowUpRight', label: parent.title || 'Untitled', sub: `Delegated it · ${STATUS_LABEL[parent.status] ?? parent.status}`, go: () => open(parent.id) });
+  if (parent) rows.push({ key: `p${parent.id}`, icon: 'arrowUpRight', label: parent.title || 'Untitled', sub: `Delegated it · ${statusLabel(parent.status)}`, go: () => open(parent.id) });
   if (links.from) {
     const f = links.from;
     rows.push({ key: `f${f.id}`, icon: <AgentGlyph harness={f.harness} status={f.status} />, label: linkName(f), sub: f.carried ? `Continued from · ${carriedText(f.carried)}` : 'Continued from', go: () => open(f.id) });
   }
   for (const l of links.into) rows.push({ key: `i${l.id}`, icon: <AgentGlyph harness={l.harness} status={l.status} />, label: linkName(l), sub: 'Continued in', go: () => open(l.id) });
   for (const c of running) rows.push({ key: `r${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: 'Running', right: relTime(c.updated_at), go: () => open(c.id) });
-  for (const t of agents) rows.push({ key: `a${t.task_id}`, icon: <Loader size={15} className="text-live-text" />, label: t.description, sub: subagentKind(t) ? `Subagent · ${subagentKind(t)}` : 'Subagent' });
+  for (const t of agents) rows.push({ key: `a${t.task_id}`, icon: <span className="grid size-[15px] place-items-center"><StatusDot status="running" size={8} /></span>, label: t.description, sub: subagentKind(t) ? `Subagent · ${subagentKind(t)}` : 'Subagent' });
   if (previous.length) {
     rows.push({ key: 'prev', icon: 'delegate', label: 'Previous agents', right: <span className="flex items-center gap-1.5">{previous.length}<Icon name="chevronDown" size={14} className={showPrev ? '' : '-rotate-90'} /></span>, go: () => setShowPrev((v) => !v) });
-    if (showPrev) for (const c of previous) rows.push({ key: `d${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: STATUS_LABEL[c.status] ?? c.status, right: relTime(c.updated_at), go: () => open(c.id) });
+    if (showPrev) for (const c of previous) rows.push({ key: `d${c.id}`, icon: <AgentGlyph harness={c.harness} status={c.status} />, label: c.title || 'Untitled', sub: statusLabel(c.status), right: relTime(c.updated_at), go: () => open(c.id) });
   }
   if (!rows.length) return null;
   return (
@@ -457,13 +469,13 @@ function AgentsGroup({ open }: { open: (id: string) => void }) {
 
 export function DetailsScreen() {
   const shell = useShell();
-  const { thread, init, lastResult, history, crew } = useThread();
+  const { thread, history, crew } = useThread();
   const { channel } = useApp();
   const { data: harnesses } = useApi<HarnessWithRunning[]>('/harnesses');
   if (!thread) return <MoHeader onBack={shell.back} title="Details" />;
   const turns = turnCount(history.history);
-  const modelId = lastResult?.model || init?.model || thread.model || '';
-  const { model } = harnesses ? modelOf(harnesses, { harness: thread.harness, model: modelId }) : { model: undefined };
+  // The model pill's own names, as on desktop's Details.
+  const run = threadRunLabels(thread, harnesses);
   const rows: [string, ReactNode][] = [
     ['Channel', `#${channel(thread.channel_id)?.name ?? thread.channel_id}`],
     ['Crew role', thread.role || 'None'],
@@ -474,8 +486,8 @@ export function DetailsScreen() {
         {harnessLabel(thread.harness)}
       </span>,
     ],
-    ['Model', model?.label ?? (modelId || 'Default')],
-    ['Effort', thread.effort || (model?.defaultEffort ? `Default (${model.defaultEffort})` : 'Default')],
+    ['Model', run.model],
+    ['Effort', run.effort],
     ['Source', thread.automation ? `Automation ${thread.automation}` : (SOURCE[thread.source] ?? thread.source)],
     ['Started', fullDate(thread.created_at)],
     ['Turns', String(turns)],
@@ -498,7 +510,7 @@ export function DetailsScreen() {
         <CrewFileList files={crew.files} shots={crew.shots} onOpen={(a) => shell.open(href.thread(thread.id, a.id))} />
         <MoGroup>
           {rows.map(([k, v], i) => (
-            <div key={k} className={`flex min-h-12 items-center px-4 text-[14.5px] ${i ? 'border-t border-line' : ''}`}>
+            <div key={k} className={`flex min-h-[52px] items-center px-4 text-[14.5px] ${i ? 'border-t border-line' : ''}`}>
               <span className="w-[104px] shrink-0 text-fg-3">{k}</span>
               <span className="min-w-0 flex-1 truncate">{v}</span>
             </div>

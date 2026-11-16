@@ -2,8 +2,11 @@ import { ARTIFACT_FILTERS, matchesArtifactFilter, type ArtifactFilter } from '@o
 import { useMemo, useState } from 'react';
 import type { ArtifactWithThread } from '../api.ts';
 import { Segmented } from '../components/ui.tsx';
-import { ArtifactThumb, useArtifacts } from '../pages/Artifacts.tsx';
-import { href } from '../router.ts';
+import { ArtifactThumb } from '../components/ArtifactThumb.tsx';
+import { artifactTitle } from '../components/ArtifactViewer.tsx';
+import { useArtifacts } from '../pages/Artifacts.tsx';
+import { ArtifactSourceSwitch, ClaudeArtifactsView } from '../components/ClaudeArtifacts.tsx';
+import { href, useRoute } from '../router.ts';
 import { useApp, useNow } from '../store.tsx';
 import { HeaderActions } from './HeaderActions.tsx';
 import { MoEmpty, MoHeader, MoScroll, MoStripes, MoTitle } from './parts.tsx';
@@ -19,14 +22,15 @@ function Card({ a, wide, channel, time, onOpen }: { a: ArtifactWithThread; wide:
     <button
       type="button"
       onClick={onOpen}
-      className="mo-press flex min-w-0 flex-col gap-2 rounded-[18px] bg-surface p-1.5 text-left"
+      className="mo-press flex min-w-0 flex-col gap-2 rounded-[var(--r-lg)] bg-surface p-1.5 text-left"
       style={{ gridColumn: wide ? '1 / -1' : undefined }}
     >
-      <div className="relative overflow-hidden rounded-[13px] bg-elev shadow-[var(--shadow-card)]" style={{ height: wide ? 170 : 110 }}>
+      <div className="relative overflow-hidden rounded-[var(--r-sm)] bg-elev shadow-[var(--shadow-card)]" style={{ height: wide ? 170 : 110 }}>
         {DRAWN.has(a.kind) ? <ArtifactThumb a={a} scale={0.5} /> : <MoStripes label={ext(a.name)} />}
       </div>
       <div className="flex min-w-0 flex-col gap-0.5 px-1.5 pb-1.5">
-        <span className="truncate font-mono text-[12.5px] leading-[1.3]">{a.name}</span>
+        <span className="truncate text-[13.5px] leading-[1.3] font-medium">{artifactTitle(a.name)}</span>
+        <span className="truncate font-mono text-[length:var(--fs-code)] leading-[1.3] text-fg-3">{a.name}</span>
         <span className="truncate text-[12px] leading-[1.3] text-fg-3">
           #{channel} · {time}
         </span>
@@ -35,8 +39,33 @@ function Card({ a, wide, channel, time, onOpen }: { a: ArtifactWithThread; wide:
   );
 }
 
-/** The Library tab: every file the crew made, newest first, the latest one full width. */
+/** The Library tab: every file the crew made, newest first, the latest one full width; or Ben's claude.ai Artifacts. */
 export function LibraryScreen() {
+  const route = useRoute();
+  if (route.name === 'artifacts' && route.source === 'claude') return <ClaudeLibrary />;
+  return <FilesLibrary />;
+}
+
+function ClaudeLibrary() {
+  return (
+    <>
+      <MoHeader left={<span className="w-10" />} right={<HeaderActions />} />
+      <MoScroll tabBar>
+        <div>
+          <MoTitle title="Library" sub="Your Artifacts on claude.ai" />
+          <div className="px-4">
+            <ArtifactSourceSwitch source="claude" />
+          </div>
+        </div>
+        <div className="px-4">
+          <ClaudeArtifactsView compact />
+        </div>
+      </MoScroll>
+    </>
+  );
+}
+
+function FilesLibrary() {
   const shell = useShell();
   const { channel } = useApp();
   const res = useArtifacts();
@@ -49,7 +78,10 @@ export function LibraryScreen() {
       <MoHeader left={<span className="w-10" />} right={<HeaderActions />} />
       <MoScroll tabBar>
         <div>
-          <MoTitle title="Library" sub="Reports, pages and files from every channel" />
+          <MoTitle title="Library" sub="Reports, pages and files your threads made" />
+          <div className="mb-2.5 px-4">
+            <ArtifactSourceSwitch source="files" />
+          </div>
           <div className="px-4">
             <Segmented label="Type" value={filter} onChange={setFilter} options={ARTIFACT_FILTERS.map((f) => ({ id: f.id, label: f.label }))} />
           </div>

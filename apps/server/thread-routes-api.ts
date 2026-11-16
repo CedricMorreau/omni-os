@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { parseContexts } from '@omni/shared/message-context-kinds.ts';
+import { readOpenItems } from '@omni/shared/open-items.ts';
 import { checkAnnotations } from './message-context/browser-annotation.ts';
 import { stampThreadReferences } from './message-context/thread-reference.ts';
 import { commentsPrompt, isArtifactUrl } from '@omni/shared/published.ts';
@@ -21,6 +22,7 @@ import { readBody } from './read-body.ts';
 import { compactBlocked, contextView } from './context.ts';
 import { continueLinks } from './continue.ts';
 import { allWithDelegating, delegatingIds, withDelegating } from './delegating.ts';
+import { machineNames } from './ran-on.ts';
 import { coldRefusal, sessionWarmth } from './session-warmth.ts';
 import {
   acceptedAgain,
@@ -50,7 +52,7 @@ import {
 } from './runner.ts';
 import { takeoverOf, type HandoffResult } from './handoff.ts';
 import { freshPrompt, handoffView } from './handoff/records.ts';
-import type { Opening } from '@omni/shared/opening.ts';
+import { leadOf, type Opening } from '@omni/shared/opening.ts';
 import { cancelRelocation, createTransition, type ThreadTransition } from './transition.ts';
 import { headPage } from './history.ts';
 import { liveMessage, openingMessages, parseAfter, STREAM_QUEUE_MAX, type DetailOf } from './stream-catch-up.ts';
@@ -58,6 +60,8 @@ import { threadFilesReady, threadOpened } from './sync/files.ts';
 import { turnBlocked } from './sync/guard.ts';
 import { basePick, baseView } from './worktree-base.ts';
 import { checkUploads, imageMime, removeUploads, safeName, saveUploads } from './uploads.ts';
+import { stepOf, stepPrompts } from '@omni/shared/thread-glance.ts';
+import { fixChecksPrompt } from './fix-checks.ts';
 
 /** List, create, detail, and summary. Registered before PATCH and the terminal routes. */
 export const threadRoutesApi = new Hono();
@@ -174,7 +178,7 @@ threadRoutesApi.get('/:id', (c) => {
  */
 function openingOf(id: string, pending: PendingMsg[]): Opening | null {
   if (events.firstUserText(id) !== null) return null;
-  const lead = pending.find((m) => m.kind === 'user' && m.state === 'sent');
+  const lead = leadOf(pending);
   if (lead) return { text: lead.text, uuid: lead.uuid, ...(lead.attachments?.length && { attachments: lead.attachments }), ...(lead.context && { context: lead.context }) };
   const prompt = freshPrompt(id);
   return prompt ? { text: prompt } : null;
@@ -184,11 +188,12 @@ function openingOf(id: string, pending: PendingMsg[]): Opening | null {
 function threadDetail(t: Thread, page: Parameters<DetailOf>[0]) {
   const pending = pendingFor(t.id);
   const ids = delegatingIds();
-  const shown = <T extends { id: string }>(list: T[]) => list.map((x) => withDelegating(x, ids));
+  const names = machineNames();
+  const shown = <T extends { id: string; status?: string }>(list: T[]) => list.map((x) => withDelegating(x, ids, names));
   const children = threads.children(t.id);
   const parent = t.parent_id ? threads.get(t.parent_id) : null;
   const detail = {
-    thread: withDelegating(t, ids),
+    thread: withDelegating(t, ids, names),
     channel: (ch => ch && publicChannel(ch))(channels.get(t.channel_id)),
     events: page.events,
     ...(page.history && { history: page.history }),
@@ -199,7 +204,7 @@ function threadDetail(t: Thread, page: Parameters<DetailOf>[0]) {
     children: shown(children),
     // Members of the teams this thread started, so its delegation cards can show their state.
     team: shown(children.flatMap((ch) => threads.team(ch.id))),
-    parent: parent ? withDelegating(parent, ids) : null,
+    parent: parent ? withDelegating(parent, ids, names) : null,
     pending,
     opening: openingOf(t.id, pending),
     live: isLive(t.id),
@@ -223,12 +228,16 @@ threadRoutesApi.get('/:id/summary', (c) => {
   if (!t) return c.json({ error: 'not found' }, 404);
   return c.json({
     id: t.id, title: t.title, status: t.status, channel: t.channel_id, role: t.role, task_id: t.task_id,
+    // What it runs on: the Conductor picks a PR review's model family from the builder's (crew/conductor.md).
+    harness: t.harness, model: t.model, effort: t.effort,
     // A thread it delegated, at any depth, still runs or queues: it reports back here.
     delegating: delegatingIds().has(t.id),
     updated_at: t.updated_at, last_reply: events.lastRunText(t.id) || events.lastAssistantText(t.id),
     artifacts: artifacts.byThread(t.id).map((a) => a.name),
     // Why this machine did not resume it (runner/spawn.ts), for recover_thread_session. Only while it holds.
     ...(t.resume_blocked && { resume_blocked: t.resume_blocked }),
+    // What its last turn left open for Ben (packages/shared/open-items.ts). Only while some are.
+    ...(t.open_items && { open_items: readOpenItems(t.open_items) }),
     // Whether its session is still in the prompt cache: a parent messages a warm one and continues a cold one in a new session.
     session: sessionWarmth(t),
     // The agents it spawned that still run, as the thread panel's Running subagents list shows them.
@@ -247,7 +256,7 @@ threadActionsApi.get('/:id/base', (c) => {
 threadActionsApi.post('/:id/messages', async (c) => {
   const id = c.req.param('id');
   const { data, files } = await readBody(c);
-  const { prompt, from, mode, request_id, context: raw, wake_cold } = z
+  const { prompt, from, mode, request_id, context: raw, wake_cold, if_away } = z
     .object({
       prompt: z.string(),
       from: z.enum(['ben', 'conductor']).default('ben'),
@@ -259,6 +268,9 @@ threadActionsApi.post('/:id/messages', async (c) => {
       context: z.unknown().optional(),
       // A parent thread's send to a thread whose session went cold is refused unless it was asked to resume that thread.
       wake_cold: z.boolean().default(false),
+      // A thread that lives on another machine Tailscale sees asleep: "ask" refuses with `lives_on` (Send there, Take
+      // over) instead of leaving the message to wait there. The reply box asks; Send there sends again without it.
+      if_away: z.enum(['ask', 'send']).default('send'),
     })
     .parse(data);
   const target = threads.get(id);
@@ -281,7 +293,9 @@ threadActionsApi.post('/:id/messages', async (c) => {
   const stamped = stampThreadReferences(id, context.value);
   if (!stamped.ok) return c.json({ error: stamped.error }, 400);
   const attachments = await saveUploads(id, files);
-  return c.json(await postMessage(id, prompt, { from, mode, attachments, context: stamped.value, requestId: request_id, fingerprint }));
+  // Ben's Fix checks step (the channel's own prompt or the built-in one) goes out with the failing checks and their log tails (fix-checks.ts), from any client.
+  const text = from === 'ben' && stepOf(prompt, stepPrompts(channels.get(target.channel_id))) === 'checks' ? await fixChecksPrompt(target) : prompt;
+  return c.json(await postMessage(id, text, { from, mode, attachments, context: stamped.value, requestId: request_id, fingerprint, ifAway: if_away }));
 });
 
 const requestIds = z.object({ ids: z.array(z.string().min(1)).min(1).max(200) });

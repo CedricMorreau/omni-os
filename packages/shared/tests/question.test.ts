@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerOf, answersOf, canAdvance, choose, newDraft, parseAnswers, parseQuestions, questionsIn, resultText, stateOf, type Question } from '../question.ts';
+import { answerOf, answersOf, canAdvance, choose, newDraft, parseAnswers, parseQuestions, questionsIn, resultText, shortHeader, stateOf, type Question } from '../question.ts';
 
 const opt = (label: string) => ({ label, description: `${label} description` });
 const q = (over: Partial<Question> = {}) => ({ question: 'Which goal first?', options: [opt('Acne'), opt('Volero')], multiSelect: false, ...over });
@@ -12,6 +12,14 @@ describe('parseQuestions', () => {
     expect(parseQuestions(four).ok).toBe(true);
   });
 
+  it('shortens a header over 12 characters instead of refusing the call', () => {
+    const r = parseQuestions([q({ header: 'Trust w/o key' })]);
+    expect(r.ok && r.value[0].header).toBe('Trust w/o k…');
+    expect(shortHeader('Twelve chars')).toBe('Twelve chars');
+    expect(shortHeader('Thread access')).toBe('Thread acce…');
+    expect(shortHeader('Thread acc  ss')).toBe('Thread acc…');
+  });
+
   it.each([
     ['no questions', []],
     ['five questions', [1, 2, 3, 4, 5].map((n) => q({ question: `Q${n}?` }))],
@@ -22,7 +30,6 @@ describe('parseQuestions', () => {
     ['an option without a label', [q({ options: [opt('A'), { label: '', description: 'x' }] })]],
     ['a duplicate option', [q({ options: [opt('A'), opt('A')] })]],
     ['an "Other" option', [q({ options: [opt('A'), opt('Other')] })]],
-    ['a long header', [q({ header: 'Thirteen char' })]],
     ['a duplicate question', [q(), q()]],
     ['a string multiSelect', [{ ...q(), multiSelect: 'yes' }]],
   ])('refuses %s', (_name, raw) => {
@@ -91,11 +98,12 @@ describe('the card draft', () => {
   const single = q();
   const multi = q({ question: 'Which stores?', multiSelect: true, options: [opt('NL'), opt('DE'), opt('FR')] });
 
-  it('preselects the first option on a single choice question only', () => {
+  it('starts with nothing picked, so neither question can advance until Ben chooses', () => {
     const d = newDraft([single, multi]);
-    expect(answersOf(d)).toEqual([{ selected: ['Acne'], other: null }, null]);
-    expect(canAdvance(d)).toBe(true);
+    expect(answersOf(d)).toEqual([null, null]);
+    expect(canAdvance(d)).toBe(false);
     expect(canAdvance({ ...d, page: 1 })).toBe(false);
+    expect(canAdvance({ ...d, picks: [choose(single, d.picks[0], 'Acne'), d.picks[1]] })).toBe(true);
   });
 
   it('swaps on single choice and toggles on multi select, keeping option order', () => {

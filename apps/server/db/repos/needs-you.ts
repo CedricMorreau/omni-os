@@ -42,13 +42,20 @@ export interface NeedsYouResult {
  * it runs: `detail` is the newest card's first question, `count` how many questions wait across its cards),
  * `setup` (its worktree could not be prepared, `detail` says why), `recovered` (messages a restart kept for Resume),
  * `uncertain` (a message a harness may have read before a restart, sent again only when Ben says so) or `limited`
- * (its harness stopped the turn at the plan's usage limit, apps/server/runner/limits.ts). `count` is how many
- * messages, for the two request kinds.
+ * (its harness stopped the turn at the plan's usage limit, apps/server/runner/limits.ts) or `child_failed` (a thread it
+ * delegated, or a member of its team, at any depth, failed and Ben has not seen that result: `detail` is the newest one's
+ * title, `count` how many). `count` is how many messages, for the two request kinds.
  */
 export interface NeedsYouBlocker {
-  kind: 'question' | 'setup' | 'recovered' | 'uncertain' | 'limited';
+  kind: 'question' | 'setup' | 'recovered' | 'uncertain' | 'limited' | 'child_failed';
   detail: string | null;
   count: number;
+  /** question: when the newest question card was asked, so a client can tell a new card from one it already saw. */
+  at?: string;
+  /** question and child_failed: the threads under this one that asked or failed, newest first. Absent when it asked itself. */
+  from?: string[];
+  /** child_failed: each failed thread's unread result, in `from`'s order. Opening that thread reads it (POST /needs-you/read). */
+  results?: string[];
   /** limited: when the harness said the limit resets. Null when it did not say, so only a manual Resume works. */
   resets_at?: string | null;
   /** limited: Ben scheduled the continuation for that time. Still a blocker: nothing runs until then. */
@@ -174,9 +181,11 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
     .all(...args) as unknown as Thread[];
 
   // Questions with no answer yet, whatever the asking thread's status, newest first so the first row per thread is its
-  // newest. Each waits on the top of its delegation chain (threads.root), the thread Ben delegated from, where its card
-  // shows too: a delegated thread's or a team member's question brings that thread here, not the one that asked.
+  // newest. Each waits on the top of its delegation chain, the thread Ben delegated from, or the newest thread that
+  // continues it (threads.home), where its card shows too: a delegated thread's or a team member's question brings that
+  // thread here, not the one that asked.
   const home = db.prepare(`SELECT ${prefixed} FROM threads t WHERE t.id = ? AND ${LISTED} ${scope}`);
+  const listed = db.prepare(`SELECT 1 FROM threads t WHERE t.id = ? AND ${LISTED}`);
   const asked = (
     db
       .prepare(
@@ -189,7 +198,7 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
       )
       .all() as { q_thread: string; q_payload: string; q_at: string }[]
   ).flatMap((q) => {
-    const t = home.get(threads.root(q.q_thread), ...args) as unknown as Thread | undefined;
+    const t = home.get(threads.home(q.q_thread), ...args) as unknown as Thread | undefined;
     return t ? [{ ...t, ...q }] : [];
   });
 
@@ -211,9 +220,30 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
   for (const q of asked) {
     const { questions } = JSON.parse(q.q_payload) as QuestionPayload;
     const it = item(q, q.q_at);
-    const had = it.blockers.find((b) => b.kind === 'question');
-    if (had) had.count += questions.length;
-    else it.blockers.push({ kind: 'question', detail: questions[0].question, count: questions.length });
+    let b = it.blockers.find((x) => x.kind === 'question');
+    if (b) b.count += questions.length;
+    else it.blockers.push((b = { kind: 'question', detail: questions[0].question, count: questions.length, at: q.q_at }));
+    if (q.q_thread !== it.thread.id && !b.from?.includes(q.q_thread)) b.from = [...(b.from ?? []), q.q_thread];
+  }
+  // A failure under a job waits on the job, as a question does: the newest unread failed result of a delegated thread or
+  // a team member brings its home here (threads.home), and the tree under the job shows which one. It moves there: the
+  // failed thread's own item loses that result, so one failure counts once. With nothing listed above it (the job is
+  // done or archived) a delegated thread keeps its own item.
+  const moved = new Map<string, string>();
+  for (const f of failedChildren()) {
+    const top = threads.home(f.id);
+    if (top === f.id || !listed.get(top)) continue;
+    moved.set(f.id, f.r_uid);
+    const t = home.get(top, ...args) as unknown as Thread | undefined;
+    if (!t) continue;
+    const it = item(t, f.r_at);
+    const b = it.blockers.find((x) => x.kind === 'child_failed');
+    if (!b) it.blockers.push({ kind: 'child_failed', detail: f.title, count: 1, from: [f.id], results: [f.r_uid] });
+    else if (!b.from?.includes(f.id)) {
+      b.count++;
+      b.from = [...(b.from ?? []), f.id];
+      b.results = [...(b.results ?? []), f.r_uid];
+    }
   }
   for (const t of setup) item(t, t.updated_at).blockers.unshift({ kind: 'setup', detail: t.setup_error, count: 0 });
   for (const p of parked) item(p, p.p_at).blockers.push({ kind: p.p_state, detail: null, count: Number(p.p_count) });
@@ -222,13 +252,37 @@ export function needsYou(channelId?: string, threadId?: string): NeedsYou {
       kind: 'limited', detail: null, count: 0, resets_at: t.limit_resets_at, scheduled: t.limit_state === 'scheduled', elsewhere: !!t.limit_elsewhere,
     });
   }
+  for (const [id, uid] of moved) {
+    const it = items.get(id);
+    if (it?.result?.uid !== uid) continue;
+    it.result = null;
+    if (!it.blockers.length) items.delete(id);
+  }
   for (const i of items.values()) i.blockers.sort((a, b) => BLOCKER_ORDER.indexOf(a.kind) - BLOCKER_ORDER.indexOf(b.kind));
 
   const list = [...items.values()].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   return { items: list, unread: list.filter((i) => i.result).length, blocked: list.filter((i) => i.blockers.length).length };
 }
 
-const BLOCKER_ORDER: NeedsYouBlocker['kind'][] = ['question', 'setup', 'uncertain', 'limited', 'recovered'];
+const BLOCKER_ORDER: NeedsYouBlocker['kind'][] = ['question', 'child_failed', 'setup', 'uncertain', 'limited', 'recovered'];
+
+/**
+ * Delegated threads and team members whose newest result failed and Ben has not read it, newest first. A thread marked
+ * done or archived is settled. Its own status must still be failed: a later run that started again clears it.
+ */
+function failedChildren() {
+  return db
+    .prepare(
+      `SELECT t.id, t.title, c.uid AS r_uid, c.created_at AS r_at
+       FROM threads t
+       JOIN completions c ON c.uid = (SELECT uid FROM completions WHERE thread_id = t.id ORDER BY n DESC, uid DESC LIMIT 1)
+       LEFT JOIN result_reads r ON r.thread_id = t.id
+       WHERE t.parent_id IS NOT NULL AND t.archived = 0 AND t.done_at IS NULL AND t.status = 'failed' AND c.status = 'failed'
+         AND (r.thread_id IS NULL OR (c.n, c.uid) > (r.n, r.uid))
+       ORDER BY c.created_at DESC`,
+    )
+    .all() as { id: string; title: string; r_uid: string; r_at: string }[];
+}
 
 /** Just the thread's own columns, without what the queries joined to it. */
 function pick(row: Thread): Thread {

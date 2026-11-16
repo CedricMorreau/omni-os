@@ -43,7 +43,9 @@ export async function startRunner(env: Record<string, string> = {}) {
   // instead of defaulting to secrets.json. A file that wants the file store passes OMNI_SECRET_STORE: 'file'.
   const bin = join(tmp, 'bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'security'), '#!/bin/sh\nexit 44\n', { mode: 0o755 });
+  // Saving the sync signing key succeeds and reading it finds nothing, so each machine a test plays keeps the key its own
+  // copy of sync/sign-key.ts made: one PATH serves every machine in the process, so a stored key could not be told apart.
+  writeFileSync(join(bin, 'security'), `#!/bin/sh\n[ "$1" = "-i" ] && grep -q '"global/OMNI_SIGN_KEY"' && exit 0\nexit 44\n`, { mode: 0o755 });
   Object.assign(process.env, {
     PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
     OMNI_DATA_DIR: join(tmp, 'data'),
@@ -141,8 +143,11 @@ export async function startRunner(env: Record<string, string> = {}) {
     claudeImages: (id: string) => claudeStdin().filter((l) => l.thread_id === id && l.type === 'user').map((l) => (l.images ?? []) as string[]),
     claudeTexts: (id: string) => claudeStdin().filter((l) => l.thread_id === id && l.type === 'user').map((l) => l.text as string),
     codexRequests,
-    /** Codex app-server processes spawned, oldest first (one per thread). */
-    codexPids: () => [...new Set(codexRequests().map((r) => r.pid))],
+    /**
+     * Codex app-server processes that ran a thread, oldest first (one per thread). The short-lived ones that only
+     * answer the catalog probe or an account check (harness-accounts.ts) are left out.
+     */
+    codexPids: () => [...new Set(codexRequests().filter((r) => r.method === 'thread/start' || r.method === 'thread/resume').map((r) => r.pid))],
     cursorRequests,
     /** Long-lived stream-json processes spawned for a thread, oldest first. */
     spawns: (id: string) => invocations().filter((i) => i.mode === 'stream' && i.thread_id === id),

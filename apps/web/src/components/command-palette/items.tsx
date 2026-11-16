@@ -27,18 +27,40 @@ const lead = (icon: IconName) => (
   </span>
 );
 
+/** The words typed, lowercased: an item matches when its label and sub hold every one. */
+export const queryWords = (q: string) => q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+/** `text` with each typed word marked where it appears. */
+export function Marked({ text, words }: { text: string; words: readonly string[] }) {
+  if (!words.length) return text;
+  const lower = text.toLowerCase();
+  const hit = new Array<boolean>(text.length).fill(false);
+  for (const w of words) for (let i = lower.indexOf(w); i !== -1; i = lower.indexOf(w, i + w.length)) hit.fill(true, i, i + w.length);
+  const parts: ReactNode[] = [];
+  let start = 0;
+  for (let i = 1; i <= text.length; i++) {
+    if (i < text.length && hit[i] === hit[start]) continue;
+    const piece = text.slice(start, i);
+    parts.push(hit[start] ? <mark key={start}>{piece}</mark> : piece);
+    start = i;
+  }
+  return <>{parts}</>;
+}
+
 /** What the palette lists for `q`: pages, channels, recent threads and the theme, filtered by every word typed, plus a search row. */
 export function paletteItems(q: string, channels: ChannelWithRunning[], recent: Thread[] | undefined, route: Route, openThread: ThreadStub | null): Item[] {
   const s = q.trim().toLowerCase();
-  const words = s.split(/\s+/).filter(Boolean);
+  const words = queryWords(q);
   const match = (i: Item) => !words.length || words.every((w) => `${i.label} ${i.sub ?? ''}`.toLowerCase().includes(w));
 
   const newThread = () => startNewThread(route, openThread);
 
   const base: Item[] = [
     { id: 'a:new', group: 'Actions', label: 'New thread', sub: 'Start a task', lead: lead('plus'), run: newThread },
-    { id: 'p:home', group: 'Go to', label: 'Home', lead: lead('home'), run: () => go(href.home()) },
+    { id: 'p:inbox', group: 'Go to', label: 'Inbox', lead: lead('inbox'), run: () => go(href.inbox()) },
+    { id: 'p:home', group: 'Go to', label: 'Overview', sub: 'Counts, machines and usage', lead: lead('home'), run: () => go(href.home()) },
     { id: 'p:artifacts', group: 'Go to', label: 'Artifacts', lead: lead('layers'), run: () => go(href.artifacts()) },
+    { id: 'p:claude-artifacts', group: 'Go to', label: 'claude.ai artifacts', sub: 'Your Artifacts on claude.ai', lead: lead('globe'), run: () => go(href.claudeArtifacts()) },
     { id: 'p:prs', group: 'Go to', label: 'Pull requests', lead: lead('pr'), run: () => go(href.pullRequests()) },
     { id: 'p:automations', group: 'Go to', label: 'Automations', lead: lead('zap'), run: () => go(href.automations()) },
     { id: 'p:settings', group: 'Go to', label: 'Settings', sub: 'General: you and setup', lead: lead('sliders'), run: () => go(href.settingsPage()) },
@@ -57,7 +79,7 @@ export function paletteItems(q: string, channels: ChannelWithRunning[], recent: 
       group: 'Channels',
       label: c.id === 'conductor' ? 'Conductor' : `#${c.name}`,
       sub: c.store_domain ?? c.github_repo ?? undefined,
-      lead: <Avatar name={c.name} channelIcon={c.icon} omni={c.id === 'conductor'} size={28} />,
+      lead: <Avatar name={c.name} channelIcon={c.icon} avatarBg={c.avatar_bg} omni={c.id === 'conductor'} size={28} />,
       right: c.running ? <span className="font-num text-[11px] text-live-text">{c.running} running</span> : undefined,
       run: () => go(href.channel(c.id)),
     })),
@@ -71,7 +93,7 @@ export function paletteItems(q: string, channels: ChannelWithRunning[], recent: 
           <StatusDot status={t.status} />
         </span>
       ),
-      right: <span className="font-num text-[11px] text-fg-4">{relTime(t.updated_at)}</span>,
+      right: <span className="font-num text-[11px] text-fg-3">{relTime(t.updated_at)}</span>,
       run: () => go(href.thread(t.id)),
     })),
     { id: 'x:light', group: 'Theme', label: 'Light theme', lead: lead('sun'), run: () => setTheme('light') },

@@ -59,7 +59,7 @@ function StageChips({ ticket }: { ticket: TicketView }) {
             title={`${i + 1} ${name}: ${STATE_LABEL[state]}`}
             aria-current={state === 'current' ? 'step' : undefined}
             style={chipStyle(state, phase)}
-            className={`inline-flex h-6 items-center rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap tabular-nums ${state === 'current' ? 'font-semibold' : ''} ${state === 'off' ? 'text-fg-4 line-through decoration-fg-4' : ''}`}
+            className={`inline-flex h-6 items-center rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap tabular-nums ${state === 'current' ? 'font-semibold' : ''} ${state === 'off' ? 'text-fg-3 line-through decoration-fg-4' : ''}`}
           >
             {i + 1} {name}
             <span className="sr-only">, {STATE_LABEL[state]}</span>
@@ -103,7 +103,7 @@ function RouteEditor({ ticket, proposal, onSaved, onCancel }: { ticket: TicketVi
               </span>
               <label htmlFor={id} className="min-w-0 flex-1 text-[13px] leading-5">
                 <span className={on ? 'text-fg' : 'text-fg-3'}>
-                  <span className="mr-1.5 tabular-nums text-fg-4">{n}</span>
+                  <span className="mr-1.5 tabular-nums text-fg-3">{n}</span>
                   {STAGES[n - 1]}
                 </span>
                 {reason && <span className="block text-[12px] leading-[1.4] text-fg-3 sm:ml-2 sm:inline sm:leading-5">{reason}</span>}
@@ -260,7 +260,7 @@ export function RouteCard({ ticket, onTicket: setTicket, className = '' }: { tic
         <StagePill ticket={ticket} />
         {summary && (
           <>
-            <span className="text-fg-4">·</span>
+            <span className="text-fg-3">·</span>
             <span className="text-fg-3 tabular-nums">{summary}</span>
           </>
         )}

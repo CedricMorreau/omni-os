@@ -32,8 +32,9 @@ export interface DelegateNeeds {
 }
 
 /**
- * The parts of a thread its running state reads. `delegating`: a thread it delegated, at any depth, runs or queues.
- * The server derives it from the statuses (apps/server/delegating.ts) and sends it with every thread.
+ * The parts of a thread its running state reads. `delegating`: a thread it delegated, at any depth, runs or queues,
+ * or a sub-agent its own turn started still works after that turn ended done. The server derives it from the statuses
+ * and the live tasks (apps/server/delegating.ts) and sends it with every thread.
  */
 export interface WorkState {
   status: string;
@@ -48,9 +49,6 @@ export const showsRunning = (t: WorkState) => t.status === 'running' || !!t.dele
 
 /** The thread is at work, for the Running lists and counts: running, queued, or waiting on a thread it delegated. */
 export const isWorking = (t: WorkState) => t.status === 'running' || t.status === 'queued' || !!t.delegating;
-
-/** The status a thread's dot, pill or label shows: running while what it delegated works, its own otherwise. */
-export const shownStatus = (t: WorkState) => (t.delegating && t.status !== 'queued' ? 'running' : t.status);
 
 const working = (c: DelegateChild) => isWorking(c);
 

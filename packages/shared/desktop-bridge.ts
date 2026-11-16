@@ -2,10 +2,15 @@
 // The Web UI in a browser or on a phone has no bridge, so every caller checks for it (apps/web/src/desktop.ts).
 // Types and the few pure rules both sides share. The preload implements it over IPC, the main process answers.
 
+import { DEFAULT_ALERT_KINDS, parseAlertKinds, type AlertKinds, type AlertPrefs } from './attention.ts';
+
 export type DesktopPlatform = 'darwin' | 'linux' | 'win32';
 
+/** The Web UI's desktop shell: the classic sidebar, or the channel rail with a list panel (apps/web/src/layout-pref.ts). */
+export type DesktopLayout = 'classic' | 'rail';
+
 /** A menu item or global shortcut that the page carries out, because only the page knows how. */
-export type DesktopCommand = 'new-thread' | 'go-to' | 'search' | 'home' | 'settings';
+export type DesktopCommand = 'new-thread' | 'go-to' | 'search' | 'home' | 'inbox' | 'settings';
 
 export type DesktopEvent =
   | { type: 'command'; command: DesktopCommand }
@@ -63,18 +68,32 @@ export interface DesktopSettings {
   /** Open at login. Only where `loginItemSupported`. */
   launchAtLogin: boolean;
   zoom: number;
+  /**
+   * The app checks for its own update at launch and every 4 hours, and downloads one in the background. Off, only
+   * Check for Updates looks, and Download fetches what it found.
+   */
+  autoUpdate: boolean;
+  /**
+   * Native notifications the main process raises (apps/desktop/src/notifications.ts): on, which kinds, and channels
+   * that never alert. On by default, every kind on.
+   */
+  notifications: AlertPrefs;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   quickPrompt: { enabled: true, shortcut: 'controlOptionSpace', dictate: true },
   launchAtLogin: false,
   zoom: 1,
+  autoUpdate: true,
+  notifications: { enabled: true, kinds: { ...DEFAULT_ALERT_KINDS }, muted: [] },
 };
 
 export type DesktopSettingsPatch = {
   quickPrompt?: Partial<DesktopSettings['quickPrompt']>;
   launchAtLogin?: boolean;
   zoom?: number;
+  autoUpdate?: boolean;
+  notifications?: { enabled?: boolean; kinds?: Partial<AlertKinds>; muted?: string[] };
 };
 
 /** Reads stored settings field by field: an unknown or broken value takes its default, never fails the whole file. */
@@ -83,12 +102,19 @@ export function parseDesktopSettings(raw: unknown): DesktopSettings {
   const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
   const root = obj(raw);
   const qp = obj(root.quickPrompt);
+  const n = obj(root.notifications);
   const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
   const shortcut = QUICK_PROMPT_SHORTCUTS.includes(qp.shortcut as QuickPromptShortcut) ? (qp.shortcut as QuickPromptShortcut) : d.quickPrompt.shortcut;
   return {
     quickPrompt: { enabled: bool(qp.enabled, d.quickPrompt.enabled), shortcut, dictate: bool(qp.dictate, d.quickPrompt.dictate) },
     launchAtLogin: bool(root.launchAtLogin, d.launchAtLogin),
     zoom: typeof root.zoom === 'number' ? clampZoom(root.zoom) : d.zoom,
+    autoUpdate: bool(root.autoUpdate, d.autoUpdate),
+    notifications: {
+      enabled: bool(n.enabled, d.notifications.enabled),
+      kinds: parseAlertKinds(n.kinds),
+      muted: Array.isArray(n.muted) ? [...new Set(n.muted.filter((m): m is string => typeof m === 'string'))] : [],
+    },
   };
 }
 
@@ -97,17 +123,37 @@ export function applySettingsPatch(current: DesktopSettings, patch: DesktopSetti
     ...current,
     ...patch,
     quickPrompt: { ...current.quickPrompt, ...patch.quickPrompt },
+    notifications: {
+      ...current.notifications,
+      ...patch.notifications,
+      kinds: { ...current.notifications.kinds, ...patch.notifications?.kinds },
+    },
   });
 }
 
-/** The app's own updater (electron-updater). `unsupported` covers dev builds, an app in a folder it cannot replace itself in, and no feed. */
+/**
+ * What a release says it changed, as plain text: one line per item of its notes (a merged PR, for the generated
+ * GitHub notes), the first few only. `more`: how many lines were left out. `url`: the release's own page.
+ */
+export interface DesktopReleaseNotes {
+  lines: string[];
+  more: number;
+  url: string | null;
+}
+
+/**
+ * The app's own updater (electron-updater). `unsupported` covers dev builds, an app in a folder it cannot replace
+ * itself in, and no feed. An app from before release notes sends no `notes`.
+ */
 export type DesktopUpdateView =
   | { state: 'unsupported'; reason: string }
   | { state: 'idle'; checkedAt: string | null }
   | { state: 'checking' }
-  | { state: 'downloading'; version: string; percent: number }
+  /** Found while automatic updates are off. Download fetches it. */
+  | { state: 'available'; version: string; notes?: DesktopReleaseNotes }
+  | { state: 'downloading'; version: string; percent: number; notes?: DesktopReleaseNotes }
   /** Downloaded. Relaunch installs it. */
-  | { state: 'ready'; version: string }
+  | { state: 'ready'; version: string; notes?: DesktopReleaseNotes }
   /** `downloadUrl`: the page with the latest build, to get it by hand while the app cannot update itself. */
   | { state: 'error'; message: string; downloadUrl?: string };
 
@@ -137,8 +183,30 @@ export interface DesktopBridge {
   openWindow(route: string): void;
   /** Brings this window forward, as a notification click should. */
   focus(): void;
+  /**
+   * The main process raises native notifications itself (settings `notifications`), so the page posts none of its
+   * own. Older app builds lack it, and the page's browser notifications stay on there.
+   */
+  readonly nativeNotifications?: boolean;
   /** Keeps the native window chrome and menus on the theme the Web UI picked. */
   setAppearance(mode: 'system' | 'light' | 'dark'): void;
+  /**
+   * Tells the window which desktop layout the page shows, so the macOS traffic lights sit where it leaves room:
+   * beside the wordmark in the classic sidebar, or inside the channel rail. Older app builds lack it.
+   */
+  setLayout?(layout: DesktopLayout): void;
+  /**
+   * Pairs this window with the server again: main mints a fresh one-time nonce and loads the desktop pairing page,
+   * then `route`. For a 401 after the install token rotated or the session ended. Older app builds lack it.
+   */
+  pairAgain?(route?: string): void;
+  /**
+   * Lets the page take this window's GitHub pull request links (@omni/shared/pr-links.ts) that would open in the
+   * browser: plain clicks only, such as one in an agent's HTML, which the page cannot see into. `decide` opens the PR's
+   * page in Omni and returns true, or returns false and the link opens in the browser. Returns the unsubscribe. Older
+   * app builds lack it.
+   */
+  routeLinks?(decide: (url: string) => boolean): () => void;
   settings: {
     get(): Promise<DesktopSettings>;
     set(patch: DesktopSettingsPatch): Promise<DesktopSettings>;
@@ -157,6 +225,8 @@ export interface DesktopBridge {
   updates: {
     get(): Promise<DesktopUpdateView>;
     check(): Promise<DesktopUpdateView>;
+    /** Downloads the update a check found while automatic updates are off (`available`). */
+    download(): Promise<DesktopUpdateView>;
     /** Quits, installs the downloaded update and opens the app again. */
     install(): void;
   };

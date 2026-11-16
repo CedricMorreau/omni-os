@@ -1,0 +1,103 @@
+import { avatarInk } from '@omni/shared/avatar-color.ts';
+import Svg, { Circle, G } from 'react-native-svg';
+import { MARK_TRANSFORM } from '@omni/shared/brand.ts';
+import { StyleSheet, View } from 'react-native';
+import { SvgCss } from 'react-native-svg/css';
+import { Text } from '../ui/Text';
+
+import { Icon } from '../ui/Icon';
+import { rounded, useOmniTheme, weight } from '../theme';
+import { monogram } from '@omni/shared/monogram.ts';
+import { channelFace, type ChannelFace } from './channel-face';
+import { type Glyph, StatusDot } from './StatusDot';
+
+/**
+ * A channel as the Web UI's Avatar draws it, everywhere a channel shows: its own icon (an emoji, a design system icon
+ * or an uploaded SVG) or its monogram (packages/shared/monogram.ts) in a soft circle, the Omni mark for the Conductor until it has an icon of its own, and a thread's status glyph
+ * on the corner when given.
+ */
+export function ChannelAvatar({
+  name,
+  icon,
+  conductor,
+  glyph,
+  size = 36,
+  disc,
+  avatarBg,
+}: {
+  name: string;
+  icon?: string | null;
+  conductor?: boolean;
+  glyph?: Glyph | null;
+  size?: number;
+  /** The circle's colour, for an avatar that sits on surface-2 itself, such as a pill. */
+  disc?: string;
+  avatarBg?: string | null;
+}) {
+  const { colors } = useOmniTheme();
+  return (
+    <View style={{ width: size, height: size }} accessible={false} importantForAccessibility="no-hide-descendants">
+      <View style={[styles.disc, { width: size, height: size, borderRadius: size / 2, backgroundColor: avatarBg || disc || colors.surface2 }]}>
+        <Face face={channelFace(name, icon, conductor)} name={name} size={size} color={avatarBg ? avatarInk(avatarBg) : colors.fg2} />
+      </View>
+      {glyph ? (
+        <View style={[styles.badge, { backgroundColor: colors.bg }]}>
+          <StatusDot glyph={glyph} size={8} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function Face({ face, name, size, color }: { face: ChannelFace; name: string; size: number; color: string }) {
+  switch (face.kind) {
+    case 'omni':
+      return <OmniMark size={size * 0.56} color={color} />;
+    case 'glyph':
+      return <Icon name={face.name} size={Math.round(size * 0.46)} color={color} />;
+    case 'emoji':
+      return <Text style={{ fontSize: size * 0.48, lineHeight: size * 0.62 }}>{face.text}</Text>;
+    case 'svg': {
+      const box = size * 0.58;
+      // Drawn by react-native-svg as native shapes: nothing in it runs, and the shared check refused anything that loads.
+      return <SvgCss xml={face.markup} width={box} height={box} color={color} onError={() => {}} fallback={<Letters letters={monogram(name)} size={size} color={color} />} />;
+    }
+    case 'letters':
+      return <Letters letters={face.letters} size={size} color={color} />;
+  }
+}
+
+function Letters({ letters, size, color }: { letters: string; size: number; color: string }) {
+  return <Text style={[styles.letter, { color, fontSize: size * 0.42, lineHeight: size * 0.5 }]}>{letters}</Text>;
+}
+
+/** The static Omni mark (web: StaticMark): a heavy ring with a satellite at its top right. */
+export function OmniMark({ size, color }: { size: number; color: string }) {
+  return <Svg width={size} height={size} viewBox="-64 -64 128 128" accessible={false}>
+    <G transform={MARK_TRANSFORM}>
+      <Circle r={40} fill="none" stroke={color} strokeWidth={20} />
+      <Circle cx={49.5} cy={-49.5} r={12} fill={color} />
+    </G>
+  </Svg>;
+}
+
+const styles = StyleSheet.create({
+  disc: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  letter: {
+    fontFamily: rounded,
+    fontWeight: weight.medium,
+  },
+  badge: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

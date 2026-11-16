@@ -97,6 +97,16 @@ describe('omni api', () => {
     expect(sent).toEqual([{ method: 'GET', url: at('/threads/t%201/requests') }]);
   });
 
+  it('dismisses one open item by its text, or all of them', async () => {
+    const { sent, api: a } = api();
+    await a.dismissOpenItems('t1', 'Which database?');
+    await a.dismissOpenItems('t1');
+    expect(sent).toEqual([
+      { method: 'PATCH', url: at('/threads/t1'), body: { dismiss_open_item: 'Which database?' } },
+      { method: 'PATCH', url: at('/threads/t1'), body: { open_items: null } },
+    ]);
+  });
+
   it('switches the run, marks done and not done, and stops', async () => {
     const { sent, api: a } = api();
     await a.switchRun('t1', { harness: 'codex', model: '', effort: 'high' });
@@ -116,6 +126,13 @@ describe('omni api', () => {
     const answers = [{ selected: ['Yes'], other: null }, null];
     expect(await a.answerQuestion('t1', 'q 1', answers)).toEqual({ state: 'answered', via: 'tool' });
     expect(sent).toEqual([{ method: 'POST', url: at('/threads/t1/questions/q%201/answer'), body: { answers } }]);
+  });
+
+  it("reads the questions a thread's crew waits on", async () => {
+    const items = [{ thread_id: 'c1', thread_title: 'Build the export', task_id: 'T-1', channel_id: 'inbox', question: { id: 'q1', event_id: 3, questions: [], state: 'pending', answers: null } }];
+    const { sent, api: a } = api({ json: { items } });
+    expect(await a.crewQuestions('t 1')).toEqual({ items });
+    expect(sent).toEqual([{ method: 'GET', url: at('/threads/t%201/crew-questions') }]);
   });
 
   it('rejects an answer to settled questions with the state the first answer left', async () => {

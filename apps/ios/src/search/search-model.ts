@@ -1,4 +1,5 @@
 import type { ChannelWithRunning, SearchHit, Thread } from '@omni/client-core';
+import { statusLabel } from '@omni/shared/status.ts';
 
 import { shortAgo } from '../live/channel-model';
 
@@ -23,6 +24,9 @@ export function snippetParts(snippet: string): SnippetPart[] {
 
 export interface ChannelMatch {
   id: string;
+  name: string;
+  icon: string | null;
+  avatar_bg?: string | null;
   label: string;
   detail: string | null;
 }
@@ -32,7 +36,7 @@ export function matchChannels(channels: readonly ChannelWithRunning[] | null, qu
   if (!needle) return [];
   return (channels ?? [])
     .filter((c) => !c.archived && `${c.name} ${c.id}`.toLowerCase().includes(needle))
-    .map((c) => ({ id: c.id, label: c.id === 'conductor' ? 'Conductor' : `#${c.name}`, detail: c.store_domain || c.github_repo || null }));
+    .map((c) => ({ id: c.id, name: c.name, icon: c.icon ?? null, avatar_bg: c.avatar_bg, label: c.id === 'conductor' ? 'Conductor' : `#${c.name}`, detail: c.store_domain || c.github_repo || null }));
 }
 
 export interface HitRow {
@@ -45,8 +49,6 @@ export interface HitRow {
   snippet: SnippetPart[];
 }
 
-const STATUS_LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', failed: 'Failed', stopped: 'Stopped' };
-
 export function hitRows(hits: readonly SearchHit[], channels: readonly ChannelWithRunning[] | null, now: number): HitRow[] {
   const names = new Map((channels ?? []).map((c) => [c.id, c.name]));
   return hits.map((h) => ({
@@ -54,7 +56,7 @@ export function hitRows(hits: readonly SearchHit[], channels: readonly ChannelWi
     title: h.title || 'Untitled',
     channel: names.get(h.channel_id) ?? h.channel_id,
     status: h.status,
-    statusLabel: STATUS_LABEL[h.status] ?? null,
+    statusLabel: h.status === 'done' || h.status === 'imported' ? null : statusLabel(h.status),
     ago: shortAgo(h.updated_at, now),
     snippet: snippetParts(h.snippet),
   }));

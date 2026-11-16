@@ -36,7 +36,7 @@ export function TicketGroups({ tickets }: { tickets: TicketView[] }) {
         <section key={s.key} aria-labelledby={`tickets-${s.key}`}>
           <h3 id={`tickets-${s.key}`} className="caption sticky top-0 z-[2] flex items-center gap-2 bg-bg px-3.5 py-2" style={{ color: phaseColor(s.phase) }}>
             {s.label}
-            <span className="text-fg-4/70">{s.items.length}</span>
+            <span className="text-fg-3/70">{s.items.length}</span>
           </h3>
           {s.items.map((t) => (
             <a key={t.thread_id} href={href.thread(t.thread_id)} className="hov group flex min-w-0 items-center gap-2 rounded-[18px] px-3 py-3 [--hov:var(--surface)] md:px-3.5">
@@ -44,7 +44,7 @@ export function TicketGroups({ tickets }: { tickets: TicketView[] }) {
               <TicketRef ticket={t} />
               <StagePill ticket={t} />
               {waitingText(t) && <span className="min-w-0 truncate text-[12px] text-fg-3">{waitingText(t)}</span>}
-              <span className="ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-4 tabular-nums">{relTime(t.updated_at)}</span>
+              <span className="ml-auto shrink-0 pl-2 font-num text-[11px] text-fg-3 tabular-nums">{relTime(t.updated_at)}</span>
             </a>
           ))}
         </section>

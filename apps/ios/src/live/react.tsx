@@ -1,15 +1,17 @@
-import { eventSourceTransport, xhrUploadTransport, type NeedsYou } from '@omni/client-core';
+import { eventSourceTransport, xhrUploadTransport, type BackgroundTask, type NeedsYou } from '@omni/client-core';
 import { useIsFocused } from '@react-navigation/native';
 import { addNetworkStateListener } from 'expo-network';
 import * as SecureStore from 'expo-secure-store';
-import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import EventSource from 'react-native-sse';
 
 import { clearArtifactCache } from '../artifacts/files';
 import { shownResult } from '../needs/inbox';
 import type { ActionsLive, ActionsView } from './actions';
+import { afterFirstPage, afterNextPage, type ChannelPages } from './channel-pages';
 import { createHandoffPrefs, type HandoffPrefs } from './handoff-prefs';
+import { createTreePrefs, type TreePrefs } from './tree-prefs';
 import { createLiveHub, type LiveHub, type ThreadLive, type ThreadView } from './hub';
 import type { Link } from './connection';
 import type { OmniSession } from './session';
@@ -57,9 +59,49 @@ export function useChannels() {
   return useStore(useLiveHub().channels);
 }
 
+/**
+ * What a row draws of its channel: the name, icon and avatar colour. A row reads only these, so the list refetching
+ * every few seconds while agents run redraws a row only when its channel's look changed. Null until the list loads.
+ */
+export function useChannelLook(id: string): { name: string | null; icon: string | null; avatarBg: string | null } {
+  const { channels } = useLiveHub();
+  const read = (key: 'name' | 'icon' | 'avatar_bg') => () => channels.get().channels?.find((c) => c.id === id)?.[key] ?? null;
+  const name = useSyncExternalStore(channels.subscribe, read('name'), read('name'));
+  const icon = useSyncExternalStore(channels.subscribe, read('icon'), read('icon'));
+  const avatarBg = useSyncExternalStore(channels.subscribe, read('avatar_bg'), read('avatar_bg'));
+  return { name, icon, avatarBg };
+}
+
 /** What waits on Ben: unread results and blockers across the server's threads. Null until the first load. */
 export function useNeedsYou(): NeedsYou | null {
   return useStore(useLiveHub().needsYou).data;
+}
+
+/** The sub-agents running now, on every thread. */
+export function useTasks(): readonly BackgroundTask[] {
+  return useStore(useLiveHub().tasks);
+}
+
+const TREE_PREF_KEY = 'omni.pref.tree.inbox';
+let treePrefs: TreePrefs | null = null;
+
+/** One per app, like the handoffs': which job trees Ben opened or closed on Activity is a choice of this device. */
+function sharedTreePrefs(): TreePrefs {
+  treePrefs ??= createTreePrefs({
+    read: () => SecureStore.getItemAsync(TREE_PREF_KEY),
+    write: (value) => SecureStore.setItemAsync(TREE_PREF_KEY, value),
+  });
+  return treePrefs;
+}
+
+/**
+ * Ben's open or closed choices for the job trees on Activity, a setter, and a prune that drops the choices whose job
+ * moved between running and finished since (phone web: useJobTree and useForgetTreeChoices).
+ */
+export function useTreeChoices() {
+  const prefs = sharedTreePrefs();
+  const saved = useStore(prefs.saved);
+  return { saved, set: prefs.set, prune: prefs.prune };
 }
 
 function useAppActive(): boolean {
@@ -107,6 +149,47 @@ export function usePullRefresh(load: (hub: LiveHub) => Promise<unknown> = (hub) 
   return { refreshing, onRefresh };
 }
 
+/**
+ * A channel's own thread list, page by page (U3). The first page loads on open and again each time the channel list
+ * refetches after a feed change; `loadMore` adds the next older page. Null until the first page arrives.
+ */
+export function useChannelThreadPages(channelId: string) {
+  const hub = useLiveHub();
+  const { loadedAt } = useChannels();
+  const [pages, setPages] = useState<ChannelPages | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const latest = useRef(pages);
+  latest.current = pages;
+
+  useEffect(() => {
+    let live = true;
+    hub
+      .request((api) => api.channelThreadsPage(channelId))
+      .then((page) => live && setPages((prev) => afterFirstPage(prev, channelId, page)))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [hub, channelId, loadedAt]);
+
+  const loadMore = useCallback(async () => {
+    const cursor = latest.current?.channelId === channelId ? latest.current.next : null;
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await hub.request((api) => api.channelThreadsPage(channelId, cursor));
+      setPages((prev) => afterNextPage(prev, channelId, cursor, page));
+    } catch {
+      // The list stays as it is; scrolling to the end asks again.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hub, channelId, loadingMore]);
+
+  const mine = pages?.channelId === channelId ? pages : null;
+  return { threads: mine?.threads ?? null, more: !!mine?.next, loadingMore, loadMore };
+}
+
 export function useLibrary() {
   return useStore(useLiveHub().library);
 }
@@ -149,6 +232,25 @@ export function useHandoffOpen(parentId: string): [open: boolean, toggle: () => 
   return [!closed.has(parentId), () => prefs.toggle(parentId)];
 }
 
+export type InboxShelf = 'working' | 'done';
+
+const SHELF_PREF_KEY = 'omni.pref.inbox.open';
+let shelfPrefs: HandoffPrefs | null = null;
+
+/**
+ * Whether an Activity shelf is open, and a toggle that remembers it on this device. Every shelf starts folded, as on
+ * phone web; the same toggled-set store as the handoffs keeps the shelves Ben opened.
+ */
+export function useShelfOpen(shelf: InboxShelf): [open: boolean, toggle: () => void] {
+  shelfPrefs ??= createHandoffPrefs({
+    read: () => SecureStore.getItemAsync(SHELF_PREF_KEY),
+    write: (value) => SecureStore.setItemAsync(SHELF_PREF_KEY, value),
+  });
+  const prefs = shelfPrefs;
+  const opened = useStore(prefs.closed);
+  return [opened.has(shelf), () => prefs.toggle(shelf)];
+}
+
 const idle = createStore<null>(null);
 
 /** The thread's view, or null until its screen has opened it. */
@@ -180,4 +282,9 @@ export function useActionsView(live: ActionsLive | null): ActionsView | null {
     (listener) => (live ? live.view.subscribe(listener) : idleActions.subscribe(listener)),
     () => (live ? live.view.get() : null),
   );
+}
+
+/** Ben's claude.ai Artifacts and the server's refresh state, for the Library's claude.ai switch. */
+export function useClaudeArtifacts() {
+  return useStore(useLiveHub().claudeArtifacts);
 }

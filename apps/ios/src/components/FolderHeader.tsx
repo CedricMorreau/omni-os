@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/Text';
+import { Icon } from '../ui/Icon';
 
 import { fontSize, minTarget, space, useOmniTheme, weight } from '../theme';
 
@@ -23,7 +24,9 @@ export function FolderHeader({ name, collapsed, count, running, onToggle }: Fold
       onPress={onToggle}
       style={({ pressed }) => [styles.header, { backgroundColor: pressed ? colors.surface2 : colors.bg }]}
     >
-      <Text style={[styles.chevron, { color: colors.fg4, transform: [{ rotate: collapsed ? '0deg' : '90deg' }] }]}>›</Text>
+      <View style={{ width: 12, alignItems: 'center', transform: [{ rotate: collapsed ? '0deg' : '90deg' }] }}>
+        <Icon name="chevronRight" size={11} color={colors.fg4} />
+      </View>
       <Text numberOfLines={1} style={[styles.name, { color: colors.fg2 }]}>
         {name}
       </Text>
@@ -43,15 +46,9 @@ const styles = StyleSheet.create({
     gap: space.s4,
     paddingHorizontal: space.s9,
   },
-  chevron: {
-    width: 14,
-    fontSize: fontSize.heading + 4,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
   name: {
     flex: 1,
-    fontSize: fontSize.body + 1,
+    fontSize: fontSize.subhead,
     fontWeight: weight.semibold,
   },
   counts: {

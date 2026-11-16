@@ -12,8 +12,10 @@ import type { ThreadLive } from '../../live/hub';
 import { useStore } from '../../live/react';
 import { canStop, composerPlaceholder, sendLabel } from '../../send/rules';
 import { fontSize, lineHeight, radius, space, useOmniTheme, weight } from '../../theme';
+import { tap } from '../../ui/haptics';
+import { Icon } from '../../ui/Icon';
 import { restoreDraft, setDraft, useDraft, useFocusRequests } from './drafts';
-import { NextTurnChip } from './RunChips';
+import { ModelButton, NextTurnChip } from './RunChips';
 
 const INPUT_LINE_HEIGHT = Math.round(fontSize.input * lineHeight.body);
 const MAX_LINES = 6;
@@ -31,12 +33,15 @@ export function ThreadComposer({
   thread,
   harnesses,
   onOpenRun,
+  step,
 }: {
   live: ThreadLive;
   thread: Thread;
   /** From `/harnesses`; null until it loads. */
   harnesses: HarnessInfo[] | null;
   onOpenRun: () => void;
+  /** The branch step chip (StepChip), beside the next-turn chip. */
+  step?: ReactNode;
 }) {
   const { colors } = useOmniTheme();
   const catalog = useStore(live.catalog);
@@ -56,6 +61,7 @@ export function ThreadComposer({
 
   const send = async () => {
     if (empty || slotTaken) return;
+    tap();
     const text = draft;
     const attached = getStaged(thread.id);
     setDraft(thread.id, '');
@@ -73,6 +79,7 @@ export function ThreadComposer({
     <View style={styles.composer}>
       <View style={styles.nextTurn}>
         <NextTurnChip thread={thread} harnesses={harnesses} onPress={onOpenRun} />
+        {step}
       </View>
       {notice ? (
         <Text accessibilityRole="alert" style={[styles.notice, { color: colors.fg2 }]}>
@@ -93,7 +100,7 @@ export function ThreadComposer({
                 {c.label}
               </Text>
               <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${c.label}`} hitSlop={space.s6} onPress={() => removeDraftContext(thread.id, c.id)}>
-                <Text style={[styles.contextRemove, { color: colors.fg3 }]}>✕</Text>
+                <Icon name="close" size={11} color={colors.fg3} />
               </Pressable>
             </View>
           ))}
@@ -111,13 +118,22 @@ export function ThreadComposer({
           placeholderTextColor={colors.fg3}
           style={[styles.input, { color: colors.fg }]}
         />
+        <ModelButton thread={thread} harnesses={harnesses} onPress={onOpenRun} />
         {showStop ? (
-          <RoundButton label={stopping ? 'Stopping' : 'Stop'} busy={stopping} disabled={stopping} onPress={() => void live.send.stop()}>
-            <View style={[styles.stopGlyph, { backgroundColor: colors.onInk }]} />
+          <RoundButton
+            label={stopping ? 'Stopping' : 'Stop'}
+            busy={stopping}
+            disabled={stopping}
+            onPress={() => {
+              tap();
+              void live.send.stop();
+            }}
+          >
+            <Icon name="stop" size={13} color={colors.onInk} />
           </RoundButton>
         ) : (
           <RoundButton label={sendLabel(thread, catalog)} busy={outbox.item?.phase === 'sending'} disabled={empty || slotTaken} onPress={() => void send()}>
-            <Text style={[styles.sendGlyph, { color: colors.onInk }]}>↑</Text>
+            <Icon name="arrowUp" size={16} color={colors.onInk} />
           </RoundButton>
         )}
       </View>
@@ -161,6 +177,8 @@ const styles = StyleSheet.create({
   },
   nextTurn: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.s2,
   },
   chips: {
     paddingHorizontal: space.s2,
@@ -180,11 +198,8 @@ const styles = StyleSheet.create({
   },
   contextLabel: {
     flexShrink: 1,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
     fontWeight: weight.semibold,
-  },
-  contextRemove: {
-    fontSize: fontSize.meta + 1,
   },
   notice: {
     fontSize: fontSize.meta,
@@ -193,7 +208,7 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    borderRadius: radius.xl,
+    borderRadius: radius.xxl,
     borderWidth: StyleSheet.hairlineWidth,
     paddingLeft: space.s2,
     paddingRight: space.s2,
@@ -215,15 +230,5 @@ const styles = StyleSheet.create({
     borderRadius: BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  sendGlyph: {
-    fontSize: 20,
-    fontWeight: weight.bold,
-    lineHeight: 24,
-  },
-  stopGlyph: {
-    width: 12,
-    height: 12,
-    borderRadius: 2,
   },
 });

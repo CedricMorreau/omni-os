@@ -2,12 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, openSSE, taskHost, type BackgroundTask, type ChannelWithRunning, type CrewRole, type FeedEvent, type HarnessUsage, type ModStatus, type NeedsYou, type Profile, type Status, type Thread, type ThreadStub } from './api.ts';
 import { type PinnedThread } from './pins.ts';
 import { pageTitle, type Route } from './router.ts';
-import { windowTitle } from './device.ts';
+import { threadTitle, windowTitle } from './device.ts';
 import { useChannels } from './app/useChannels.ts';
 import { useNeedsYou } from './app/useNeedsYou.ts';
 import { useStatusAndProfile } from './app/useStatusAndProfile.ts';
 import { createSyncNudge } from './sync-nudge.ts';
 import { secretStoreLabel, type SecretStoreKind } from '@omni/shared/secret-store.ts';
+import { monograms } from '@omni/shared/monogram.ts';
+import { Monograms } from './components/ui/primitives.tsx';
 
 interface AppState {
   channels: ChannelWithRunning[];
@@ -190,7 +192,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [channels, channelsLoaded, channelsError, reloadChannels, pinned, setPinned, crew, reloadCrew, usage, status, reloadStatus, profile, saveProfile, reloadProfile, setupOpen, openSetup, closeSetup, feedLive, tasks, mods, subscribe, needsYou, readResult, setDone, openThread],
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  const marks = useMemo(() => monograms(channels), [channels]);
+  return (
+    <Ctx.Provider value={value}>
+      <Monograms.Provider value={marks}>{children}</Monograms.Provider>
+    </Ctx.Provider>
+  );
+}
+
+/**
+ * A thread's Needs you item (what holds it up, its unread result), or undefined. A thread under a job asks through
+ * the job: its question sits on the job's blocker (`from`), so the asking thread reads as that question too. Safe
+ * outside the provider.
+ */
+export function useNeedOf(threadId: string | undefined): { blockers: readonly NeedsYou['items'][number]['blockers'][number][] } | undefined {
+  const items = useContext(Ctx)?.needsYou?.items;
+  return useMemo(() => {
+    if (!threadId || !items) return undefined;
+    const own = items.find((i) => i.thread.id === threadId);
+    if (own?.blockers.length) return own;
+    const asked = items.flatMap((i) => i.blockers).find((b) => b.kind === 'question' && b.from?.includes(threadId));
+    return asked ? { blockers: [{ ...asked, from: undefined }] } : own;
+  }, [items, threadId]);
 }
 
 export function useApp() {
@@ -234,6 +257,14 @@ export function writePref(key: string, value: unknown) {
   }
 }
 
+export function dropPref(key: string) {
+  try {
+    localStorage.removeItem(`omni.${key}`);
+  } catch {
+    /* private mode or blocked storage: ignore */
+  }
+}
+
 export function useMediaQuery(q: string) {
   const [m, setM] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(q).matches : false));
   useEffect(() => {
@@ -260,11 +291,14 @@ export function useNow(ms = 30_000) {
 
 /** The window title: the page's name, or the one given, then Omni, led by the Mac's name when it is not this one. */
 export function usePageTitle(route: Route, name?: string) {
-  const { channel, status } = useApp();
+  const { channel, status, openThread } = useApp();
   const device = status?.device;
+  // A thread is named by its title, then its channel, so the Window menu and Mission Control tell threads apart.
+  const thread = route.name === 'thread' && openThread?.id === route.id ? openThread : null;
+  const threadName = thread ? threadTitle(thread.title, thread.channel_id === 'conductor' ? 'conductor' : (channel(thread.channel_id)?.name ?? thread.channel_id)) : undefined;
   useEffect(() => {
-    document.title = windowTitle(name ?? pageTitle(route, (id) => channel(id)?.name), device);
-  }, [route, channel, name, device]);
+    document.title = windowTitle(name ?? threadName ?? pageTitle(route, (id) => channel(id)?.name), device);
+  }, [route, channel, name, threadName, device]);
 }
 
 /** Back on the tab: ask the server to sync, so the other Mac's work shows up now rather than on its timer. */

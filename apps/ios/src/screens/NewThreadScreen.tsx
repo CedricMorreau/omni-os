@@ -1,12 +1,14 @@
 import type { DraftRun } from '@omni/shared/draft-run.ts';
 import { offersRunOn } from '@omni/shared/thread-machine.ts';
-import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/Text';
+import { Icon } from '../ui/Icon';
 
 import { AttachControl, AttachNotice } from '../attachments/AttachControl';
 import { AttachmentChips } from '../attachments/AttachmentChips';
 import { clearStaged, removeStagedFile, useStaged } from '../attachments/staged';
+import { ChannelAvatar } from '../components/ChannelAvatar';
 import { HeaderButton } from '../components/HeaderButton';
 import { MachineSheet } from '../components/thread/MachineSheet';
 import { RunOptions } from '../components/thread/RunOptions';
@@ -24,12 +26,14 @@ import {
   targetsOf,
   type DraftInputs,
   type DraftPick,
+  type Target,
 } from '../newthread/draft';
 import { useCrew, useStartThread } from '../newthread/hooks';
-import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme, weight } from '../theme';
+import { chipHeight, chipSlop, fontSize, lineHeight, minTarget, radius, space, useOmniTheme, weight } from '../theme';
 import { useHarnessCatalog } from '../thread/hooks';
 import { Button } from '../ui/Button';
 import { Callout } from '../ui/Callout';
+import { OptionGroup, OptionRow } from '../ui/OptionRow';
 import { Sheet } from '../ui/Sheet';
 
 const RUN_ON_NOTE = 'New threads run on the machine Settings names on the computer unless you pick another here. Replies and Stop follow the thread wherever it runs.';
@@ -43,15 +47,15 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
   const { channels } = useChannels();
   const crew = useCrew();
   const [target, setTarget] = useState(route.params?.channel ?? CONDUCTOR);
-  const [text, setText] = useState('');
+  // An open item's + starts with its prompt (components/thread/OpenItemsCard.tsx).
+  const [text, setText] = useState(route.params?.prompt ?? '');
   const [pick, setPick] = useState<{ target: string; run: DraftRun } | null>(null);
   const [picking, setPicking] = useState(false);
   const [machinePick, setMachinePick] = useState<string | null>(null);
   const [pickingMachine, setPickingMachine] = useState(false);
+  const [pickingTarget, setPickingTarget] = useState(false);
   const { facts } = useMachineFacts(true);
   const devices = offersRunOn(facts?.devices) ? facts.devices : null;
-  const strip = useRef<ComponentRef<typeof ScrollView>>(null);
-  const centered = useRef(false);
   const catalog = useHarnessCatalog(target, true);
   const { state, start, dismiss, progress, cancel } = useStartThread();
   const starting = state.status === 'starting';
@@ -102,7 +106,9 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
     dismiss();
   };
   const chip = shown && catalog.harnesses ? draftChipLabel(shown, catalog.harnesses) : null;
-  const channelName = targets.find((t) => t.id === target)?.name;
+  const current = targets.find((t) => t.id === target) ?? null;
+  const channelName = current?.name;
+  const targetLabel = current ? targetName(current) : `#${target}`;
 
   const onPick = (p: DraftPick) => {
     if (shown) setPick({ target, run: applyPick(shown, p) });
@@ -120,21 +126,6 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
         keyboardDismissMode="interactive"
         automaticallyAdjustKeyboardInsets
       >
-        <ScrollView ref={strip} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip} keyboardShouldPersistTaps="handled">
-          {targets.map((t) => (
-            <TargetPill
-              key={t.id}
-              label={t.id === CONDUCTOR ? t.name : `#${t.name}`}
-              on={t.id === target}
-              onPress={() => onTarget(t.id)}
-              onLayout={(x) => {
-                if (t.id !== target || centered.current) return;
-                centered.current = true;
-                strip.current?.scrollTo({ x: Math.max(0, x - space.s11), animated: false });
-              }}
-            />
-          ))}
-        </ScrollView>
         <TextInput
           autoFocus
           multiline
@@ -161,9 +152,25 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
           <AttachControl scope={NEW_SCOPE} disabled={starting} onNotice={setAttachNotice} />
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={`Where it runs: ${targetLabel}`}
+            accessibilityHint="Opens the list of channels"
+            disabled={starting}
+            hitSlop={chipSlop}
+            onPress={() => setPickingTarget(true)}
+            style={({ pressed }) => [styles.chip, styles.target, { backgroundColor: pressed ? colors.surface3 : colors.surface2 }]}
+          >
+            {current ? <ChannelAvatar name={current.name} icon={current.icon} avatarBg={current.avatar_bg} conductor={current.id === CONDUCTOR} size={22} disc={colors.bg} /> : null}
+            <Text numberOfLines={1} style={[styles.chipLabel, { color: colors.fg }]}>
+              {targetLabel}
+            </Text>
+            <Icon name="chevronDown" size={10} color={colors.fg3} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel={chip ? `Model: ${chip}` : 'Model'}
             accessibilityHint="Opens the model and effort picker"
             disabled={!shown || starting}
+            hitSlop={chipSlop}
             onPress={() => setPicking(true)}
             style={({ pressed }) => [styles.chip, { backgroundColor: pressed ? colors.surface3 : colors.surface2, opacity: shown ? 1 : 0.5 }]}
           >
@@ -174,7 +181,7 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
             ) : (
               <ActivityIndicator color={colors.fg3} />
             )}
-            <Text style={[styles.caret, { color: colors.fg3 }]}>▾</Text>
+            <Icon name="chevronDown" size={10} color={colors.fg3} />
           </Pressable>
           {machineRows ? (
             <Pressable
@@ -182,13 +189,14 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
               accessibilityLabel={`Run on: ${machineLabel ?? 'default machine'}`}
               accessibilityHint="Opens the list of machines"
               disabled={starting}
+              hitSlop={chipSlop}
               onPress={() => setPickingMachine(true)}
               style={({ pressed }) => [styles.chip, { backgroundColor: pressed ? colors.surface3 : colors.surface2 }]}
             >
               <Text numberOfLines={1} style={[styles.chipLabel, { color: colors.fg }]}>
                 {machineLabel ? `On ${machineLabel}` : 'Run on'}
               </Text>
-              <Text style={[styles.caret, { color: colors.fg3 }]}>▾</Text>
+              <Icon name="chevronDown" size={10} color={colors.fg3} />
             </Pressable>
           ) : null}
         </View>
@@ -207,6 +215,25 @@ export function NewThreadScreen({ navigation, route }: RootScreenProps<'NewThrea
           </View>
         ) : null}
       </ScrollView>
+      <Sheet visible={pickingTarget} title="Channel" onClose={() => setPickingTarget(false)}>
+        <ScrollView contentContainerStyle={styles.sheetContent}>
+          <OptionGroup>
+            {targets.map((t, i) => (
+              <OptionRow
+                key={t.id}
+                label={targetName(t)}
+                leading={<ChannelAvatar name={t.name} icon={t.icon} avatarBg={t.avatar_bg} conductor={t.id === CONDUCTOR} size={24} disc={colors.surface2} />}
+                selected={t.id === target}
+                onPress={() => {
+                  onTarget(t.id);
+                  setPickingTarget(false);
+                }}
+                last={i === targets.length - 1}
+              />
+            ))}
+          </OptionGroup>
+        </ScrollView>
+      </Sheet>
       <Sheet visible={picking} title="Model" onClose={() => setPicking(false)}>
         <ScrollView contentContainerStyle={styles.sheetContent}>
           {sheet ? (
@@ -246,49 +273,20 @@ function UploadLine({ progress, onCancel }: { progress: number | null; onCancel:
       <Text accessibilityRole="progressbar" style={[styles.uploadLabel, { color: colors.fg3 }]}>
         {progress === null ? 'Uploading…' : `Uploading ${Math.round(progress * 100)}%`}
       </Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Cancel upload" hitSlop={8} onPress={onCancel}>
-        <Text style={[styles.uploadLabel, styles.uploadCancel, { color: colors.fg }]}>Cancel</Text>
-      </Pressable>
+      <Button label="Cancel" accessibilityLabel="Cancel upload" variant="ghost" size="small" onPress={onCancel} />
     </View>
   );
 }
 
-function TargetPill({ label, on, onPress, onLayout }: { label: string; on: boolean; onPress: () => void; onLayout: (x: number) => void }) {
-  const { colors } = useOmniTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: on }}
-      accessibilityLabel={label}
-      onPress={onPress}
-      onLayout={(e) => onLayout(e.nativeEvent.layout.x)}
-      style={[styles.pill, { backgroundColor: on ? colors.fg : colors.surface2 }]}
-    >
-      <Text numberOfLines={1} style={[styles.pillLabel, { color: on ? colors.onInk : colors.fg }]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
+/** The Conductor by name, a channel as #name. */
+function targetName(t: Target): string {
+  return t.id === CONDUCTOR ? t.name : `#${t.name}`;
 }
 
 const styles = StyleSheet.create({
   content: {
     gap: space.s6,
     paddingVertical: space.s6,
-  },
-  strip: {
-    gap: space.s4,
-    paddingHorizontal: space.s8,
-  },
-  pill: {
-    height: 36,
-    justifyContent: 'center',
-    borderRadius: radius.pill,
-    paddingHorizontal: space.s6,
-  },
-  pillLabel: {
-    fontSize: fontSize.body,
-    fontWeight: weight.medium,
   },
   input: {
     minHeight: 160,
@@ -303,24 +301,22 @@ const styles = StyleSheet.create({
   },
   runRow: {
     flexDirection: 'row',
-
     alignItems: 'center',
     gap: space.s4,
     paddingHorizontal: space.s8,
   },
   upload: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: space.s8,
+    paddingLeft: space.s8,
+    paddingRight: space.s4,
   },
   uploadLabel: {
     fontSize: fontSize.body,
   },
-  uploadCancel: {
-    fontWeight: weight.semibold,
-  },
   chip: {
-    height: 36,
+    height: chipHeight,
     minWidth: minTarget,
     flexShrink: 1,
     flexDirection: 'row',
@@ -330,13 +326,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingHorizontal: space.s6,
   },
+  target: {
+    gap: space.s3,
+    paddingLeft: 7,
+    paddingRight: space.s6,
+  },
   chipLabel: {
     flexShrink: 1,
     fontSize: fontSize.body,
     fontWeight: weight.medium,
-  },
-  caret: {
-    fontSize: fontSize.meta,
   },
   sheetContent: {
     gap: space.s8,

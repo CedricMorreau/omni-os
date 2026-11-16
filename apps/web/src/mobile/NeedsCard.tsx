@@ -1,6 +1,7 @@
+import { useMarkDone } from '../done-confirm.tsx';
 import { useState } from 'react';
 import { api, errorText, type PendingMsg, type Thread } from '../api.ts';
-import { Button } from '../components/ui.tsx';
+import { Button, asksForYou } from '../components/ui.tsx';
 import { LIMIT_ACTION } from '../limits.ts';
 import { href } from '../router.ts';
 import { useApp } from '../store.tsx';
@@ -21,10 +22,11 @@ const DONE: Partial<Record<NeedsAction['kind'], string>> = { retry: 'Preparing t
 /** Runs a card's action. `onRecovered` gets the thread page's answer, so an open thread shows it before the stream does. */
 export function useNeedsAction(onRecovered?: (r: Recovered) => void) {
   const shell = useShell();
-  const { readResult, setDone } = useApp();
+  const { readResult } = useApp();
+  const markDone = useMarkDone();
   const [busy, setBusy] = useState<NeedsAction | null>(null);
-  const run = async (card: Pick<NeedsCard, 'id'>, a: NeedsAction) => {
-    if (a.kind === 'open') return shell.open(href.thread(card.id));
+  const run = async (card: Pick<NeedsCard, 'id' | 'thread'>, a: NeedsAction) => {
+    if (a.kind === 'open') return shell.open(href.thread(a.thread ?? card.id));
     if (a.kind === 'read') {
       readResult(a.uid);
       return shell.toast(DONE.read!);
@@ -32,8 +34,7 @@ export function useNeedsAction(onRecovered?: (r: Recovered) => void) {
     setBusy(a);
     if (a.kind === 'done') {
       try {
-        await setDone(card.id, true);
-        shell.toast(DONE.done!);
+        if (await markDone(card.thread, true)) shell.toast(DONE.done!);
       } catch (e) {
         shell.toast(errorText(e));
       } finally {
@@ -64,7 +65,7 @@ export function NeedsActions({ card, size = 'lg', onRecovered }: { card: NeedsCa
         <Button
           key={a.label}
           size={size}
-          variant={i ? 'secondary' : card.glyph === 'needs' ? 'needs' : 'primary'}
+          variant={i ? 'secondary' : asksForYou(card.glyph) ? 'needs' : 'primary'}
           busy={busy === a}
           disabled={!!busy}
           onClick={() => void run(card, a)}

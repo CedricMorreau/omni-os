@@ -1,19 +1,31 @@
-// Push alerts to the native app. An alert only tells the phone to fetch: the title and a generic body, plus the thread or
-// channel id for a deep link. Never the prompt, a question, a thread name or a code. Triggers in the runner call the
-// notify functions at the bottom. With no APNs key configured every call is a no-op, and startPush says so once.
-import { createPrivateKey } from 'node:crypto';
-import { threads, type ThreadStatus } from './db.ts';
+// Push alerts to the native app: the thread's title, what happened, and a plain-text preview of the reply, question or
+// report (push-preview.ts), plus the thread and channel ids for a deep link. Never the prompt or a code. Triggers in
+// the runner call the notify functions at the bottom. With no APNs key configured every call is a no-op, and startPush says why. Setting or
+// deleting one of the APNs secrets loads the config again, so no restart is needed.
+import { createPrivateKey, randomUUID } from 'node:crypto';
+import { publishFeed } from './bus.ts';
+import { kv, threads, type ThreadStatus } from './db.ts';
 import { sessionIsLive } from './google-auth.ts';
+import { clip, pushPreview, TITLE_MAX } from './push-preview.ts';
 import { classify, http2Transport, providerTokens, type ApnsKey, type ApnsResponse, type ApnsTransport } from './push-apns.ts';
 import { pushTargets, type PushTarget } from './push-preferences.ts';
 import { forgetPushToken } from './push-tokens.ts';
-import { globalSecret } from './secrets.ts';
+import { globalSecret, onSecretChange } from './secrets.ts';
 import type { AppPushKind } from '@omni/shared/app-pairing.ts';
+import { crewAsker } from '@omni/shared/question.ts';
 
 export interface PushEvent {
   kind: AppPushKind;
   threadId: string;
   channelId: string | null;
+  /** The thread's title, the alert's title. */
+  title: string | null;
+  /** The markdown the alert previews: the turn's last reply, the question or the crew report. */
+  text: string | null;
+  /** Crew reports: the title of the thread that reported. A delegated thread's question: the thread that asked. */
+  from?: string | null;
+  /** A delegated thread's question: the thread that asked, so the app stays quiet while that thread is on screen. */
+  askerId?: string;
 }
 
 /** Secret names (secret store first, then an environment variable of the same name). Values are never logged. */
@@ -40,11 +52,28 @@ export interface PushConfig {
   bundleId: string;
 }
 
+const PEM_HEAD = '-----BEGIN PRIVATE KEY-----';
+const PEM_TAIL = '-----END PRIVATE KEY-----';
+
+/**
+ * The .p8 key as PEM, however it was saved: the file's text, its newlines written as `\n`, or its newlines lost to the
+ * one-line secret field (Settings, then Secrets, and the secret store refuse line breaks). OpenSSL needs the header,
+ * the base64 and the footer on their own lines, so the base64 is put back on 64-character lines. Empty when there is
+ * nothing to read.
+ */
+export function apnsKeyPem(raw: string): string {
+  const text = raw.replace(/\\n/g, '\n');
+  const start = text.indexOf(PEM_HEAD);
+  const end = text.indexOf(PEM_TAIL);
+  const body = (start >= 0 && end > start ? text.slice(start + PEM_HEAD.length, end) : text).replace(/\s+/g, '');
+  return body ? `${PEM_HEAD}\n${body.match(/.{1,64}/g)!.join('\n')}\n${PEM_TAIL}` : '';
+}
+
 /** The config, or the reason there is none. The reason names secrets and never shows a value. */
 export function loadPushConfig(read: (name: string) => string | null | undefined): { config: PushConfig } | { problem: string } {
   const keyId = read(PUSH_SECRETS.keyId)?.trim() ?? '';
   const teamId = read(PUSH_SECRETS.teamId)?.trim() ?? '';
-  const pem = (read(PUSH_SECRETS.key) ?? '').replace(/\\n/g, '\n').trim();
+  const pem = apnsKeyPem(read(PUSH_SECRETS.key) ?? '');
   const missing = [
     !keyId && PUSH_SECRETS.keyId,
     !teamId && PUSH_SECRETS.teamId,
@@ -69,6 +98,8 @@ export interface PushSenderDeps {
   /** Drop the registration for a token Apple says is dead. */
   forget(token: string): unknown;
   now(): number;
+  /** This server's id in every payload (`omni.sender`), so only it settles its alerts (push-settled.ts). */
+  senderId(): string;
   sleep(ms: number): Promise<void>;
   log(line: string): void;
 }
@@ -77,19 +108,72 @@ export interface PushSender {
   readonly configured: boolean;
   /** Fire and forget. Errors are logged, never thrown into the caller. */
   send(event: PushEvent): void;
+  /** Closes the connection to APNs, when this sender is replaced. */
+  close(): void;
 }
 
-const ALERTS: Record<AppPushKind, { title: string; body: string }> = {
-  needsInput: { title: 'Omni needs you', body: 'A thread is waiting for your answer.' },
-  finished: { title: 'Thread finished', body: 'Open Omni to see the result.' },
-  failed: { title: 'Thread failed', body: 'Open Omni to see what happened.' },
-  crewReport: { title: 'Crew report', body: 'A crew member reported back in Conductor.' },
+/** `label` says what happened, under the thread's title. `title` and `body` stand in when there is no title or text. */
+const ALERTS: Record<AppPushKind, { label: string; title: string; body: string }> = {
+  needsInput: { label: 'Needs your answer', title: 'Omni needs you', body: 'A thread is waiting for your answer.' },
+  finished: { label: 'Finished', title: 'Thread finished', body: 'Open Omni to see the result.' },
+  failed: { label: 'Failed', title: 'Thread failed', body: 'Open Omni to see what happened.' },
+  crewReport: { label: 'Crew report', title: 'Crew report', body: 'A crew member reported back in Conductor.' },
+  prAttention: { label: 'Pull request', title: 'Pull request needs attention', body: 'A watched PR has failing checks or new review feedback.' },
 };
 
-export function payloadFor(event: PushEvent): string {
+/** Apple's limit for `apns-collapse-id`. A thread id is a uuid, well under it. */
+const COLLAPSE_MAX_BYTES = 64;
+
+/**
+ * One alert per thread on the phone, as on the desktop: a newer alert for a thread replaces the one shown, so the newest
+ * says where it stands. Sent only to app builds that declared `collapse`: an older build keys taps by the notification
+ * identifier alone, and collapsed alerts share one, so its second tap on a thread would open nothing.
+ */
+export const collapseIdFor = (event: PushEvent) => (Buffer.byteLength(event.threadId) <= COLLAPSE_MAX_BYTES ? event.threadId : undefined);
+
+const oneLine = (text: string | null | undefined) => text?.replace(/\s+/g, ' ').trim() || null;
+
+/** The `aps.alert` iOS shows: the thread's title, what happened, and a preview of the text. */
+export function alertFor(event: PushEvent): { title: string; subtitle?: string; body: string } {
+  const fixed = ALERTS[event.kind];
+  const body = pushPreview(event.text) ?? fixed.body;
+  const title = oneLine(event.title);
+  if (!title) return { title: fixed.title, body };
+  const from = oneLine(event.from);
+  return { title: clip(title, TITLE_MAX), subtitle: clip(from ? `${fixed.label}: ${from}` : fixed.label, TITLE_MAX), body };
+}
+
+/**
+ * Where this server's sender id lives. Under `sync.` so it never leaves this machine: each Mac has its own. A data
+ * folder copied to another Mac drops it when sync gives the copy a new machine id (db/sync.ts arm).
+ */
+const SENDER_KEY = 'sync.push_sender';
+
+/** This server's id in its alerts, made once and kept. */
+export function pushSenderId(): string {
+  const had = kv.get<string>(SENDER_KEY);
+  if (had) return had;
+  const id = randomUUID();
+  kv.set(SENDER_KEY, id);
+  return id;
+}
+
+/**
+ * `at` is when the server sent it, by the server's clock, and `sender` which server sent it. The phone hands both back
+ * to POST /api/auth/push-settled on every paired server; only the sender settles the alert, once the thread was read
+ * after `at`. Another server may be behind on sync and take an open question for an answered one.
+ */
+export function payloadFor(event: PushEvent, meta: { at?: string; sender?: string } = {}): string {
   return JSON.stringify({
-    aps: { alert: ALERTS[event.kind], sound: 'default' },
-    omni: { kind: event.kind, threadId: event.threadId, channelId: event.channelId },
+    aps: { alert: alertFor(event), sound: 'default' },
+    omni: {
+      kind: event.kind,
+      threadId: event.threadId,
+      channelId: event.channelId,
+      ...(event.askerId ? { askerId: event.askerId } : {}),
+      ...(meta.at ? { at: meta.at } : {}),
+      ...(meta.sender ? { sender: meta.sender } : {}),
+    },
   });
 }
 
@@ -116,7 +200,7 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
   const tokens = providerTokens(deps.config.key, deps.now);
   const run = pool(CONCURRENCY);
 
-  async function deliver(t: PushTarget, body: string, attempt = 1): Promise<void> {
+  async function deliver(t: PushTarget, body: string, collapseId: string | undefined, attempt = 1): Promise<void> {
     if (!deps.live(t.sessionId)) return;
     const expiration = Math.floor(deps.now() / 1000) + ALERT_TTL_S;
     let res: ApnsResponse;
@@ -128,6 +212,7 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
         jwt: tokens.get(),
         body,
         expiration,
+        collapseId,
       });
     } catch {
       res = { status: 0, reason: 'network' };
@@ -136,11 +221,11 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
     if (action === 'delivered') return;
     if (action === 'refresh' && attempt === 1) {
       tokens.refresh();
-      return deliver(t, body, 2);
+      return deliver(t, body, collapseId, 2);
     }
     if (action === 'retry' && attempt < MAX_ATTEMPTS) {
       await deps.sleep(backoffMs(attempt));
-      return deliver(t, body, attempt + 1);
+      return deliver(t, body, collapseId, attempt + 1);
     }
     if (action === 'forget') deps.forget(t.token);
     // The token itself stays out of the log: a status and a reason are enough to act on.
@@ -152,31 +237,56 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
     send(event) {
       const targets = deps.targets(event.kind);
       if (!targets.length) return;
-      const body = payloadFor(event);
-      for (const t of targets) run(() => deliver(t, body)).catch((err: Error) => deps.log(`[push] ${err.message}`));
+      const body = payloadFor(event, { at: new Date(deps.now()).toISOString(), sender: deps.senderId() });
+      const collapseId = collapseIdFor(event);
+      for (const t of targets) run(() => deliver(t, body, t.collapse ? collapseId : undefined)).catch((err: Error) => deps.log(`[push] ${err.message}`));
     },
+    close: () => deps.transport.close(),
   };
 }
 
-export const noopPushSender: PushSender = { configured: false, send() {} };
+export const noopPushSender: PushSender = { configured: false, send() {}, close() {} };
 
 let installed: PushSender = noopPushSender;
+/** Why alerts cannot go out, naming secrets and never a value. Null once they can, or before startPush has run. */
+let problem: string | null = null;
 
-export function installPushSender(sender: PushSender) {
+export function installPushSender(sender: PushSender, why: string | null = null) {
+  if (installed !== sender) installed.close();
   installed = sender;
+  problem = sender.configured ? null : why;
 }
 
-/** Whether alerts can go out. GET /api/capabilities reports it as push.delivery. */
-export const pushDelivery = () => installed.configured;
+/** Whether alerts can go out, and why not. GET /api/capabilities reports it as push.delivery and push.problem. */
+export const pushStatus = () => ({ delivery: installed.configured, problem: installed.configured ? null : problem });
 
-/** Reads the config once, installs the sender, and logs why it did not when the config is missing. Restart to change it. */
-export async function startPush(): Promise<void> {
+const PUSH_SECRET_NAMES = new Set<string>(Object.values(PUSH_SECRETS));
+let loading: Promise<void> = Promise.resolve();
+let watching = false;
+
+/**
+ * Reads the config, installs the sender, and logs why not when the config is missing. Runs again whenever an APNs
+ * secret is set or deleted. Loads run one after another, so saving the three secrets in a row installs the last read.
+ */
+export function startPush(): Promise<void> {
+  if (!watching) {
+    watching = true;
+    onSecretChange((scope, name) => {
+      if (scope === 'global' && PUSH_SECRET_NAMES.has(name)) void startPush();
+    });
+  }
+  loading = loading.then(loadAndInstall, loadAndInstall);
+  return loading;
+}
+
+async function loadAndInstall(): Promise<void> {
   const values: Record<string, string | null> = {};
   for (const name of Object.values(PUSH_SECRETS)) {
     values[name] = (await globalSecret(name).catch(() => null)) ?? process.env[name] ?? null;
   }
   const loaded = loadPushConfig((name) => values[name]);
   if ('problem' in loaded) {
+    installPushSender(noopPushSender, loaded.problem);
     console.log(`[push] not configured, no alerts will be sent: ${loaded.problem}`);
     return;
   }
@@ -188,6 +298,7 @@ export async function startPush(): Promise<void> {
       live: sessionIsLive,
       forget: forgetPushToken,
       now: Date.now,
+      senderId: pushSenderId,
       sleep: (ms) =>
         new Promise((done) => {
           setTimeout(done, ms).unref();
@@ -206,25 +317,76 @@ function emit(event: PushEvent) {
   }
 }
 
-/** The agent asked a question and waits for an answer. */
-export function notifyNeedsInput(threadId: string) {
-  emit({ kind: 'needsInput', threadId, channelId: threads.get(threadId)?.channel_id ?? null });
+/**
+ * The agent asked a question and waits for an answer. The alert previews the first question. A delegated thread's
+ * question opens the thread Ben answers it on (threads.home: the one he delegated from, or the newest that continues
+ * it), where its card shows too, and names the thread that asked.
+ */
+export function notifyNeedsInput(threadId: string, question: string | null = null) {
+  const t = threads.get(threadId);
+  const home = threads.get(threads.home(threadId));
+  if (t && home && home.id !== t.id) {
+    const from = crewAsker({ task_id: t.task_id, thread_title: t.title });
+    emit({ kind: 'needsInput', threadId: home.id, channelId: home.channel_id, title: home.title, text: question, from, askerId: t.id });
+    return;
+  }
+  emit({ kind: 'needsInput', threadId, channelId: t?.channel_id ?? null, title: t?.title ?? null, text: question });
 }
 
 /**
  * A turn ended. Done or failed only; stopped and queued are silent. A finished child is already reported to its parent,
- * so only a failed child alerts.
+ * so only a failed child alerts. `reply` is the turn's last assistant text, or why it failed; none falls back to a
+ * generic line.
  */
-export function notifyEnded(threadId: string, status: ThreadStatus) {
+export function notifyEnded(threadId: string, status: ThreadStatus, reply: string | null = null) {
   if (status !== 'done' && status !== 'failed') return;
   const t = threads.get(threadId);
   if (status === 'done' && t?.parent_id) return;
-  emit({ kind: status === 'done' ? 'finished' : 'failed', threadId, channelId: t?.channel_id ?? null });
+  emit({
+    kind: status === 'done' ? 'finished' : 'failed',
+    threadId,
+    channelId: t?.channel_id ?? null,
+    title: t?.title ?? null,
+    text: reply,
+  });
 }
 
-/** A crew report landed in a thread. Only the Conductor's reports alert: that is where Ben reads them. */
-export function notifyCrewReport(parentId: string) {
+/**
+ * A crew report landed in a thread. Only the Conductor's reports alert: that is where Ben reads them. The phone gets a
+ * push; the Web UI and the desktop app get a feed `alert` (Needs you does not list reports).
+ */
+export function notifyCrewReport(parentId: string, report: Record<string, unknown> = {}) {
   const t = threads.get(parentId);
   if (t?.channel_id !== 'conductor') return;
-  emit({ kind: 'crewReport', threadId: parentId, channelId: t.channel_id });
+  const str = (value: unknown) => (typeof value === 'string' ? value : null);
+  emit({ kind: 'crewReport', threadId: parentId, channelId: t.channel_id, title: t.title, text: str(report.text), from: str(report.title) });
+  const from = oneLine(str(report.title));
+  const preview = pushPreview(str(report.text));
+  publishFeed({
+    type: 'alert',
+    alert: {
+      id: `crew:${randomUUID()}`,
+      kind: 'crewReport',
+      thread_id: parentId,
+      channel_id: t.channel_id,
+      title: t.title,
+      body: [from, preview].filter(Boolean).join(': '),
+      at: new Date().toISOString(),
+    },
+  });
+}
+
+/**
+ * A watched PR has new failing checks or review feedback, and its thread was woken for it (pr-watch/worker.ts).
+ * `summary` is the wake's one line ("#12 at abc1234. CI failed: test"). The phone gets a push; the Web UI and the
+ * desktop app get a feed `alert`. The worker calls this once per wake, so a poll that finds nothing new sends nothing.
+ */
+export function notifyPRAttention(threadId: string, summary: string, key: string) {
+  const t = threads.get(threadId);
+  if (!t) return;
+  emit({ kind: 'prAttention', threadId, channelId: t.channel_id, title: t.title, text: summary });
+  publishFeed({
+    type: 'alert',
+    alert: { id: `pr:${threadId}:${key}`, kind: 'prAttention', thread_id: threadId, channel_id: t.channel_id, title: t.title, body: summary, at: new Date().toISOString() },
+  });
 }

@@ -48,9 +48,15 @@ export function planToUsage(p: CursorPlanUsage, now = new Date()): Usage {
 export async function refreshCursorPlan(now = new Date()): Promise<void> {
   if (!dashboard) return;
   const plan = await dashboard.planUsage().catch(() => null);
-  if (plan) return recordUsage('cursor', planToUsage(plan, now));
+  // Read through the IDE's session, the cycle may be another account's than the one cursor-agent runs as.
+  if (plan) return recordUsage('cursor', planToUsage(plan, now), { account: !plan.fallback });
   const last = usageFor('cursor');
   if (last && (!last.updated_at || now.getTime() - Date.parse(last.updated_at) > STALE_MS)) clearUsage('cursor');
+}
+
+/** Every Cursor billing event from `since` (epoch ms), for the Inbox dashboard. Null when the dashboard cannot be read. */
+export function cursorUsageEvents(since: number): Promise<CursorUsageEvent[] | null> {
+  return dashboard ? dashboard.usageEvents(since).catch(() => null) : Promise.resolve(null);
 }
 
 // ---------- per-thread tokens and cost ----------

@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import type { ServerCapabilities } from '@omni/shared/app-pairing.ts';
 import type { ConnectStatus } from '@omni/server/connect/service.ts';
 import { api, useApi } from '../api.ts';
 import { QrCode } from '../components/QrCode.tsx';
-import { Button, ErrorNote, Label, Loading, Picker } from '../components/ui.tsx';
+import { Button, ErrorNote, Label, LinkButton, Loading, Picker } from '../components/ui.tsx';
 import {
   clock,
   NEEDS_INSTALL_TOKEN,
@@ -11,14 +12,16 @@ import {
   pairingOptions,
   pairingPayload,
   parseEnteredAddress,
+  pushDeliveryNote,
   parsePairingCode,
   remoteHttpsOrigin,
   secondsLeft,
   SOURCE_LABEL,
   unchecked,
 } from '../pair-ios.ts';
+import { href } from '../router.ts';
 import type { AuthAccount } from './GoogleAccount.tsx';
-import { Advanced, Card, InfoRow } from './settings-parts.tsx';
+import { Advanced, Card, InfoList, InfoRow } from './settings-parts.tsx';
 
 // Settings, Sharing & access, Omni for iOS: a QR the iPhone app scans to pair. The addresses come from pair-ios.ts, the
 // code from POST /api/auth/app-pairings. The code lives in this component only: it is not stored, logged or sent
@@ -38,6 +41,7 @@ export function IosPairingSection() {
   const onRemote = !!remoteHttpsOrigin(location.origin);
   const connect = useApi<ConnectStatus>(onRemote ? null : '/connect');
   const account = useApi<AuthAccount>('/auth/account');
+  const pushNote = pushDeliveryNote(useApi<ServerCapabilities>('/capabilities').data?.push);
   const { reload } = connect;
   const [entered, setEntered] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -107,21 +111,29 @@ export function IosPairingSection() {
   const subtitle = 'Pair the iPhone app by scanning a code. The code is short-lived and holds this Omni’s address, never your token.';
   if (account.data?.via === 'session') {
     return (
-      <Card title="Omni for iOS" subtitle={subtitle}>
+      <Card entry="ios" title="Omni for iOS" subtitle={subtitle}>
         <p className="text-[13px] text-fg-3">{NEEDS_INSTALL_TOKEN}</p>
       </Card>
     );
   }
   const loading = (!onRemote && !connect.data && !connect.error) || (!account.data && !account.error);
   return (
-    <Card title="Omni for iOS" subtitle={subtitle}>
+    <Card entry="ios" title="Omni for iOS" subtitle={subtitle}>
       {loading ? (
         <Loading />
       ) : (
         <>
+          {pushNote && (
+            <div data-push-note className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-fg-2">
+              <p className="min-w-0 flex-1 basis-64">{pushNote}</p>
+              <LinkButton size="sm" href={href.settingsSection('secrets')} icon="key">
+                Open Secrets
+              </LinkButton>
+            </div>
+          )}
           {!onRemote && connect.error && !connect.data && <ErrorNote onRetry={reload}>{connect.error}</ErrorNote>}
           {address ? (
-            <div className="space-y-2 text-[13px]">
+            <InfoList>
               <InfoRow label="Address">
                 {options.addresses.length > 1 ? (
                   <Picker
@@ -134,8 +146,8 @@ export function IosPairingSection() {
                   <span className="min-w-0 truncate font-mono text-[12.5px]">{host(address.url)}</span>
                 )}
               </InfoRow>
-              {unchecked(address) && <p className="text-[12px] text-fg-3">Omni cannot check from here that your phone can reach this address. If you are unsure, open it in the phone’s browser first.</p>}
-            </div>
+              {unchecked(address) && <p className="text-[12.5px] text-fg-3">Omni cannot check from here that your phone can reach this address. If you are unsure, open it in the phone’s browser first.</p>}
+            </InfoList>
           ) : (
             <p className="text-[13px] text-fg-3">{options.problem}</p>
           )}

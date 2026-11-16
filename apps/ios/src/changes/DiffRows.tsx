@@ -3,6 +3,7 @@ import type { DiffLine } from '@omni/shared/diff.ts';
 import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/Text';
+import { Icon } from '../ui/Icon';
 
 import { DiffCount } from '../review/parts';
 import { fontSize, minTarget, mono, space, useOmniTheme, weight } from '../theme';
@@ -19,16 +20,18 @@ interface LineRowProps {
   line: DiffLine;
   width: number;
   picked: boolean;
+  /** A review note is pinned to this line (ReviewNotes.tsx). */
+  noted?: boolean;
   onPress: (fileKey: string, index: number) => void;
 }
 
-export const LineRow = memo(function LineRow({ fileKey, index, line, width, picked, onPress }: LineRowProps) {
+export const LineRow = memo(function LineRow({ fileKey, index, line, width, picked, noted = false, onPress }: LineRowProps) {
   const { colors } = useOmniTheme();
   const canPick = pickable(line);
-  const tint = picked ? colors.mark : line.kind === 'add' ? colors.diffAdd : line.kind === 'del' ? colors.diffDel : line.kind === 'hunk' ? colors.surface2 : 'transparent';
+  const tint = picked ? colors.mark : line.kind === 'add' ? colors.diffAddBg : line.kind === 'del' ? colors.diffDelBg : line.kind === 'hunk' ? colors.surface2 : 'transparent';
   const number = line.new ?? line.old;
   const body = (
-    <View style={[styles.line, { backgroundColor: tint, borderLeftColor: picked ? colors.fg : 'transparent' }]}>
+    <View style={[styles.line, { backgroundColor: tint, borderLeftColor: picked ? colors.fg : noted ? colors.live : 'transparent' }]}>
       <Text style={[styles.gutter, { width: width * DIGIT + space.s2, color: colors.fg4 }]}>{number ?? ''}</Text>
       <Text style={[styles.text, { color: line.kind === 'hunk' || line.kind === 'note' ? colors.fg3 : colors.fg }]}>{line.text || ' '}</Text>
     </View>
@@ -64,7 +67,9 @@ export const FileHeader = memo(function FileHeader({ row, onToggle }: FileHeader
       onPress={() => onToggle(key)}
       style={({ pressed }) => [styles.file, { backgroundColor: pressed ? colors.surface3 : colors.surface2, borderTopColor: colors.line }]}
     >
-      <Text style={[styles.caret, { color: colors.fg3 }]}>{row.open ? '▾' : '▸'}</Text>
+      <View style={{ width: 14, alignItems: 'center', transform: [{ rotate: row.open ? '90deg' : '0deg' }] }}>
+        <Icon name="chevronRight" size={10} color={colors.fg3} />
+      </View>
       <Text style={[styles.letter, { color: colors.fg3 }]}>{STATUS_LETTER[file.status]}</Text>
       <Text numberOfLines={1} ellipsizeMode="middle" style={[styles.label, { color: colors.fg }]}>
         {label}
@@ -119,7 +124,7 @@ const styles = StyleSheet.create({
   text: {
     flex: 1,
     fontFamily: mono,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
     lineHeight: LINE_HEIGHT,
   },
   file: {
@@ -130,22 +135,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.s6,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  caret: {
-    width: 12,
-    fontSize: fontSize.body,
-  },
   letter: {
     width: 14,
     fontFamily: mono,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
   },
   label: {
     flex: 1,
     fontFamily: mono,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
   },
   meta: {
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
     fontVariant: ['tabular-nums'],
   },
   group: {

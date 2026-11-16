@@ -13,6 +13,7 @@ import { allWithDelegating, delegatingIds } from './delegating.ts';
 import { validateDefaults } from './harness/resolve.ts';
 import { publishFeed } from './bus.ts';
 import { baseOptions } from './worktree-base.ts';
+import { storedList, worktreeListProblem } from '@omni/shared/worktree-lists.ts';
 
 export const channelsApi = new Hono();
 
@@ -57,6 +58,25 @@ function runDefaultsError(body: { default_harness?: string | null; default_model
   return err ? `Default model: ${err}` : undefined;
 }
 
+/** A worktree list, one entry per line: blanks, comments and repeats dropped, empty clears it. Checked by listsError. */
+const worktreeList = z
+  .string()
+  .max(64 * 1024)
+  .nullish()
+  .transform((s) => (s === undefined ? undefined : storedList(s)));
+
+/** Why the worktree lists a body sets are refused, as one sentence. */
+const listsError = (body: { worktree_include?: string | null; worktree_shared?: string | null }) =>
+  worktreeListProblem(body.worktree_include) ?? worktreeListProblem(body.worktree_shared, { shared: true });
+
+/** A branch step's own prompt (packages/shared/thread-glance.ts stepPrompts): blank clears it back to the built-in one. */
+const stepPrompt = z
+  .string()
+  .trim()
+  .max(4000)
+  .transform((s) => s || null)
+  .nullish();
+
 const channelSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]{2,40}$/, 'lowercase letters, digits and dashes'),
   name: z.string().min(1),
@@ -71,6 +91,8 @@ const channelSchema = z.object({
   browser_headless: z.coerce.number().int().min(0).max(1).optional(),
   notes: z.string().nullish(),
   icon: channelIcon,
+  avatar_bg: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'use a six-digit hex color').nullish(),
+  avatar_bg_manual: z.number().int().min(0).max(1).optional(),
   default_harness: runDefault,
   default_model: runDefault,
   default_effort: runDefault,
@@ -90,6 +112,11 @@ const channelSchema = z.object({
     .max(5)
     .nullish()
     .transform((l) => (l == null ? l : JSON.stringify(l))),
+  worktree_include: worktreeList,
+  worktree_shared: worktreeList,
+  prompt_open_pr: stepPrompt,
+  prompt_fix_conflicts: stepPrompt,
+  prompt_fix_checks: stepPrompt,
 });
 
 /** A channel's latest threads of any status, so the sidebar can keep finished ones findable. */
@@ -99,8 +126,9 @@ const RECENT_PER_CHANNEL = 5;
 const THREADS_PER_FOLDER = 50;
 
 /** A thread as the sidebar lists it. `delegating`: a thread it delegated still works (apps/server/delegating.ts). */
-const stub = ({ id, channel_id, title, status, created_at, updated_at, folder_id, harness, pinned_at, done_at, parent_id, source, waiting_on }: Thread, delegating: ReadonlySet<string>) => ({
-  id, channel_id, title, status, created_at, updated_at, folder_id, harness, pinned_at, done_at, parent_id, source, waiting_on, delegating: delegating.has(id),
+/** A thread as the lists show it. `model` and `branch` are for the thread tree's child rows (tooltip and second line), `setup` for the Starting dot. */
+const stub = ({ id, channel_id, title, status, created_at, updated_at, folder_id, harness, model, branch, pinned_at, done_at, parent_id, source, limit_state, setup, waiting_on }: Thread, delegating: ReadonlySet<string>) => ({
+  id, channel_id, title, status, created_at, updated_at, folder_id, harness, model, branch, pinned_at, done_at, parent_id, source, limit_state, setup, waiting_on, delegating: delegating.has(id),
 });
 
 /** Conductor jobs with their delegated child threads, including children in other channels. */
@@ -119,6 +147,32 @@ function conductorHandoffs(delegating: ReadonlySet<string>) {
     group.children.push(child);
   }
   return [...groups.values()].map(({ parent, children }) => ({ parent: stub(parent, delegating), children: children.map((t) => stub(t, delegating)) }));
+}
+
+/**
+ * Team leads with their members, keyed by the lead's channel: a lead lists in its channel, and its members (who get no
+ * row of their own) nest under it. A lead the Conductor delegated also nests under its job through `handoffs`.
+ */
+function teamsByChannel(delegating: ReadonlySet<string>) {
+  const groups = new Map<string, { parent: Thread; children: Thread[] }>();
+  for (const member of threads.teamMembers()) {
+    const leadId = member.parent_id!;
+    let group = groups.get(leadId);
+    if (!group) {
+      const lead = threads.get(leadId);
+      if (!lead || lead.archived) continue;
+      group = { parent: lead, children: [] };
+      groups.set(leadId, group);
+    }
+    group.children.push(member);
+  }
+  const byChannel = new Map<string, { parent: ReturnType<typeof stub>; children: ReturnType<typeof stub>[] }[]>();
+  for (const { parent, children } of groups.values()) {
+    const list = byChannel.get(parent.channel_id) ?? [];
+    list.push({ parent: stub(parent, delegating), children: children.map((t) => stub(t, delegating)) });
+    byChannel.set(parent.channel_id, list);
+  }
+  return byChannel;
 }
 
 /** Each folder with its count, how many of its threads run, and its newest threads, keyed by channel. */
@@ -156,14 +210,25 @@ function busyThreads(delegating: ReadonlySet<string>) {
   return busy;
 }
 
-/** Its own turn runs or queues, or a thread it delegated does. A thread with only sub-agents left is not counted. */
+/**
+ * Its own turn runs or queues, or a thread or sub-agent it delegated still works. A thread listed only for background
+ * shells or monitors, or for sub-agents a stopped turn left, is not counted.
+ */
 const isWorking = (t: Thread, delegating: ReadonlySet<string>) => t.status === 'running' || t.status === 'queued' || delegating.has(t.id);
 
 /**
  * A channel plus its busy threads, its latest ones, and its folders with their threads, so the sidebar can list them
- * under the name. `running` counts the running and queued ones and those whose delegated threads still work.
+ * under the name. `running` counts the running and queued ones and those whose delegated threads or sub-agents still work.
  */
-const withActive = (ch: Channel, busy: Thread[], recent: Thread[], folders: Map<string, unknown[]>, handoffs: ReturnType<typeof conductorHandoffs>, delegating: ReadonlySet<string>) => {
+const withActive = (
+  ch: Channel,
+  busy: Thread[],
+  recent: Thread[],
+  folders: Map<string, unknown[]>,
+  handoffs: ReturnType<typeof conductorHandoffs>,
+  teams: ReturnType<typeof teamsByChannel>,
+  delegating: ReadonlySet<string>,
+) => {
   const mine = busy.filter((t) => t.channel_id === ch.id && t.source !== 'team');
   return {
     ...publicChannel(ch),
@@ -172,6 +237,7 @@ const withActive = (ch: Channel, busy: Thread[], recent: Thread[], folders: Map<
     recent: recent.filter((t) => t.channel_id === ch.id).map((t) => stub(t, delegating)),
     folders: folders.get(ch.id) ?? [],
     ...(ch.id === 'conductor' && handoffs.length ? { handoffs } : {}),
+    ...(teams.get(ch.id)?.length ? { teams: teams.get(ch.id) } : {}),
   };
 };
 
@@ -181,7 +247,8 @@ channelsApi.get('/', (c) => {
   const recent = threads.recentPerChannel(RECENT_PER_CHANNEL);
   const folders = foldersByChannel(folderRepo.all(), threads.filed(), delegating);
   const handoffs = conductorHandoffs(delegating);
-  return c.json(channels.list(c.req.query('archived') === '1').map((ch) => withActive(ch, busy, recent, folders, handoffs, delegating)));
+  const teams = teamsByChannel(delegating);
+  return c.json(channels.list(c.req.query('archived') === '1').map((ch) => withActive(ch, busy, recent, folders, handoffs, teams, delegating)));
 });
 
 channelsApi.get('/:id', (c) => {
@@ -189,7 +256,7 @@ channelsApi.get('/:id', (c) => {
   if (!ch) return c.json({ error: 'not found' }, 404);
   const delegating = delegatingIds();
   const folders = foldersByChannel(folderRepo.byChannel(ch.id), threads.filed(ch.id), delegating);
-  return c.json(withActive(ch, busyThreads(delegating), threads.byChannel(ch.id, RECENT_PER_CHANNEL), folders, conductorHandoffs(delegating), delegating));
+  return c.json(withActive(ch, busyThreads(delegating), threads.byChannel(ch.id, RECENT_PER_CHANNEL), folders, conductorHandoffs(delegating), teamsByChannel(delegating), delegating));
 });
 
 channelsApi.post('/', async (c) => {
@@ -197,7 +264,7 @@ channelsApi.post('/', async (c) => {
   if ('error' in parsed) return c.json(parsed, 400);
   const body = parsed;
   if (channels.get(body.id)) return c.json({ error: 'channel exists' }, 409);
-  const runError = runDefaultsError(body);
+  const runError = runDefaultsError(body) ?? listsError(body);
   if (runError) return c.json({ error: runError }, 400);
   if (body.repo_path && !existsSync(body.repo_path)) return c.json({ error: `repo path not found: ${body.repo_path}` }, 400);
   if (body.repo_path && !body.github_repo) body.github_repo = await detectRepo(body.repo_path);
@@ -212,7 +279,7 @@ channelsApi.patch('/:id', async (c) => {
   if ('error' in parsed) return c.json(parsed, 400);
   const body = parsed;
   delete (body as any).id;
-  const runError = runDefaultsError(body, current);
+  const runError = runDefaultsError(body, current) ?? listsError(body);
   if (runError) return c.json({ error: runError }, 400);
   // Read the GitHub repo from the path when none is typed and there is none yet, or when the path moves without one
   // typed (the clients leave it out unless detection failed or it was edited, #405).
@@ -256,4 +323,32 @@ channelsApi.get('/:id/bases', async (c) => {
   return channel ? c.json(await baseOptions(channel)) : c.json({ error: 'not found' }, 404);
 });
 
-channelsApi.get('/:id/threads', (c) => c.json(allWithDelegating(threads.byChannel(c.req.param('id'), 200, c.req.query('archived') === '1'))));
+const PAGE_MAX = 200;
+
+/** A page's opaque cursor: where the next page starts. */
+const cursorOf = (t: { updated_at: string; id: string }) => Buffer.from(JSON.stringify([t.updated_at, t.id])).toString('base64url');
+function readCursor(raw: string | undefined): { updated_at: string; id: string } | null | undefined {
+  if (!raw) return null;
+  try {
+    const [updated_at, id] = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown[];
+    return typeof updated_at === 'string' && typeof id === 'string' ? { updated_at, id } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The channel's threads, newest first. Without `paged`, the newest 200 as an array, as before. With `paged=1`, one page
+ * of `limit` (default 50, at most 200) as `{threads, next}`, where `next` is the cursor for the page after it (`cursor`,
+ * or `before` as its alias) or null at the end (PRD #667, story 41).
+ */
+channelsApi.get('/:id/threads', (c) => {
+  const archived = c.req.query('archived') === '1';
+  if (c.req.query('paged') !== '1') return c.json(allWithDelegating(threads.byChannel(c.req.param('id'), PAGE_MAX, archived)));
+  const after = readCursor(c.req.query('cursor') ?? c.req.query('before'));
+  if (after === undefined) return c.json({ error: 'bad cursor' }, 400);
+  const limit = Math.min(PAGE_MAX, Math.max(1, Number(c.req.query('limit')) || 50));
+  const rows = threads.byChannelPage(c.req.param('id'), { limit: limit + 1, archived, after });
+  const page = rows.slice(0, limit);
+  return c.json({ threads: allWithDelegating(page), next: rows.length > limit ? cursorOf(page.at(-1)!) : null });
+});

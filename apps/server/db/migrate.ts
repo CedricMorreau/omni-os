@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS threads (
   suggestion TEXT,
   next_title TEXT,
   next_prompt TEXT,
+  open_items TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -254,6 +255,22 @@ CREATE TABLE IF NOT EXISTS pr_watches (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pr_watches_due ON pr_watches(next_poll_at) WHERE state = 'watching';
+-- Ben's claude.ai Artifacts as the claude CLI lists them (claude-artifacts.ts): a cache of the last good listing, keyed
+-- by the page's uuid. Machine-local, not synced: each Mac lists the same account itself. gone_at hides a page a
+-- complete listing no longer had. The meta table holds the run state and the schedule.
+CREATE TABLE IF NOT EXISTS claude_artifacts (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  type TEXT,
+  updated_on TEXT,
+  rank INTEGER NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  gone_at TEXT
+);
+CREATE TABLE IF NOT EXISTS claude_artifacts_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pr_watch_events (
   thread_id TEXT NOT NULL REFERENCES pr_watches(thread_id) ON DELETE CASCADE,
   key TEXT NOT NULL,
@@ -318,6 +335,8 @@ export function migrate() {
   // A follow-up thread Haiku proposes once a turn is done: its title and first prompt. Local, not synced.
   ensureColumn('threads', 'next_title', 'TEXT');
   ensureColumn('threads', 'next_prompt', 'TEXT');
+  // What a finished turn left open for Ben (packages/shared/open-items.ts), as JSON. Local, not synced.
+  ensureColumn('threads', 'open_items', 'TEXT');
   ensureColumn('threads', 'archived', 'INTEGER NOT NULL DEFAULT 0');
   // A worktree thread's preparation (apps/server/runner/setup.ts): preparing or failed, with why; null once it is ready. Local, not synced.
   ensureColumn('threads', 'setup', 'TEXT');
@@ -331,7 +350,13 @@ export function migrate() {
   // limit_elsewhere is 1 on a Mac that holds the other Mac's stop, so clients show it without offering to act.
   for (const col of ['limit_state', 'limit_resets_at', 'limit_id', 'limit_machine']) ensureColumn('threads', col, 'TEXT');
   ensureColumn('threads', 'limit_elsewhere', 'INTEGER NOT NULL DEFAULT 0');
+  // Claude Code's `/goal` on the thread's session (packages/shared/goal.ts). Local, not synced: the goal is the session's.
+  ensureColumn('threads', 'goal_objective', 'TEXT');
+  ensureColumn('threads', 'goal_status', 'TEXT');
+  ensureColumn('threads', 'goal_checks', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('channels', 'icon', 'TEXT');
+  ensureColumn('channels', 'avatar_bg', 'TEXT');
+  ensureColumn('channels', 'avatar_bg_manual', 'INTEGER NOT NULL DEFAULT 0');
   // The sidebar folder a thread sits in, null for ungrouped: every existing thread. Synced with the thread row.
   ensureColumn('threads', 'folder_id', 'TEXT REFERENCES folders(id) ON DELETE SET NULL');
   db.exec('CREATE INDEX IF NOT EXISTS threads_folder ON threads(folder_id) WHERE folder_id IS NOT NULL');
@@ -341,6 +366,8 @@ export function migrate() {
   ensureColumn('threads', 'done_at', 'TEXT');
   // What a new thread in the channel runs on when neither the thread nor its role picks (apps/server/harness/resolve.ts).
   for (const col of ['default_harness', 'default_model', 'default_effort', 'default_base', 'links', 'extra_repos']) ensureColumn('channels', col, 'TEXT');
+  // The channel's own worktree lists, one entry per line (worktree-include.ts): files to copy, folders to share.
+  for (const col of ['worktree_include', 'worktree_shared']) ensureColumn('channels', col, 'TEXT');
   ensureColumn('tickets', 'role', 'TEXT');
   ensureColumn('tickets', 'route', 'TEXT');
   ensureColumn('tickets', 'route_proposal', 'TEXT');
@@ -358,6 +385,8 @@ export function migrate() {
   // The channel's design system: one standalone HTML file for the pages its threads write, and the file's name.
   ensureColumn('channels', 'design_system', 'TEXT');
   ensureColumn('channels', 'design_system_name', 'TEXT');
+  // The channel's own Open PR, Fix conflicts and Fix checks prompts (packages/shared/thread-glance.ts stepPrompts). Null is the built-in one.
+  for (const col of ['prompt_open_pr', 'prompt_fix_conflicts', 'prompt_fix_checks']) ensureColumn('channels', col, 'TEXT');
   // The claude.ai page an artifact was published as (packages/shared/published.ts), and what the publish said it was.
   ensureColumn('artifacts', 'url', 'TEXT');
   ensureColumn('artifacts', 'description', 'TEXT');
@@ -373,6 +402,8 @@ export function migrate() {
   // Crew reports and a team's go to its lead are durable requests too, with the transcript payload Omni wrote.
   ensureColumn('message_requests', 'kind', `TEXT NOT NULL DEFAULT 'user'`);
   ensureColumn('message_requests', 'payload', 'TEXT');
+  // #679/#680: why a scheduled run was skipped (failed precheck, catch-up past catchup_max_age); null for a run that started.
+  ensureColumn('automation_runs', 'skip_reason', 'TEXT');
   for (const table of ['events', 'artifacts', 'automation_runs']) {
     ensureColumn(table, 'uid', 'TEXT');
     db.exec(`UPDATE ${table} SET uid = ${UUID_SQL} WHERE uid IS NULL`);
@@ -391,6 +422,18 @@ export function migrate() {
       CREATE TABLE result_reads (thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE, n INTEGER NOT NULL, uid TEXT NOT NULL, read_at TEXT NOT NULL);
       INSERT INTO result_reads (thread_id, n, uid, read_at) SELECT r.thread_id, c.n, r.uid, r.read_at FROM result_reads_old r JOIN completions c ON c.uid = r.uid;
       DROP TABLE result_reads_old;`);
+  }
+  // #733: a failed team member brings its job to Needs you until Ben opens it (db/repos/needs-you.ts). Members never
+  // listed on their own, so none has a read watermark: once per machine, every member's newest result so far counts as
+  // read. The marker is a `sync.` key, which stays on this machine (db/sync.ts localKey).
+  if (!db.prepare(`SELECT 1 FROM kv WHERE key = 'sync.migrated.team_results_read'`).get()) {
+    db.exec(`INSERT INTO result_reads (thread_id, n, uid, read_at)
+        SELECT t.id, c.n, c.uid, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM threads t
+        JOIN completions c ON c.uid = (SELECT uid FROM completions WHERE thread_id = t.id ORDER BY n DESC, uid DESC LIMIT 1)
+        WHERE t.source = 'team'
+      ON CONFLICT(thread_id) DO UPDATE SET n = excluded.n, uid = excluded.uid, read_at = excluded.read_at
+        WHERE (excluded.n, excluded.uid) > (result_reads.n, result_reads.uid);
+      INSERT INTO kv (key, value) VALUES ('sync.migrated.team_results_read', json_quote(strftime('%Y-%m-%dT%H:%M:%fZ', 'now')));`);
   }
   // Every way a turn ends writes the thread's status (the runners, Setup, boot): a turn leaving running or queued for
   // done, failed or stopped is a result. Only on the Mac that ran it (run_machine was this one, or none): another
@@ -452,6 +495,9 @@ export function migrate() {
     thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
     run_id TEXT NOT NULL
   );`);
+  // #678: the one action a channel runs in a worktree right before a cleanup removes it. Local, not synced.
+  ensureColumn('channel_actions', 'teardown', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS channel_actions_teardown ON channel_actions(channel_id) WHERE teardown = 1');
   // #221: a thread continued on another harness names its source (synced with the row; the source is never written).
   // Its Carryover is a synced `carryover` event. This Mac keeps what cut its worktree (the source's HEAD and snapshot
   // tree, the ref that holds them) and the client's request id, so a retried start gets the same thread back.
@@ -592,4 +638,92 @@ export function migrate() {
     crew_report INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL
   );`);
+  // Watched PRs with failing checks or review feedback (push-sender.ts notifyPRAttention): on, like the rest, for a
+  // device that chose before the kind existed.
+  ensureColumn('push_preferences', 'pr_attention', 'INTEGER NOT NULL DEFAULT 1');
+  // What the registering app build can take (AppPushFeature), as a JSON array. A token from before it takes none:
+  // no collapse id and no pull request alerts, which that build could not tell apart or open.
+  ensureColumn('push_tokens', 'features', `TEXT NOT NULL DEFAULT '[]'`);
+  // OAuth clients that reached /mcp with a Clerk JWT for the owner (apps/server/mcp-clients.ts): which Ben approved,
+  // which wait for approval and which he removed. Synced as a signed action (sync/handlers/mcp-client.ts), so a forged
+  // sync change cannot approve a client. decided_at is when Ben last approved or removed it: the newest decision wins
+  // across machines. An approval from before the column stays null, which any dated decision beats. A removal from
+  // before it is dated when the column is added, so an approval another machine made earlier, while this one still ran
+  // the old build, never undoes it. Bringing that client back takes a new Approve.
+  db.exec(`CREATE TABLE IF NOT EXISTS mcp_clients (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    via TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+  );`);
+  const datedDecisions = (db.prepare('PRAGMA table_info(mcp_clients)').all() as unknown as { name: string }[]).some((c) => c.name === 'decided_at');
+  ensureColumn('mcp_clients', 'decided_at', 'TEXT');
+  if (!datedDecisions) db.prepare(`UPDATE mcp_clients SET decided_at = ? WHERE status = 'removed'`).run(new Date().toISOString());
+  // When each metadata field of a thread was last edited, for the field-by-field merge of synced rows
+  // (sync/thread-merge.ts). Rows from before it are seeded once with their updated_at (pinned_at and done_at with
+  // their own times when set), which is what whole-row last-writer-wins compared before.
+  const seedEdits = !(db.prepare('PRAGMA table_info(threads)').all() as unknown as { name: string }[]).some((c) => c.name === 'field_edits');
+  ensureColumn('threads', 'field_edits', 'TEXT');
+  if (seedEdits) {
+    db.exec(`UPDATE threads SET field_edits = json_object('title', updated_at, 'archived', updated_at, 'folder_id', updated_at,
+      'pinned_at', COALESCE(pinned_at, updated_at), 'done_at', COALESCE(done_at, updated_at))`);
+  }
+  // The other machines' public keys (sync/keyring.ts), pinned the first time each is seen. A key that changes later is
+  // kept as seen_*, and only Ben's confirmation pins it. Local, never synced: a forged change must not pin a key.
+  db.exec(`CREATE TABLE IF NOT EXISTS sync_keys (
+    machine_id TEXT PRIMARY KEY,
+    sign_key TEXT,
+    seal_key TEXT,
+    pinned_at TEXT NOT NULL,
+    seen_sign_key TEXT,
+    seen_seal_key TEXT,
+    seen_at TEXT
+  );`);
+  // The other machines trusted to make this one act (sync/keyring.ts), each with the signing key it is trusted with: the
+  // first one pinned for it, or one Ben confirmed after a key change. Local, never synced.
+  db.exec(`CREATE TABLE IF NOT EXISTS sync_trusted (machine_id TEXT PRIMARY KEY, sign_key TEXT NOT NULL, trusted_at TEXT NOT NULL);`);
+  // Synced changes whose signature did not check out (sync/verify.ts): refused, or applied while that entity still
+  // takes unsigned changes. One row per machine, entity, reason and (for a refused one) entity id.
+  db.exec(`CREATE TABLE IF NOT EXISTS sync_refused (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    machine TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    applied INTEGER NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS sync_refused_at ON sync_refused(at);`);
+  // Review notes on a thread's Changes diff (db/repos/review-notes.ts): the lines as Ben picked them (`anchor`, a
+  // diff_selection body as JSON) and his note. Synced, last writer wins on the whole row (sync/handlers/review-note.ts).
+  db.exec(`CREATE TABLE IF NOT EXISTS review_notes (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    anchor TEXT NOT NULL,
+    body TEXT NOT NULL,
+    resolved_at TEXT,
+    sent_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS review_notes_thread ON review_notes(thread_id, created_at);`);
+  // Builds before trust on first pin (ADR 0013) left paired machines untrusted until a Trust click, so their commands
+  // sat in sync_deferred. Trust every machine with a pinned signing key and no changed key waiting, with that key; the
+  // next sync applies what was held. One trusted with another key keeps that. Safe to run again: it is the same rule.
+  db.exec(`INSERT INTO sync_trusted (machine_id, sign_key, trusted_at)
+    SELECT machine_id, sign_key, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM sync_keys WHERE sign_key IS NOT NULL AND seen_sign_key IS NULL
+    ON CONFLICT(machine_id) DO NOTHING;
+  DELETE FROM sync_refused WHERE reason = 'waiting for Trust' AND machine IN
+    (SELECT t.machine_id FROM sync_trusted t JOIN sync_keys k ON k.machine_id = t.machine_id AND k.sign_key = t.sign_key);`);
+  // The machines that held a thread before its holder, oldest first (db/repos/assignments.ts), for the Inbox row's
+  // machine history. JSON; synced with the row. Null reads as none.
+  ensureColumn('assignments', 'trail', 'TEXT');
+  // Sub-agents another machine runs, read from their synced task rows (db/repos/events.ts openTasksSince): the recent
+  // ones, and each one's start.
+  db.exec(`CREATE INDEX IF NOT EXISTS events_task_at ON events(created_at) WHERE kind = 'task';
+    CREATE INDEX IF NOT EXISTS events_task ON events(thread_id, json_extract(payload, '$.task_id')) WHERE kind = 'task';`);
 }

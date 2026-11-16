@@ -8,6 +8,7 @@ import { applyPage, earlierCursor, historyQuery, openHistory, revealCursor, type
 import { newContext } from '@omni/shared/message-context.ts';
 import { diffSelection, selectRows } from '@omni/shared/message-context-diff.ts';
 import { changesProblems, turnChangesProblems } from '@omni/shared/changes.ts';
+import { reviewNoteProblems } from '@omni/shared/review-notes.ts';
 import { WIRE_FIXTURES } from '@omni/test-fixtures';
 import { diff, shapeOf, tagOf } from './fixture-shape.ts';
 import { FAKE_CLAUDE, diffFile, fakeAlive } from './support.ts';
@@ -34,21 +35,30 @@ const HINT = `The server JSON the clients read changed shape. If that is on purp
 /**
  * Every fixture this test owns. A few come from elsewhere: sync-status.json is checked
  * by sync-setup.test.ts, and those that take two machines by their own tests: devices.json and thread-handoff.json by
- * handoff-two-macs.test.ts, thread-takeover.json and thread-takeover-requested.json by takeover-two-macs.test.ts, and
- * thread-undelivered.json by delivery-gap-run-on.test.ts.
+ * handoff-two-macs.test.ts, thread-takeover.json and thread-takeover-requested.json by takeover-two-macs.test.ts,
+ * thread-undelivered.json by delivery-gap-run-on.test.ts, update-fleet.json by update-fleet-two-macs.test.ts, and
+ * update-desktop.json and update-desktop-request.json by update-desktop.test.ts.
  */
 const NAMES = [
   'harnesses.json',
   'crew.json',
   'thread-created.json',
+  // POST /threads/:id/messages: the thread with the message's acceptance, as `omni send` reads it.
+  'message-sent.json',
   'status.json',
+  // GET /machines with one thread running, as `omni status --machine` reads it.
+  'machines.json',
   'channels.json',
   'channel.json',
   'thread.json',
   'channel-threads.json',
+  // One page of the same, as the phone and iOS channel screens read it (PRD #667, story 41).
+  'channel-threads-page.json',
   'threads.json',
   'recent.json',
   'artifacts.json',
+  // The claude.ai Artifacts list after a refresh through the fake CLI's Artifact listing.
+  'claude-artifacts.json',
   'error-not-found.json',
   'thread-stream.sse',
   // A stream opened with a stale `after`: the newest page in a sync, in place of a replay (#224).
@@ -92,6 +102,9 @@ const NAMES = [
   'needs-you.json',
   'needs-you-read-request.json',
   'needs-you-read.json',
+  // The held report's child on screen: its success never lists in Needs you, so seeing it reads it.
+  'needs-you-seen-request.json',
+  'needs-you-seen.json',
   // A turn stopped at the plan's usage limit, with its reset time: scheduled to resume then, cancelled, resumed now.
   'thread-limited.json',
   'limit-scheduled.json',
@@ -117,6 +130,13 @@ const NAMES = [
   'thread-context.json',
   // The thread reference picker's search over every channel, from that thread.
   'thread-references.json',
+  // Review notes on that thread's diff (#686): a note pinned to the same lines, the list with it edited and a second
+  // one resolved, and Send open notes.
+  'review-note-request.json',
+  'review-notes.json',
+  'review-notes-sent.json',
+  // Where a thread's notes may go besides itself (#687): the rich thread's one delegate.
+  'review-note-targets.json',
   // Bounded history (#223), on a thread whose first message is too big for a row, under a tiny OMNI_HISTORY_BUDGET:
   // the head with an anchor, an older page, a reveal of the first message, that message whole, and search hits.
   'thread-open.json',
@@ -138,16 +158,24 @@ const NAMES = [
   'thread-actions.json',
   // The storage scan over the worktrees above, once it has finished.
   'worktree-scan.json',
-  // A cleanup of two of them that removes one and keeps the other, then this Mac's retention policy turned on.
+  // A cleanup of two of them that removes one and keeps the other, then this Mac's retention policy turned on, then
+  // its schedule for stripping caches.
   'worktree-cleanup.json',
   'worktree-retention-request.json',
   'worktree-retention.json',
+  'worktree-slim-request.json',
+  'worktree-slim.json',
   // A thread with no PR watch, then one polled through the fake gh, then stopped.
   'pr-watch-none.json',
   'pr-watch.json',
   'pr-watch-stopped.json',
   // Every channel's PRs, with one repo gh cannot read.
   'all-prs.json',
+  // Auto-merge turned on for a PR with the repo's merge method, then off (#685).
+  'pr-auto-merge-request.json',
+  'pr-auto-merge.json',
+  'pr-auto-merge-off-request.json',
+  'pr-auto-merge-off.json',
   // A question a delegated thread asked, as the thread that delegated it lists it.
   'crew-questions.json',
 ] as const;
@@ -227,7 +255,18 @@ function fakeGh(bin: string) {
     labels: [{ id: 'L1', name: 'feature', description: '', color: '0e8a16' }], reviewRequests: [{ __typename: 'User', login: 'ben' }, { __typename: 'Team', name: 'Theme', slug: 'theme' }],
   };
   const list = `if [ "$1 $2 $8" = "pr list 40" ]; then [ "$4" = "acme/shop" ] && echo '${JSON.stringify([listed])}' && exit 0; echo "GraphQL: Could not resolve to a Repository with the name '$4'." >&2; exit 1; fi\n`;
-  writeFileSync(join(bin, 'gh'), `#!/bin/sh\nif [ "$1 $2" = "pr view" ]; then echo '${JSON.stringify(pr)}'; exit 0; fi\n${list}if [ "$1 $2" = "api user" ]; then echo ben; exit 0; fi\nif [ "$1" = "api" ]; then exit 0; fi\necho "fake gh: $*" >&2\nexit 1\n`);
+  // Auto-merge on acme/shop, which allows squash only: `--auto` arms it until `--disable-auto`, and `pr view` shows it.
+  // acme/gone has auto-merge off, so arming there fails with gh's words.
+  const armed = join(bin, 'auto-merge-armed');
+  const autoMerge = { enabledAt: '2026-11-01T10:00:00Z', enabledBy: { login: 'ben' }, mergeMethod: 'SQUASH', commitHeadline: '', commitBody: '', authorEmail: null };
+  const auto =
+    `if [ "$1 $2 $3" = "repo view acme/shop" ]; then echo '{"squashMergeAllowed":true,"mergeCommitAllowed":false,"rebaseMergeAllowed":false}'; exit 0; fi\n` +
+    `if [ "$1 $2 $3" = "repo view acme/gone" ]; then echo '{"squashMergeAllowed":true,"mergeCommitAllowed":true,"rebaseMergeAllowed":true}'; exit 0; fi\n` +
+    `if [ "$1 $2 $5" = "pr merge acme/gone" ]; then echo "GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)" >&2; exit 1; fi\n` +
+    `if [ "$1 $2 $6" = "pr merge --auto" ]; then touch '${armed}'; echo "! Pull request $5#$3 will be automatically merged via $7 when all requirements are met"; exit 0; fi\n` +
+    `if [ "$1 $2 $6" = "pr merge --disable-auto" ]; then rm -f '${armed}'; echo "✓ Auto-merge disabled for pull request $5#$3"; exit 0; fi\n` +
+    `if [ "$1 $2" = "pr view" ] && [ -f '${armed}' ]; then echo '${JSON.stringify({ ...pr, autoMergeRequest: autoMerge })}'; exit 0; fi\n`;
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\n${auto}if [ "$1 $2" = "pr view" ]; then echo '${JSON.stringify({ ...pr, autoMergeRequest: null })}'; exit 0; fi\n${list}if [ "$1 $2" = "api user" ]; then echo ben; exit 0; fi\nif [ "$1" = "api" ]; then exit 0; fi\necho "fake gh: $*" >&2\nexit 1\n`);
   chmodSync(join(bin, 'gh'), 0o755);
 }
 
@@ -282,6 +321,8 @@ async function boot(): Promise<number> {
       OMNI_CURSOR_DASHBOARD: '0',
       OMNI_CURSOR_API_URL: 'http://127.0.0.1:9',
       OMNI_BROWSER: '0',
+      // No scheduled claude.ai Artifacts listing mid-recording: the test refreshes it once itself.
+      OMNI_CLAUDE_ARTIFACTS: '0',
       OMNI_BRAIN_DIR: join(tmp, 'brain'),
       OMNI_DEFAULT_MODEL: 'sonnet',
       OMNI_KEEPALIVE_SECONDS: '60',
@@ -383,19 +424,24 @@ async function scenario() {
   }, 'the first turn to finish');
 
   // A second turn busy in its tool, with a third message held until it ends: the running and pending shapes.
-  await call('POST', `/threads/${id}/messages`, { prompt: 'TOOL:4000 and the tests', mode: 'steer' });
+  keep('message-sent.json', await call('POST', `/threads/${id}/messages`, { prompt: 'TOOL:4000 and the tests', mode: 'steer' }));
   await eventually(async () => {
     const d = await detail(id);
     return d.thread.status === 'running' && count(d, 'tool_use') === 2;
   }, 'the second turn to run its tool');
   await call('POST', `/threads/${id}/messages`, { prompt: 'then tidy up', mode: 'queue' });
   keep('status.json', await get('/status'));
+  keep('machines.json', await get('/machines'));
   keep('channels.json', await get('/channels'));
   keep('channel.json', await get('/channels/acme'));
   const busy = keep('thread.json', await detail(id)) as Detail;
   expect(busy.pending?.length, 'the held message').toBe(1);
 
   writeFileSync(join(data, 'threads', id, 'artifacts', 'report.md'), '# Report\n');
+  // An automation file saved again, as an editor would: the scheduler reloads and the feed sends `automations`. Recorded
+  // on purpose, since a late watch event (FSEvents on a Mac) can send one in this window anyway.
+  const digestFile = join(setUp!.automationsDir, 'daily-digest.yaml');
+  writeFileSync(digestFile, readFileSync(digestFile));
   await call('PATCH', `/threads/${id}`, { title: 'Fix the cart and the tests' });
   await eventually(async () => {
     const d = await detail(id);
@@ -403,17 +449,25 @@ async function scenario() {
   }, 'the held message to run');
   const sent = (text: string, tag: string) => frames(text).some((f) => tagOf(f) === tag);
   await eventually(
-    async () => sent(stream.text(), 'artifact') && sent(feed.text(), 'artifact') && frames(stream.text()).filter((f) => tagOf(f) === 'result').length === 3,
-    () => `the artifact on both streams and the last result on the thread's:\n${stream.text()}\n\n${feed.text()}`,
+    async () =>
+      sent(stream.text(), 'artifact') &&
+      sent(feed.text(), 'artifact') &&
+      sent(feed.text(), 'automations') &&
+      frames(stream.text()).filter((f) => tagOf(f) === 'result').length === 3,
+    () => `the artifact on both streams, the automations reload on the feed and the last result on the thread's:\n${stream.text()}\n\n${feed.text()}`,
   );
 
   keep('channel-threads.json', await get('/channels/acme/threads'));
+  keep('channel-threads-page.json', await get('/channels/acme/threads?paged=1&limit=1'));
   keep('threads.json', await get('/threads?channel=acme'));
   keep('recent.json', await get('/recent'));
   keep('artifacts.json', await get('/artifacts'));
   keep('error-not-found.json', await call('GET', '/threads/nope', undefined, false));
   got.set('thread-stream.sse', await stream.stop());
   got.set('feed.sse', await feed.stop());
+  // After the feed is kept, so its claude_artifacts events stay out of feed.sse.
+  await call('POST', '/claude-artifacts/refresh', { force: true, wait: true });
+  keep('claude-artifacts.json', await get('/claude-artifacts'));
   const stale = capture(`${base}/api/threads/${id}/stream?after=stale`);
   await eventually(async () => sent(stale.text(), 'sync'), () => `the snapshot sync:\n${stale.text()}`);
   // Up to the sync: whether the context reading follows it in time is a race.
@@ -634,6 +688,9 @@ async function scenario() {
   const readBody = request('needs-you-read-request.json', { uid: stopped.result!.uid }) as { uid: string };
   const after = keep('needs-you-read.json', await call('POST', '/needs-you/read', { ...readBody, uid: stopped.result!.uid })) as { item: Item };
   expect(after.item).toMatchObject({ result: null, blockers: [{ kind: 'recovered' }] });
+  // The child that reported is on screen: a delegated thread's success is not in Needs you, so seeing it reads it.
+  const seenBody = request('needs-you-seen-request.json', { thread: crew.id }) as { thread: string };
+  expect(keep('needs-you-seen.json', await call('POST', '/needs-you/seen', { ...seenBody, thread: crew.id }))).toEqual({ read: true });
   git('commit', '-q', '--allow-empty', '-m', 'first');
   keep('setup-retried.json', await call('POST', `/threads/${wt.id}/setup/retry`, {}));
   await eventually(async () => (await detail(wt.id)).thread.status === 'done', 'the retried thread to run');
@@ -721,6 +778,21 @@ async function scenario() {
   const references = keep('thread-references.json', await get(`/thread-references?thread=${wt.id}&q=&scope=all`)) as { same_channel: boolean }[];
   expect(references.map((r) => r.same_channel)).toContain(false);
 
+  const noteBody = request('review-note-request.json', { anchor: rows.value, body: 'name these better' }) as { anchor: unknown; body: string };
+  const pinned = (await call('POST', `/threads/${wt.id}/review-notes`, noteBody)) as { note: { id: string } };
+  await call('PATCH', `/threads/${wt.id}/review-notes/${pinned.note.id}`, { body: 'name these sum and price' });
+  const done = (await call('POST', `/threads/${wt.id}/review-notes`, { ...noteBody, body: 'already fixed' })) as { note: { id: string } };
+  await call('PATCH', `/threads/${wt.id}/review-notes/${done.note.id}`, { resolved: true });
+  keep('review-notes.json', await get(`/threads/${wt.id}/review-notes`));
+  const notesSent = keep('review-notes-sent.json', await call('POST', `/threads/${wt.id}/review-notes/send`, {})) as { sent: { id: string }[] };
+  expect(notesSent.sent.map((n) => n.id)).toEqual([pinned.note.id]);
+  const targets = keep('review-note-targets.json', await get(`/threads/${rich.id}/review-notes/targets`)) as { targets: { title: string }[] };
+  expect(targets.targets.map((t) => t.title)).toEqual(['Check the checkout']);
+  await eventually(async () => {
+    const d = await detail(wt.id);
+    return d.thread.status === 'done' && !d.pending?.length;
+  }, 'the review notes message to run');
+
   keep('limit-cancelled.json', await call('POST', `/threads/${capped.id}/limit/cancel`, {}));
   keep('limit-resumed.json', await call('POST', `/threads/${capped.id}/limit/resume`, {}));
   await eventually(async () => (await detail(capped.id)).thread.status === 'done', 'the resumed thread to run');
@@ -775,7 +847,7 @@ async function scenario() {
   expect(continued.continued_from?.id).toBe(id);
   expect(continued.continued_in).toHaveLength(1);
 
-  const actionBody = request('channel-action-request.json', { name: 'Theme check', command: 'echo "Theme check passed"', secrets: [], port: null, setup: 'background' });
+  const actionBody = request('channel-action-request.json', { name: 'Theme check', command: 'echo "Theme check passed"', secrets: [], port: null, setup: 'background', teardown: true });
   const check = keep('channel-action.json', await call('POST', '/channels/acme/actions', actionBody)) as { id: string };
   const preview = (await call('POST', '/channels/acme/actions', { name: 'Theme preview', command: 'echo "Previewing on $OMNI_PORT"; sleep 30', port: 0 })) as { id: string };
   const tests = (await call('POST', '/channels/acme/actions', { name: 'Tests', command: 'echo "1 failing" >&2; exit 1' })) as { id: string };
@@ -842,6 +914,8 @@ async function scenario() {
 
   const retentionBody = request('worktree-retention-request.json', { enabled: true, idleDays: 30 });
   keep('worktree-retention.json', await call('PUT', '/worktrees/retention', retentionBody));
+  const slimBody = request('worktree-slim-request.json', { enabled: false, idleDays: 14 });
+  keep('worktree-slim.json', await call('PUT', '/worktrees/slim', slimBody));
 
   // Last, since it gives acme a GitHub repo. The app sends {} for the branch's PR; acme threads have no branch, so
   // this one names the PR.
@@ -864,6 +938,28 @@ async function scenario() {
   expect(all.prs[0]).toMatchObject({ labels: ['feature'], reviewRequests: ['ben'] });
   expect(all.viewer).toBe('ben');
   expect(all.failed.map((f) => f.repo)).toEqual(['acme/gone']);
+
+  // Auto-merge: the app asks for rebase, the repo allows squash only, so it arms with squash; the PR view shows it
+  // armed, then off. A repo with auto-merge turned off answers with gh's words.
+  // Only a paired device arms it: the install token, which agents hold, is refused even with confirm: true.
+  const armBody = request('pr-auto-merge-request.json', { enabled: true, method: 'rebase', confirm: true });
+  expect(await call('POST', '/channels/acme/prs/7/auto-merge', armBody, false)).toEqual({ error: 'Only a paired device can turn auto-merge on. Arm it with the slide in the PR view.' });
+  const { code } = (await call('POST', '/auth/app-pairings', {})) as { code: string };
+  const { token: device } = (await call('POST', '/auth/app-pairings/redeem', { code, name: 'Fixture iPhone' })) as { token: string };
+  const asDevice = async (path: string, body: unknown, ok = true) => {
+    const res = await fetch(`${base}/api${path}`, { method: 'POST', headers: { authorization: `Bearer ${device}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const text = await res.text();
+    if (res.ok !== ok) throw new Error(`POST ${path}: ${res.status} ${text}`);
+    return JSON.parse(text);
+  };
+  const armed = keep('pr-auto-merge.json', await asDevice('/channels/acme/prs/7/auto-merge', armBody));
+  expect(armed).toMatchObject({ ok: true, method: 'squash', state: 'OPEN', autoMergeRequest: { mergeMethod: 'SQUASH', enabledBy: { login: 'ben' } } });
+  expect(((await get('/channels/acme/prs/7')) as { autoMergeRequest: unknown }).autoMergeRequest).toMatchObject({ mergeMethod: 'SQUASH' });
+  const offBody = request('pr-auto-merge-off-request.json', { enabled: false });
+  expect(keep('pr-auto-merge-off.json', await call('POST', '/channels/acme/prs/7/auto-merge', offBody))).toMatchObject({ ok: true, method: null, autoMergeRequest: null });
+  expect(((await get('/channels/acme/prs/7')) as { autoMergeRequest: unknown }).autoMergeRequest).toBeNull();
+  expect(await asDevice('/channels/gadgets/prs/7/auto-merge', armBody, false)).toEqual({ error: 'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)' });
+  expect(JSON.stringify(await asDevice('/channels/acme/prs/7/auto-merge', { enabled: true }, false))).toContain('needs confirm: true');
 
   // A delegated thread asks: the thread above it lists the question, with the asking thread's id for the answer.
   const conductor = (await call('POST', '/threads', { channel: 'acme', prompt: 'plan the launch week', title: 'Plan the launch week' })) as Thread;
@@ -995,5 +1091,13 @@ describe('Changes fixtures follow @omni/shared', () => {
     ['turns-unavailable.json', turnChangesProblems],
   ] as const)('%s is what @omni/shared/changes.ts says', (name, problems) => {
     expect(problems(fixture(name))).toEqual([]);
+  });
+
+  it('review-notes.json and review-notes-sent.json are notes as @omni/shared/review-notes.ts reads them', () => {
+    const listed = fixture('review-notes.json') as { notes: unknown[] };
+    const sent = fixture('review-notes-sent.json') as { target: string; sent: unknown[] };
+    expect(listed.notes).toHaveLength(2);
+    expect(typeof sent.target).toBe('string');
+    for (const n of [...listed.notes, ...sent.sent]) expect(reviewNoteProblems(n)).toEqual([]);
   });
 });

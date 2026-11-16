@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ChannelWithRunning, ConductorHandoffGroup, Thread } from '../api.ts';
 import { OmniMark } from '../components/brand.tsx';
-import { useLiveThreads } from '../components/ThreadList.tsx';
-import { Avatar, Icon, Segmented, StatusDot } from '../components/ui.tsx';
+import { useChannelThreads } from '../app/useChannelThreads.ts';
+import { folderOf } from '../folder-groups.ts';
+import { Avatar, Icon, Segmented, StatusDot, asksForYou } from '../components/ui.tsx';
 import { inChannel, reasonOf } from '../needs-you.ts';
 import { href } from '../router.ts';
 import { QuickLinks } from '../components/QuickLinks.tsx';
@@ -12,6 +13,7 @@ import { groupByStage, phaseColor, waitingText, type TicketView } from '../ticke
 import { useApp, useNow } from '../store.tsx';
 import { useFolders } from '../folders.tsx';
 import { delegatesByParent } from '@omni/shared/delegate-count.ts';
+import { hasOwnLook } from '@omni/shared/channel-icon.ts';
 import { bottomInset, MoEmpty, MoGroup, MoHeader, MoListRow, MoRound, MoScroll, MoSection, MoTitle } from './parts.tsx';
 import { MoDelegatedRow } from './DelegatedRow.tsx';
 import { HeaderActions } from './HeaderActions.tsx';
@@ -73,7 +75,7 @@ export function ChannelsScreen() {
         <div className="px-4">
           <MoGroup>
             <MoListRow
-              icon={<OmniMark size={22} state={conductor?.running ? 'delegating' : 'idle'} />}
+              icon={conductor && hasOwnLook(conductor) ? <Avatar name={conductor.name} omni channelIcon={conductor.icon} avatarBg={conductor.avatar_bg} size={30} /> : <OmniMark size={22} />}
               label="Conductor"
               sub={conductor?.notes || 'Delegates to crew threads in every channel'}
               right={<Counts needs={needsIn('conductor')} running={conductor?.running ?? 0} />}
@@ -91,7 +93,7 @@ export function ChannelsScreen() {
                 {list.map((c, i) => (
                   <MoListRow
                     key={c.id}
-                    icon={<Avatar name={c.name} channelIcon={c.icon} size={30} />}
+                    icon={<Avatar name={c.name} channelIcon={c.icon} avatarBg={c.avatar_bg} size={30} />}
                     label={`#${c.name}`}
                     sub={c.store_domain || c.github_repo || undefined}
                     right={<Counts needs={needsIn(c.id)} running={c.running} />}
@@ -118,10 +120,10 @@ function MoFolderHeader({ folder, onToggle }: { folder: FolderRows; onToggle: ()
       onClick={onToggle}
       className="flex items-center gap-2.5 px-4 py-3 text-left text-[14px] leading-[1.4] font-medium text-fg-2 hover:text-fg active:bg-[var(--wash)]"
     >
-      <Icon name={folder.collapsed ? 'chevronRight' : 'chevronDown'} size={14} className="shrink-0 text-fg-4" />
+      <Icon name={folder.collapsed ? 'chevronRight' : 'chevronDown'} size={14} className="shrink-0 text-fg-3" />
       <span className="flex-1 truncate">{folder.name}</span>
-      <span className="shrink-0 text-[12px] text-fg-4 tabular-nums">{folder.count}</span>
-      {folder.running > 0 && <span className="shrink-0 text-[12px] text-fg-4 tabular-nums">{folder.running} running</span>}
+      <span className="shrink-0 text-[12px] text-fg-3 tabular-nums">{folder.count}</span>
+      {folder.running > 0 && <span className="shrink-0 text-[12px] text-fg-3 tabular-nums">{folder.running} running</span>}
     </button>
   );
 }
@@ -142,7 +144,7 @@ export function ChannelScreen({ id }: { id: string }) {
   const folders = useFolders();
   const ch: ChannelWithRunning | undefined = channel(id);
   const accept = useCallback((t: Thread) => t.channel_id === id, [id]);
-  const list = useLiveThreads(`/channels/${encodeURIComponent(id)}/threads`, accept);
+  const list = useChannelThreads(id, accept);
   const now = useNow(60_000);
   const [tab, setTab] = useState<'active' | 'recent'>('active');
   const conductor = id === 'conductor';
@@ -151,7 +153,7 @@ export function ChannelScreen({ id }: { id: string }) {
   const sections = useMemo(() => groupByStage(tickets), [tickets]);
 
   const { active, recent, activeFolders, recentFolders } = useMemo(() => {
-    const info = ch ? { name: ch.name, icon: ch.icon } : undefined;
+    const info = ch ? { name: ch.name, icon: ch.icon, avatar_bg: ch.avatar_bg } : undefined;
     const needs = new Map((inChannel(needsYou, id)?.items ?? []).map((i) => [i.thread.id, i]));
     const folderMap = new Map<string, { active: RowItem[]; recent: RowItem[] }>();
     const activeRows: RowItem[] = [];
@@ -162,12 +164,15 @@ export function ChannelScreen({ id }: { id: string }) {
     for (const t of (list.data ?? []).filter((x) => x.source !== 'team' && !handoffChildren.has(x.id) && !ticketIds.has(x.id))) {
       const item = needs.get(t.id);
       const row = rowOf(t, info, now);
-      const finalRow = item ? { ...row, meta: reasonOf(item).label, status: reasonOf(item).glyph === 'needs' ? 'needs' : row.status } : row;
+      const finalRow = item ? { ...row, meta: reasonOf(item).label, status: asksForYou(reasonOf(item).glyph) ? reasonOf(item).glyph : row.status } : row;
       const isActive = !!item || busy(t);
 
-      if (t.folder_id) {
-        if (!folderMap.has(t.folder_id)) folderMap.set(t.folder_id, { active: [], recent: [] });
-        folderMap.get(t.folder_id)![isActive ? 'active' : 'recent'].push(finalRow);
+      // The sidebar's rule (folder-groups.ts): a folder this channel no longer has, say one just deleted, falls through
+      // to ungrouped rather than hiding the thread.
+      const folder = ch ? folderOf(ch, t) : null;
+      if (folder) {
+        if (!folderMap.has(folder)) folderMap.set(folder, { active: [], recent: [] });
+        folderMap.get(folder)![isActive ? 'active' : 'recent'].push(finalRow);
       } else {
         if (isActive) activeRows.push(finalRow);
         else recentRows.push(finalRow);
@@ -188,7 +193,7 @@ export function ChannelScreen({ id }: { id: string }) {
         const inActive = activeRows.some((row) => row.id === group.parent.id);
         if (inActive) continue;
         const parent = rowOf(group.parent, info, now);
-        const folder = group.parent.folder_id;
+        const folder = ch ? folderOf(ch, group.parent) : null;
         if (folder) {
           if (!folderMap.has(folder)) folderMap.set(folder, { active: [], recent: [] });
           const rows = folderMap.get(folder)!;
@@ -250,8 +255,8 @@ export function ChannelScreen({ id }: { id: string }) {
             value={tab}
             onChange={setTab}
             options={[
-              { id: 'active', label: 'Active', badge: <span className="text-[11px] text-fg-4 tabular-nums">{activeCount}</span> },
-              { id: 'recent', label: 'Recent', badge: <span className="text-[11px] text-fg-4 tabular-nums">{recentCount}</span> },
+              { id: 'active', label: 'Active', badge: <span className="text-[11px] text-fg-3 tabular-nums">{activeCount}</span> },
+              { id: 'recent', label: 'Recent', badge: <span className="text-[11px] text-fg-3 tabular-nums">{recentCount}</span> },
             ]}
           />
         </div>
@@ -270,7 +275,7 @@ export function ChannelScreen({ id }: { id: string }) {
               ))}
               {rows.length > 0 && (
                 <>
-                  {tabFolders.length > 0 && <div className="px-4 py-2 text-[12px] text-fg-4">Ungrouped</div>}
+                  {tabFolders.length > 0 && <div className="px-4 py-2 text-[12px] text-fg-3">Ungrouped</div>}
                   <MobileThreadRows items={rows} handoffs={id === 'conductor' ? ch?.handoffs ?? [] : []} onOpen={(r) => shell.open(href.thread(r.id))} />
                 </>
               )}
@@ -283,6 +288,16 @@ export function ChannelScreen({ id }: { id: string }) {
                   ? `Nothing running in ${name}. Start a thread below; crew threads the Conductor delegates here show up too.`
                   : `Nothing finished in ${name} yet.`}
             </MoEmpty>
+          )}
+          {list.more && (
+            <button
+              type="button"
+              onClick={() => void list.loadMore()}
+              disabled={list.loadingMore}
+              className="mo-press mx-auto mt-1 flex h-11 items-center gap-2 rounded-full px-4 text-[14px] font-medium text-fg-2 disabled:opacity-60"
+            >
+              {list.loadingMore ? 'Loading older threads' : 'Show older threads'}
+            </button>
           )}
         </MoSection>
       </MoScroll>

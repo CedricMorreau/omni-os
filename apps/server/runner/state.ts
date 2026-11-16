@@ -3,7 +3,7 @@ import type { MessageContext } from '@omni/shared/message-context.ts';
 import type { DeliveryPhase } from '../delivery.ts';
 import { about } from '../about.ts';
 import { config } from '../config.ts';
-import { events, messageRequests, threads, type DeliveryState, type MessageRequest } from '../db.ts';
+import { events, messageRequests, outbox, remoteCommands, threads, type DeliveryState, type MessageRequest } from '../db.ts';
 import { publishFeed, publishThread } from '../bus.ts';
 import type { Attachment } from '../uploads.ts';
 import { contextAttachments, harnessText } from '../message-context/project.ts';
@@ -46,6 +46,8 @@ const CAPS: Record<string, number> = {
   'cursor-cloud': config.maxConcurrentCursorCloud,
 };
 export const capFor = (harness: string) => CAPS[harness] ?? config.maxConcurrent;
+/** Every harness's cap, as this machine announces them to the others (sync/devices.ts). */
+export const slotCaps = (): Record<string, number> => ({ ...CAPS });
 
 /** The CLI name a harness shows in errors and the resume command. */
 const CLI_LABEL: Record<string, string> = { 'claude-code': 'claude', codex: 'codex', cursor: 'cursor-agent', hermes: 'Hermes', 'cursor-cloud': 'Cursor Cloud' };
@@ -94,6 +96,13 @@ export interface PendingMsg {
   delivery?: DeliveryState;
   attachments?: Attachment[];
   context?: MessageContext[];
+  /**
+   * Ben's message to a thread another machine holds, which that machine has not taken yet (run-on.ts): its name, and
+   * when it was sent. It leaves the list once the holder answers: taken, it shows in the transcript when the turn
+   * syncs back; refused or expired, it shows there as not delivered, with why (remote-outcomes.ts).
+   */
+  forwarded_to?: string;
+  sent_at?: string;
 }
 
 /**
@@ -285,7 +294,24 @@ export function pendingFor(threadId: string): PendingMsg[] {
           ...(r.context?.length && { context: r.context }),
         }),
     ),
+    ...forwardedFrom(threadId),
   ];
+}
+
+/** Ben's messages this machine forwarded to the thread's holder that no machine has answered yet. */
+function forwardedFrom(threadId: string): PendingMsg[] {
+  const self = outbox.machineId();
+  return remoteCommands
+    .open(threadId)
+    .filter((c) => c.kind === 'message' && c.sender === self)
+    .map((c) => ({
+      ...pendingRow({ uuid: `command:${c.id}`, kind: 'user', text: c.prompt, mode: c.mode ?? 'steer', state: 'sent' }, { source: c.source ?? 'ben' }, {
+        request_id: c.id,
+        ...(c.context?.length && { context: c.context }),
+      }),
+      forwarded_to: c.target_name,
+      sent_at: c.created_at,
+    }));
 }
 
 /** Record where a durable message is now. A message without a request row (a thread's first prompt) has nothing to track. */

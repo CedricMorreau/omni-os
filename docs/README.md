@@ -3,16 +3,19 @@
 ## Using Omni
 
 - [Install and first run](user/install.md): the desktop app, running from a checkout, and the step-by-step agent instructions
-- [Configuration](user/configuration.md): your config, `.env`, placeholders and secrets
-- [Threads](user/threads.md): Needs you and Mark done, the composer, context chips, history, channel actions, Watch PR and Send to Grok Bot
-- [Harnesses](user/harnesses.md): Claude Code, Codex, Cursor Agent, Hermes and Cursor Cloud
+- [Configuration](user/configuration.md): your config, `.env`, placeholders, secrets, Appearance (Classic sidebar, Full color, Press I for Inbox, Press E to mark done), Accounts, Branch steps, worktree copy/shared directories, teardown actions and channel avatar backgrounds
+- [Threads](user/threads.md): Inbox (machine and run time on each card) and Needs you, Claude Code `/goal`, machine tiles (CPU and RAM), Mark done, the composer (including Open PR when the agent asks and To Grok Bot), the quick-actions card, context chips, review notes, Auto-merge, Rerun failed checks, history, channel actions, Watch PR and Send to Grok Bot
+- [Harnesses](user/harnesses.md): Claude Code, Codex, Cursor Agent, Hermes and Cursor Cloud, and Settings > Accounts for which account each is signed in to per machine
 - [Crew and Conductor](user/crew.md)
-- [Automations](user/automations.md): cron, GitHub PR events, published pages and signed GitHub webhooks
-- [Sync between two Macs](user/sync.md)
+- [Notifications](user/notifications.md): what notifies (questions, failures, finishes, crew reports, PRs), native notifications in the desktop app, browser notifications, and turning kinds and channels off
+- [Automations](user/automations.md): edit in Omni (Form or YAML, machine per automation), cron, GitHub PR events, published pages and signed GitHub webhooks, with optional `precheck` and `catchup_max_age` skips
+- [Sync between two Macs](user/sync.md): signed changes, first-key trust for Omni Connect machines ([ADR 0013](adr/0013-paired-machines-are-trusted.md)), handoff and repo clone on a machine without the checkout
 - [Remote access and security](user/remote-access.md), including the phone layout, home-screen setup and pairing the native iOS app
 - [Omni Connect](user/omni-connect.md): open any machine from a phone through your relay, without Tailscale
+- [claude.ai Artifacts](user/claude-artifacts.md): the list of your Artifacts on claude.ai beside the files threads made
 - [Link previews](user/link-previews.md)
 - [Mods](user/mods.md)
+- [The omni command](user/cli.md): `new`, `send`, `threads`/`show`, `status`, `doctor` and `open` from any terminal or agent shell, where the desktop app puts it, and the `--wait` exit codes
 - [Other ways in](user/entry-points.md): shell, Quick Prompt, history import, brain export
 - [Omni as an MCP server](user/external-mcp.md): use Omni from Claude Code, Codex, Cursor, Hermes, Claude Desktop, claude.ai, ChatGPT or Grok
 - [Known limits](user/limits.md), including Storage and worktree retention
@@ -30,13 +33,13 @@ Start with [CONTRIBUTING.md](../CONTRIBUTING.md). Agents also read [CLAUDE.md](.
 - [Delivery contract](internals/delivery.md): what an accepted message, wake or Stop is promised on any machine, and the known gaps with their expected-fail tests
 - [Transitions](internals/transitions.md): the one service behind a run switch, a handoff or Take over and a Continue, its four routes, the six older routes that answer through it, and what stays as synced kv for machines on an older build
 - [Glossary](../CONTEXT.md)
-- [Native app pairing contract](internals/app-pairing.md): session pairing, capabilities, and push token registration
-- [iOS app](../apps/ios/README.md) · [iOS release](../apps/ios/RELEASE.md)
-- [Desktop app](../apps/desktop/README.md): develop against a QA stack, the QA harness (`scripts/qa.ts`), packaging, where data and logs live, and the bridge contract · [Desktop release](../apps/desktop/RELEASE.md): signing, notarization and the release workflow
-- [Prototypes](../prototypes/README.md): standalone experiments outside the apps and packages
+- [Native app pairing contract](internals/app-pairing.md): session pairing, desktop pairing with a one-time nonce, install token rotation, capabilities, and push token registration
+- [iOS app](../apps/ios/README.md) · [iOS release](../apps/ios/RELEASE.md): Activity as Inbox (with machine tiles), Library with claude.ai Artifacts, thinking line, the Open items card, push alerts with a reply preview, Settings and Channel Settings (Accounts, Branch steps, worktree copy/shared directories), Changes review notes, PR steps (Open PR offer, working Fix conflicts / Fix checks, Auto-merge, Rerun failed checks) and forwarded-message rows, shared icons, first build, TestFlight, and the EAS workflow on `main` (native build or EAS Update)
+- [Desktop app](../apps/desktop/README.md): develop against a QA stack, the QA harness (`scripts/qa.ts`), packaging, where data and logs live, the bridge contract and the macOS Activity Monitor · [Desktop release](../apps/desktop/RELEASE.md): signing, notarization and the release workflow
+- [Prototypes](../prototypes/README.md): standalone experiments outside the apps and packages (including the Activity Monitor sampler)
 - [Screenshots on PRs](pr-screenshots.md)
-- Reviews: [2026-10-31 consolidation release, the KPIs re-measured](reviews/2026-10-31-consolidation-review.md) · [2026-10-22 bloat and dead code](reviews/2026-10-22-thermo-bloat-review.html) · [2026-10-16 thermo](reviews/2026-10-16-thermo-review.html)
-- Decisions: [0001 Codex app-server](adr/0001-codex-app-server.md) · [0002 Mac app is a client](adr/0002-mac-app-is-a-client.md) (superseded by 0010; the app is deleted) · [0003 Hermes remote harness](adr/0003-hermes-remote-harness.md) · [0004 Supabase sync](adr/0004-supabase-sync.md) · [0005 One execution owner](adr/0005-one-execution-owner.md) · [0006 Linux app is a window](adr/0006-linux-app-is-a-window.md) (superseded by 0010; the app is deleted) · [0007 Google sign-in through Clerk](adr/0007-google-sign-in-through-clerk.md) · [0008 Cloudflare relay](adr/0008-cloudflare-relay.md) · [0009 Omni Connect](adr/0009-omni-connect.md) · [0010 Desktop app is Electron](adr/0010-desktop-app-is-electron.md)
+- Reviews: [2026-11-07 iOS and phone web visual parity](reviews/2026-11-07-ios-visual-parity.md) · [2026-10-31 consolidation release, the KPIs re-measured](reviews/2026-10-31-consolidation-review.md) · [2026-10-22 bloat and dead code](reviews/2026-10-22-thermo-bloat-review.html) · [2026-10-16 thermo](reviews/2026-10-16-thermo-review.html)
+- Decisions: [0001 Codex app-server](adr/0001-codex-app-server.md) · [0002 Mac app is a client](adr/0002-mac-app-is-a-client.md) (superseded by 0010; the app is deleted) · [0003 Hermes remote harness](adr/0003-hermes-remote-harness.md) · [0004 Supabase sync](adr/0004-supabase-sync.md) · [0005 One execution owner](adr/0005-one-execution-owner.md) · [0006 Linux app is a window](adr/0006-linux-app-is-a-window.md) (superseded by 0010; the app is deleted) · [0007 Google sign-in through Clerk](adr/0007-google-sign-in-through-clerk.md) · [0008 Cloudflare relay](adr/0008-cloudflare-relay.md) · [0009 Omni Connect](adr/0009-omni-connect.md) · [0010 Desktop app is Electron](adr/0010-desktop-app-is-electron.md) · [0011 claude.ai Artifacts list](adr/0011-claude-artifacts-list.md) · [0012 Signed sync](adr/0012-signed-sync.md) · [0013 Paired machines are trusted](adr/0013-paired-machines-are-trusted.md) · [0014 The omni command](adr/0014-omni-command-line.md)
 
 ## Where a new doc goes
 

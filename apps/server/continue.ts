@@ -11,7 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { continueRefusal, continueSourceRefusal, type CarriedStats, type CarryoverFile, type ContinueBlock, type ContinueBody, type ContinueLink, type ContinuePreview } from '@omni/shared/continue.ts';
 import type { Run, RunName } from '@omni/shared/run-switch.ts';
-import { channels, continuations, events, messageRequests, threadBases, threads, tx, type SkippedFile, type Thread, type ThreadBase } from './db.ts';
+import { channels, continuations, events, messageRequests, outbox, threadBases, threads, tx, type SkippedFile, type Thread, type ThreadBase } from './db.ts';
 import { buildCarryover, carriedStats, historyText, type CarryoverP } from './carryover.ts';
 import { copyAttachments, planAttachments, planSignature, type AttachmentPlan } from './continue-attachments.ts';
 import { changesCheckout, defaultBranch, git, gitOr, parseNameStatus, real, threadBase } from './changes.ts';
@@ -21,7 +21,16 @@ import { freshCatalog, getCatalog } from './harness/catalog-service.ts';
 import { isHarnessId, isProviderHarness, providerWhere } from './harness/types.ts';
 import { userName } from './profile.ts';
 import { resumeRequests } from './runner/api.ts';
-import { saveStart, setUpThread } from './runner/setup.ts';
+import { failSetup, saveStart, setUpThread } from './runner/setup.ts';
+import { sendNewThread } from './handoff.ts';
+import { packTree } from './handoff/worktree.ts';
+import { assignRouted, holderOf } from './ownership.ts';
+import { deviceName, ownName } from './sync/devices.ts';
+import { targetFor } from './run-on.ts';
+import type { Mac } from './runner/ports.ts';
+import { sendSaved } from './sync/files.ts';
+import { activeWorker } from './sync/worker.ts';
+import type { Attachment } from './uploads.ts';
 import { emitThread, hasBackground, lives, refusal, runsHere, waiting } from './runner/state.ts';
 import { invalid, runName } from './runner/switch.ts';
 import { plannedWorktree, prepareWorkdir } from './sandbox.ts';
@@ -196,7 +205,7 @@ interface Captured {
 const WORKSPACE: Record<Checkout['kind'], ContinuePreview['workspace']> = { snapshot: 'worktree', head: 'worktree', branch: 'branch', gone: 'fresh', folder: 'folder' };
 
 /** The source as the continued thread would start from it now, and the preview of that. */
-async function capture(sourceId: string, to: RunName, picked: readonly string[]): Promise<Captured> {
+async function capture(sourceId: string, to: RunName, picked: readonly string[], route: Route | null, machineBlocked = false): Promise<Captured> {
   const source = threads.get(sourceId);
   if (!source) throw refusal('thread not found', 404);
   const blocked = sourceBlock(source);
@@ -229,6 +238,7 @@ async function capture(sourceId: string, to: RunName, picked: readonly string[])
     parked: messageRequests.parked(sourceId).map((r) => (typeof r.payload?.text === 'string' ? r.payload.text : r.prompt)),
     attachments: plan.items,
     uploads: [uploadsDir(sourceId), real(uploadsDir(sourceId))],
+    machine: machineBlocked ? null : machinesOf(sourceId, route),
   });
   const revision = createHash('sha256')
     .update(JSON.stringify([events.uidOf(guard) ?? guard, repo?.head ?? '', repo?.tree ?? '', body, planSignature(plan)]))
@@ -243,15 +253,50 @@ async function capture(sourceId: string, to: RunName, picked: readonly string[])
   };
 }
 
-/** POST /api/threads/:id/continue/preview: the Carryover for this run, and whether the thread can be continued now. */
-export async function previewContinue(sourceId: string, run: Run, attachments: readonly string[] = []): Promise<ContinuePreview> {
-  if (!threads.get(sourceId)) throw refusal('thread not found', 404);
-  return (await capture(sourceId, await targetRun(run), attachments)).preview;
+type Route = { from: Mac; to: Mac };
+
+/**
+ * The Carryover's `Machine:` line: the machine the source ran on (the one that holds it, else this one) and the one the
+ * fork runs on, by name. Null when they are the same, or with sync off, where every thread is this machine's.
+ */
+function machinesOf(sourceId: string, route: Route | null): { from: string; to: string } | null {
+  const self = outbox.machineId();
+  if (!self) return null;
+  const ran = holderOf(sourceId) ?? self;
+  const runs = route?.to.id ?? self;
+  if (ran === runs) return null;
+  const name = (id: string) => (id === self ? ownName(self) : (deviceName(id) ?? 'another machine'));
+  return { from: name(ran), to: route ? route.to.name : name(self) };
 }
 
-/** The same message on the same run hashes the same. */
+/**
+ * Where the new thread goes: the machine Ben picked in the Fork dialog (`device`, a synced machine's id or "here"),
+ * else Settings > Threads' "Run new threads on", as for a thread started from the composer. A machine that cannot
+ * take it now (offline, not synced, or sync off) is a block, so the preview says why before Ben writes.
+ */
+async function machineFor(device: string | undefined): Promise<{ route: Route | null; block: ContinueBlock | null }> {
+  try {
+    return { route: await targetFor(device), block: null };
+  } catch (err) {
+    return { route: null, block: { code: 'machine', message: (err as Error).message } };
+  }
+}
+
+/** POST /api/threads/:id/continue/preview: the Carryover for this run, whether the thread can be continued now, and where. */
+export async function previewContinue(sourceId: string, run: Run, attachments: readonly string[] = [], device?: string): Promise<ContinuePreview> {
+  if (!threads.get(sourceId)) throw refusal('thread not found', 404);
+  const to = await targetRun(run);
+  // The Carryover says which machine it runs on, so the machine is known before the capture.
+  const machine = await machineFor(device);
+  const { preview } = await capture(sourceId, to, attachments, machine.route, !!machine.block);
+  return { ...preview, blocked: preview.blocked ?? machine.block, runs_on: machine.route?.to ?? null };
+}
+
+/** The same message on the same run, to the same machine, hashes the same. A start that names no machine hashes as before machines could be picked. */
 const fingerprintOf = (b: ContinueBody) =>
-  createHash('sha256').update(JSON.stringify([b.text, b.harness, b.model, b.effort, [...new Set(b.attachments ?? [])].sort()])).digest('hex');
+  createHash('sha256')
+    .update(JSON.stringify([b.text, b.harness, b.model, b.effort, [...new Set(b.attachments ?? [])].sort(), ...(b.device === undefined ? [] : [b.device])]))
+    .digest('hex');
 
 /** The thread a start with this request id made before, or a 409 when the id went with another message or run. */
 function startedBefore(sourceId: string, requestId: string, fingerprint: string): { thread: Thread; duplicate: true } | null {
@@ -277,11 +322,14 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
   const again = startedBefore(sourceId, body.request_id, fingerprint);
   if (again) return again;
   const to = await targetRun(body);
+  const { route, block } = await machineFor(body.device);
+  if (block) throw busy(block);
   const idle = sourceBlock(threads.get(sourceId) ?? first);
   if (idle) throw busy(idle);
-  const cap = await capture(sourceId, to, body.attachments ?? []);
+  const cap = await capture(sourceId, to, body.attachments ?? [], route);
+  const runs_on = route?.to ?? null;
   if (cap.preview.blocked) throw busy(cap.preview.blocked);
-  if (cap.preview.revision !== body.revision) throw changed(cap.preview);
+  if (cap.preview.revision !== body.revision) throw changed({ ...cap.preview, runs_on });
 
   const channel = channels.get((threads.get(sourceId) ?? first).channel_id)!;
   const id = randomUUID();
@@ -290,6 +338,7 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
   const at = repo ? plannedWorktree(id) : wd;
   const discard = () => rmSync(threadDir(id), { recursive: true, force: true });
   let made: Thread | undefined;
+  let carried: Attachment[] = [];
   let lost: ContinueBlock | null = null;
   try {
     await continueHooks.captured(id);
@@ -307,13 +356,15 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
       // The picked files are copied here, before the thread is written: one that is no longer the file the preview
       // judged starts nothing. A failure from here on removes the new thread's folder, uploads included.
       const files = copyAttachments(sourceId, id, cap.plan);
+      if (files) carried = files;
       if (files) made = tx(() => {
         const t = threads.create({
           id,
           channel_id: now.channel_id,
           // A chain keeps one suffix: continuing a continued thread does not stack them.
           title: `${now.title.replace(/ \(continued\)$/, '')} (continued)`,
-          status: 'queued',
+          // One for another machine waits there, as a routed new thread does (runner/api.ts createThread).
+          status: route ? 'stopped' : 'queued',
           role: now.role,
           model: to.model || null,
           harness: to.harness,
@@ -326,7 +377,8 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
           source: 'manual',
           automation: null,
           folder_id: now.folder_id,
-          setup: at.branch ? 'preparing' : null,
+          // Its worktree is laid out on the machine that runs it.
+          setup: at.branch && !route ? 'preparing' : null,
         });
         continuations.link(id, sourceId);
         const carried = cap.preview.carryover;
@@ -334,7 +386,7 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
         events.add(id, 'carryover', { source: carried.source, goal: carried.goal, text: cap.body, ...carriedStats(carried) } satisfies CarryoverP);
         continuations.add({ thread_id: id, source_id: sourceId, request_id: body.request_id, fingerprint, head: repo?.head ?? null, tree: repo?.kind === 'snapshot' ? repo.tree : null });
         if (repo) threadBases.set(id, { sha: repo.base.sha, ref: repo.base.ref, how: repo.base.how });
-        saveStart(t, body.text, files.length ? files : undefined);
+        if (!route) saveStart(t, body.text, files.length ? files : undefined);
         return threads.get(id)!;
       });
     }
@@ -345,17 +397,45 @@ export async function startContinue(sourceId: string, body: ContinueBody): Promi
   if (!made) {
     discard();
     if (lost) throw busy(lost);
-    throw changed((await capture(sourceId, to, body.attachments ?? [])).preview);
+    throw changed({ ...(await capture(sourceId, to, body.attachments ?? [], route)).preview, runs_on });
   }
 
   emitThread(id);
-  if (made.setup) void setUpThread(id);
+  if (route) await sendElsewhere(made, route, body.text, carried, repo);
+  else if (made.setup) void setUpThread(id);
   else {
     // As a worktree thread's setup sends its first message once ready: through Resume, in order, through the slots.
     for (const r of messageRequests.unstarted(id)) messageRequests.park(r.id);
     await resumeRequests(id).catch((err) => console.error(`[continue] ${id}: could not send the first message:`, (err as Error).message));
   }
   return { thread: threads.get(id)!, duplicate: false };
+}
+
+/**
+ * Send a fork made here to the machine Ben picked or Settings names, as a new thread's offer: its files in Storage and, for repo
+ * work, the source's checkout as a worktree bundle (the source's HEAD, its changes on top), which that machine lays out
+ * before its setup runs. Nothing is laid out here. When the send fails, the fork stays here with its first message
+ * kept, as a new thread the other machine could not take does (handoff.ts restoreFresh).
+ */
+async function sendElsewhere(t: Thread, route: { from: Mac; to: Mac }, text: string, files: Attachment[], repo: RepoCheckout | null) {
+  const offer = randomUUID();
+  try {
+    const worker = activeWorker();
+    if (!worker) throw new Error('sync is off');
+    const refs = await sendSaved(files);
+    const bundle = repo ? await packTree(repo.dir, { head: repo.head, tree: repo.tree }, t.id, offer, worker.transport) : null;
+    tx(() => {
+      assignRouted(t.id, route.to.id);
+      sendNewThread(t.id, text, route.from, route.to, refs, bundle, offer);
+    });
+  } catch (err) {
+    console.error(`[continue] ${t.id}: could not send it to ${route.to.name}:`, (err as Error).message);
+    saveStart(t, text, files.length ? files : undefined);
+    const why = `Omni could not send it to ${route.to.name}: ${(err as Error).message.replace(/\.$/, '')}. Retry runs it on this machine.`;
+    if (t.branch) failSetup(t.id, why);
+    else for (const r of messageRequests.unstarted(t.id)) messageRequests.park(r.id);
+  }
+  emitThread(t.id);
 }
 
 const statsOf = (threadId: string): CarriedStats | null => {

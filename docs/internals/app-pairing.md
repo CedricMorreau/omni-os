@@ -21,20 +21,36 @@ The QR payload is a JSON object with `version` set to `1`, `serverUrl` set to th
   "api": 1,
   "auth": { "via": "session", "method": "pairing", "sessionId": "..." },
   "pairing": { "app": true, "codeTtlSeconds": 300 },
-  "push": { "registration": true, "delivery": false },
+  "push": { "registration": true, "delivery": false, "problem": "missing APNS_KEY_ID, APNS_TEAM_ID, APNS_AUTH_KEY" },
   "streams": { "sse": true, "closeOnRevoke": true }
 }
 ```
 
-For install-token authentication, `auth.via` is `token`, and `auth.method` and `auth.sessionId` are null. A Google session has `auth.method` set to `google`. `push.delivery` is `true` only when the server has an APNs key (see Push delivery). Clients must reject API versions they do not support rather than assume an unknown response is compatible.
+For install-token authentication, `auth.via` is `token`, and `auth.method` and `auth.sessionId` are null. A Google session has `auth.method` set to `google`. `push.delivery` is `true` only when the server has an APNs key (see Push delivery). While it is `false`, `push.problem` says why, naming the missing secrets and never a value. It is `null` once alerts can go out, and absent from servers older than the field. Clients must reject API versions they do not support rather than assume an unknown response is compatible.
 
 ## Sessions
 
-`GET /api/auth/devices` lists sessions, including the `method` field (`google` or `pairing`). `DELETE /api/auth/devices/:id` revokes one session. The install token and Google sessions can revoke any session. A pairing session can revoke only itself and gets 403 for any other id. `POST /api/auth/signout` revokes the caller's session. Only requests that carry the install token can call `POST /api/auth/pair`, so a session cannot swap itself for the install token. A revoked session cannot make subsequent HTTP requests, and its open SSE connections close. Sessions expire after 90 days without an authenticated request. An open SSE connection does not count as an authenticated request after it starts. The server checks open streams for expired sessions every 15 seconds. A pairing session is local to the selected server and does not require a linked Google account. Linking or unlinking a Google account does not revoke pairing sessions.
+`GET /api/auth/devices` lists sessions, including the `method` field: `token` for a session made from the install token (the desktop app's window through desktop pairing, or a browser through `POST /api/auth/pair`), `google`, or `pairing` for a native app. `DELETE /api/auth/devices/:id` revokes one session. The install token and Google sessions can revoke any session. A pairing session can revoke only itself and gets 403 for any other id. `POST /api/auth/signout` revokes the caller's session. Only requests that carry the install token can call `POST /api/auth/pair`, so a session cannot swap itself for the install token. A revoked session cannot make subsequent HTTP requests, and its open SSE connections close. Sessions expire after 90 days without an authenticated request. An open SSE connection does not count as an authenticated request after it starts. The server checks open streams for expired sessions every 15 seconds. A pairing session is local to the selected server and does not require a linked Google account. Linking or unlinking a Google account does not revoke pairing sessions. Only `token` sessions can open the thread terminal (`POST /api/threads/:id/terminal`); `google` and `pairing` sessions get 403 there, because a shell can read `data/api-token`.
+
+## Desktop pairing
+
+The desktop app pairs its window with no clicks and without putting the install token in the browser.
+
+1. When the Electron main process spawns the server, it generates a random secret and passes it in the server's environment as `OMNI_DESKTOP_PAIR_SECRET`. Only the app and the server process know it.
+2. Before every window load, main calls `POST /api/auth/desktop-nonce` with the header `X-Omni-Desktop-Secret: <secret>` (or `Authorization: Bearer <install token>`; either is enough) and no body. The answer is `{ "nonce": "...", "expiresIn": 60 }`.
+3. The window loads `GET /api/auth/desktop-pair?nonce=<nonce>`. The nonce works once, within 60 seconds, and only when `Sec-Fetch-Site` is absent or `none`, so a page cannot trigger it. The server creates a `token` session, sets its cookie (`omni_session_<port>`, `HttpOnly`, `SameSite=Strict`) and redirects to `/`. A missing, used or expired nonce gets 401.
+
+A reload or a second window asks for a new nonce. After a 401 (a rotation or a revoked session) the page asks main to pair again through the bridge (`pairAgain`), at most once every 10 seconds per window. A server too old to have the nonce route answers 404, and main falls back to the plain `desktop-pair`. The route still refuses a request through a proxy or from another machine. `GET /api/auth/proof` keeps guarding which server main attaches to, before any of this.
+
+## Rotating the install token
+
+`POST /api/auth/rotate-token` takes the install token or a `token` session (the desktop window, or a browser paired with the token). A `google` or `pairing` session gets 403 saying to rotate from this Mac or a device paired with the install token. A server whose token is pinned by `OMNI_TOKEN` in its environment answers 409 naming that variable, since rewriting the file would change nothing. It writes a new `data/api-token`, revokes every device session of every method (closing their SSE streams), and answers `{ "ok": true }`. The desktop app sees its session end and pairs again through the nonce flow, reading the new token from the file. A native app gets 401 and shows the pairing screen.
+
+Running threads keep the old token in `OMNI_TOKEN` until their agent process starts again. Omni's own MCP servers, the per-thread ones and the local `apps/mcp/external/stdio.ts`, re-read their token file (`OMNI_TOKEN_FILE`, else `data/api-token`) after a 401 (the stdio server only when its token came from that file or `OMNI_TOKEN_FILE` is set, so a token given in `OMNI_TOKEN` for another host never falls back to this machine's), so Conductor tools and local MCP clients recover on their next call; a `curl` from an agent's shell does not.
 
 ## Push registration
 
-`PUT /api/auth/push-token` requires an app session and returns 401 if the session ended while the request was in flight. Send `token`, a hexadecimal APNs device token, `platform: "ios"`, `environment: "sandbox"` or `"production"`, and an optional `bundleId`. Registering again replaces that session's registration. The server associates a token with at most one session.
+`PUT /api/auth/push-token` requires an app session and returns 401 if the session ended while the request was in flight. Send `token`, a hexadecimal APNs device token, `platform: "ios"`, `environment: "sandbox"` or `"production"`, an optional `bundleId`, and an optional `features` list of what the app build understands (`AppPushFeature`): `collapse` (alerts may share a notification identifier per thread) and `prAttention` (it can show, open and switch off pull request alerts). Unknown names are dropped. A build that sends no `features`, every build from before the field, gets no collapse id and no `prAttention` alerts, so a server update never breaks taps on an older app. Registering again replaces that session's registration, `features` included. The server associates a token with at most one session.
 
 `GET /api/auth/push-token` returns whether a token is registered and its metadata, but never returns the token. `DELETE /api/auth/push-token` removes the registration and is idempotent. Revoking a session removes its registration. A registration sends nothing by itself; the server uses it only when `push.delivery` is `true`. A push is a wake-up signal; HTTP and SSE remain the source of truth.
 
@@ -44,12 +60,12 @@ The server sends alerts directly to Apple with the team's APNs key, a `.p8` file
 
 Set these in the secret store (Keychain, libsecret or `data/secrets.json`), or as environment variables with the same names:
 
-- `APNS_AUTH_KEY`: the `.p8` file's PEM text. Literal `\n` sequences are read as newlines.
+- `APNS_AUTH_KEY`: the `.p8` file's PEM text. Settings, then Secrets, takes one line, so paste the file's text there as it is. The server puts the line breaks back. Literal `\n` sequences work too. The key never reaches an agent's environment.
 - `APNS_KEY_ID`: the ten-character id of that key.
 - `APNS_TEAM_ID`: the Apple developer team id.
 - `APNS_BUNDLE_ID`: optional. Defaults to `app.omni-os.ios`.
 
-With any of the first three missing, or the key unreadable, nothing is sent and `push.delivery` is `false`. The server logs once at startup which names are missing, never their values. Restart the server after changing them.
+With any of the first three missing, or the key unreadable, nothing is sent, `push.delivery` is `false` and `push.problem` names the cause. The server logs which names are missing, never their values. Setting or deleting one of these secrets loads them again, so no restart is needed. A value in the environment needs a restart. The iPhone app's Notifications screen and the Omni for iOS card in Settings both show the problem.
 
 Each registration names its environment, and each request goes to the matching APNs host (`sandbox` or `production`). Alerts expire after 15 minutes. APNs answers every request, so there are no receipts to poll.
 
@@ -59,10 +75,20 @@ Alerts go out on these events:
 - `finished`: a turn ends with the thread done. A finished child thread does not alert, because its parent gets the crew report.
 - `failed`: a turn ends with an error, or Omni cannot prepare the thread's worktree. A failed child does alert.
 - `crewReport`: a crew report lands in a Conductor thread. A report in any other channel does not alert.
+- `prAttention`: a PR under Watch PR has new failing checks or new review feedback, and its thread is woken for it. One alert per wake: a poll that finds nothing new sends none. Only the machine whose PR watch woke the thread sends it.
 
 A stopped turn, a queued turn and a turn cut short by Omni shutting down do not alert.
 
-The payload has a fixed title and body, plus `kind`, `threadId` and `channelId`. It never carries a prompt, a question, a thread title, a reply or a code.
+The alert's title is the thread's title, clipped to 80 characters. Its subtitle says what happened (`Needs your answer`, `Finished`, `Failed`, `Pull request`, or `Crew report: <reporting thread>`). Its body previews the text as plain text (`apps/server/push-preview.ts`): markdown marks, code blocks, rules and HTML tags removed, whitespace collapsed to one line, and clipped to 150 characters at a word with an ellipsis. The text is:
+
+- `needsInput`: the first question.
+- `finished` and `failed`: the turn's last assistant text, not the narration before its tool calls. A worktree that cannot be prepared gives the reason.
+- `crewReport`: the report.
+- `prAttention`: the wake's one line, such as `#12 at abc1234. CI failed: CI / build`.
+
+When there is no readable text, such as a tool-only turn or a code-only reply, the body is a generic line, and a thread with no title gets a generic title and no subtitle. Under `omni` the payload carries `kind`, `threadId`, `channelId`, `at` (when the server sent it, by its clock), `sender` (this server's own id, kept under the local kv key `sync.push_sender` so it never syncs) and, for a delegated thread's question, `askerId`. It never carries the prompt or a code.
+
+Every alert to a build that declared `collapse` goes with `apns-collapse-id` set to its thread id, so the phone shows at most one alert per thread: a newer one replaces the one shown, as on the desktop app. iOS gives every alert of a thread the same notification identifier, so the app tells two taps apart by identifier and delivery time. The phone's own Show Previews setting decides whether the body shows on a locked screen.
 
 How each APNs answer is handled:
 
@@ -78,17 +104,25 @@ A session revoked before an attempt gets no further attempts.
 
 ## Push preferences
 
-`GET /api/auth/push-preferences` returns the device's choices: `{ "needsInput": true, "finished": true, "failed": true, "crewReport": true }`. Every kind is on until the device turns it off.
+`GET /api/auth/push-preferences` returns the device's choices: `{ "needsInput": true, "finished": true, "failed": true, "crewReport": true, "prAttention": true }`. Every kind is on until the device turns it off, including `prAttention` for a device that chose before it existed. The app shows a switch only for the kinds its server returns, so an older server shows no Pull requests switch.
 
-`PUT /api/auth/push-preferences` changes only the keys it sends and returns the full set. The body takes any of the four keys, each `true` or `false`. It must name at least one key and no other field. Anything else gets 400. Only app sessions may call either route (403 otherwise). A revoked session gets 401. The choices are removed with the session, as its token is.
+`PUT /api/auth/push-preferences` changes only the keys it sends and returns the full set. The body takes any of the five keys, each `true` or `false`. It must name at least one key and no other field. Anything else gets 400. Only app sessions may call either route (403 otherwise). A revoked session gets 401. The choices are removed with the session, as its token is.
 
-The shared types are `AppPushKind`, `AppPushPreferences` and `AppPushPreferencesUpdate` in `packages/shared/app-pairing.ts`.
+The shared types are `AppPushKind`, `AppPushPreferences`, `AppPushPreferencesUpdate`, `AppPushAlertRef` and `AppPushSettled` in `packages/shared/app-pairing.ts`.
+
+## Clearing read alerts
+
+`POST /api/auth/push-settled` takes `{ "alerts": [{ "id", "kind", "threadId", "at", "sender" }] }`, up to 100 (`APP_PUSH_SETTLED_MAX`; more gets 400), where `id` is the notification's identifier and `at` and `sender` the alert's `omni.at` and `omni.sender`. Only the server that sent an alert settles it: with two paired Macs, the one behind on sync may not have a question yet and would take it for answered. It returns `{ "settled": [ids] }`: the alerts Ben has dealt with, here or on another device (`apps/server/push-settled.ts`). An alert is settled when its thread was archived or marked done; for `needsInput`, when no question waits on the thread any more; for any other kind, when nothing waits on the thread in Needs you, it is not running, and its result was read at or after `at`. A thread the server does not have is never settled, since another paired server may have sent the alert. Only app sessions may call it (403 otherwise); a malformed body gets 400.
+
+The app asks every paired server, in batches of 100, when it comes to the front and whenever Needs you changes, and clears the alerts any of them names.
+
+Needs you never lists a delegated thread's success or a team member's turn, so reading one there writes no read. The Web UI (desktop and phone) instead sends `POST /api/needs-you/seen` with `{ "thread" }` while such a thread is on screen and idle: its newest result counts as read, `{ "read": true }` when the watermark moved, and a pull request alert on that thread settles. Opening a thread on the phone clears its alerts at once, without asking. With the app closed nothing clears until it next opens: there is no background push for it.
 
 ## What revoking does and does not stop
 
-A pairing session has the same API access as a Google session. It can open the thread terminal and start agents, and both run code as the user who runs the server. That code can read `data/api-token`, and every agent receives the install token in its environment. Revoking a session ends that token's access to HTTP and SSE. It does not undo what the session already ran, and it does not remove anything that code installed.
+A pairing session has the same API access as a Google session. It cannot open the thread terminal, but it can start agents, which run code as the user who runs the server. That code can read `data/api-token`, and every agent receives the install token in its environment. Revoking a session ends that token's access to HTTP and SSE. It does not undo what the session already ran, and it does not remove anything that code installed.
 
-So revoke protects against a lost or stolen token that nobody has used yet. For a device that has already run commands, revoke it, then rotate the install token and check the machine. The API has no route-level limit for pairing sessions, because the terminal, threads, automations and mods all run code. A reduced-capability session would need an allowlist of routes. That is a product decision this contract does not make.
+So revoke protects against a lost or stolen token that nobody has used yet. For a device that has already run commands, revoke it, then rotate the install token (above) and check the machine. Apart from the terminal, the API has no route-level limit for pairing sessions, because threads, automations and mods all run code. A reduced-capability session would need an allowlist of routes. That is a product decision this contract does not make.
 
 ## Notes for the iOS client
 
@@ -99,7 +133,7 @@ So revoke protects against a lost or stolen token that nobody has used yet. For 
 - Register the push token after pairing and again when APNs gives a new one. Registering again replaces the old one. Delete it on sign-out.
 - Send the native APNs device token as lowercase or uppercase hex, with `environment` matching the build (`sandbox` for development builds, `production` for TestFlight and the App Store). The server does not accept Expo push tokens.
 - Ask for notification permission before registering. Without it there is no token to send.
-- A push only tells the app to fetch. Read state over HTTP and SSE.
+- A push previews the news, but the app reads state over HTTP and SSE.
 - A tapped alert carries `omni.threadId` and `omni.channelId`. Open that thread, fetching it over HTTP first.
 - Show the choices from `GET /api/auth/push-preferences` and change them with `PUT`, sending only the keys that changed.
 - A code works once. If redeeming fails with 404, ask for a new code. If it fails with 429, wait for `Retry-After`.

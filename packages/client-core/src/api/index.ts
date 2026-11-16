@@ -7,6 +7,7 @@ import { activityApi } from './activity.ts';
 import { artifactsApi } from './artifacts.ts';
 import { automationsApi } from './automations.ts';
 import { changesApi } from './changes.ts';
+import { claudeArtifactsApi } from './claude-artifacts.ts';
 import { channelsApi } from './channels.ts';
 import { continueApi } from './continue.ts';
 import { crewApi } from './crew.ts';
@@ -19,6 +20,8 @@ import { pushApi } from './push.ts';
 import { pullsApi } from './pulls.ts';
 import { recoveryApi } from './recovery.ts';
 import { searchApi } from './search.ts';
+import { settingsApi } from './settings.ts';
+import { tasksApi } from './tasks.ts';
 import { threadsApi } from './threads.ts';
 
 export * from './account.ts';
@@ -27,6 +30,7 @@ export * from './activity.ts';
 export * from './artifacts.ts';
 export * from './automations.ts';
 export * from './changes.ts';
+export * from './claude-artifacts.ts';
 export * from './channels.ts';
 export * from './continue.ts';
 export * from './crew.ts';
@@ -40,6 +44,8 @@ export * from './push.ts';
 export * from './pulls.ts';
 export * from './recovery.ts';
 export * from './search.ts';
+export * from './settings.ts';
+export * from './tasks.ts';
 export * from './threads.ts';
 
 export type OmniApi = ReturnType<typeof createOmniApi>;
@@ -57,13 +63,16 @@ export function createOmniApi(http: HttpClient) {
     ...pushApi(http),
     ...activityApi(http),
     ...artifactsApi(http),
+    ...claudeArtifactsApi(http),
     ...machinesApi(http),
     ...continueApi(http),
     ...searchApi(http),
+    ...settingsApi(http),
     ...accountApi(http),
     ...automationsApi(http),
     ...actionsApi(http),
     ...changesApi(http),
     ...pullsApi(http),
+    ...tasksApi(http),
   };
 }

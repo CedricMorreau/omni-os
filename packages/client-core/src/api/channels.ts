@@ -1,10 +1,12 @@
+import type { ChannelKind } from '@omni/shared/channel-form.ts';
+import { CHANNEL_THREADS_CURSOR, CHANNEL_THREADS_PAGE, readChannelThreadsPage, type ChannelThreadsPage } from '@omni/shared/channel-threads.ts';
 import { apiPath, type HttpClient } from '../http.ts';
 import type { Thread, ThreadStub } from './threads.ts';
 
 export interface Channel {
   id: string;
   name: string;
-  kind: 'client' | 'internal' | 'personal' | 'system';
+  kind: ChannelKind | 'system';
   repo_path: string | null;
   github_repo: string | null;
   use_worktree: number;
@@ -14,11 +16,21 @@ export interface Channel {
   browser_headless: number;
   notes: string | null;
   icon: string | null;
+  avatar_bg?: string | null;
+  avatar_bg_manual?: number;
   default_harness: string | null;
   default_model: string | null;
   default_effort: string | null;
-  links: { label: string; url: string }[];
-  extra_repos: { path: string; github: string | null }[];
+  links?: { label: string; url: string }[];
+  extra_repos?: { path: string; github: string | null }[];
+  /** Ignored files copied into each new worktree, one gitignore pattern per line. */
+  worktree_include: string | null;
+  /** Folders linked from the main checkout into each new worktree, one per line. */
+  worktree_shared: string | null;
+  /** The channel's own branch step prompts, null for the built-in ones (`stepPrompts` in @omni/shared/thread-glance.ts). Missing from an older server. */
+  prompt_open_pr?: string | null;
+  prompt_fix_conflicts?: string | null;
+  prompt_fix_checks?: string | null;
   design_system_name: string | null;
   design_system_size: number;
   archived: number;
@@ -41,7 +53,7 @@ export type FolderWithThreads = Folder & { count: number; running: number; threa
 
 /**
  * GET /channels and /channels/:id. `active`: running and queued threads, and those whose sub-agents still run.
- * `recent`: the latest threads of any status. `handoffs`: only on the Conductor channel. Older servers leave the lists out.
+ * `recent`: the latest threads of any status. `handoffs`: only on the Conductor channel. `teams`: on a channel with team leads. Older servers leave the lists out.
  */
 export type ChannelWithRunning = Channel & {
   running: number;
@@ -49,10 +61,12 @@ export type ChannelWithRunning = Channel & {
   recent?: ThreadStub[];
   folders?: FolderWithThreads[];
   handoffs?: { parent: ThreadStub; children: ThreadStub[] }[];
+  /** The channel's team leads with their members, in the order they were handed out. Older servers leave it out. */
+  teams?: { parent: ThreadStub; children: ThreadStub[] }[];
 };
 
 export interface ListArchived {
-  /** Only the archived ones, in place of the others. */
+  /** The archived ones too, alongside the others. */
   archived?: boolean;
 }
 
@@ -64,9 +78,24 @@ export function channelsApi(http: HttpClient) {
     channel: (id: string) => http.request<ChannelWithRunning>('GET', apiPath`/channels/${id}`),
     /** At most 200, most recently updated first, without team members. */
     channelThreads: (id: string, o?: ListArchived) => http.request<Thread[]>('GET', apiPath`/channels/${id}/threads`, { query: archivedQuery(o) }),
+    /**
+     * One page of a channel's threads, newest first; `cursor` is the previous page's `next`. A server from before paging
+     * answers with its plain list of up to 200, read as one page with no next.
+     */
+    channelThreadsPage: async (id: string, cursor: string | null = null, limit = CHANNEL_THREADS_PAGE): Promise<ChannelThreadsPage<Thread>> =>
+      readChannelThreadsPage<Thread>(
+        await http.request<unknown>('GET', apiPath`/channels/${id}/threads`, { query: { paged: '1', limit: String(limit), [CHANNEL_THREADS_CURSOR]: cursor ?? undefined } }),
+      ),
     /** Every folder, or one channel's. */
     folders: (channel?: string) => http.request<Folder[]>('GET', apiPath`/folders`, { query: { channel } }),
     /** Opens or closes a folder in every client's channel list: the server keeps the state. A 404 for a folder it does not have. */
     setFolderCollapsed: (id: string, collapsed: boolean) => http.request<Folder>('PATCH', apiPath`/folders/${id}`, { body: { collapsed } }),
+    /** A new channel. `body` is `channelBody` from @omni/shared/channel-form.ts. A 409 when the id is taken. */
+    createChannel: (id: string, body: Record<string, unknown>) => http.request<Channel>('POST', apiPath`/channels`, { body: { id, ...body } }),
+    /** Changes any of a channel's fields, `archived` included. A 400 with the reason for a value it refuses. */
+    updateChannel: (id: string, body: Record<string, unknown>) => http.request<Channel>('PATCH', apiPath`/channels/${id}`, { body }),
+    /** Replaces the channel's design system with one standalone HTML file. */
+    setDesignSystem: (id: string, name: string, html: string) => http.request<Channel>('PUT', apiPath`/channels/${id}/design-system`, { body: { name, html } }),
+    removeDesignSystem: (id: string) => http.request<Channel>('DELETE', apiPath`/channels/${id}/design-system`),
   };
 }

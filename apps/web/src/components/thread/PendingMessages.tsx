@@ -9,6 +9,7 @@ import { isOmnis, isParked, parkedHeading, parkedLabel, parkedOf } from '../../r
 import { useSending } from '../../sending.ts';
 import { canMove, canSteerNow, editBody, editFailed, isEditable, movedOrder, openEdit, reconcileEdits, STALE_NOTE, type EditDraft } from '../../pending-edits.ts';
 import { ContextChips, hasContext } from '../../message-context/ContextChips.tsx';
+import { forwardedLabel, isForwarded, useSyncTrouble } from '../../forwarded.ts';
 
 /** A message that waits for the thread's worktree (SetupCard). */
 const SETUP_LABEL = 'Sends once the worktree is ready';
@@ -55,11 +56,12 @@ export function QueuedMessages({
   const [error, setError] = useState<string | null>(null);
   // Every new pending list: an open edit whose message was sent meanwhile turns stale and keeps its text.
   useEffect(() => setDrafts((d) => reconcileEdits(d, items)), [items]);
+  const trouble = useSyncTrouble(items.some(isForwarded));
   const stale = drafts.filter((d) => d.status === 'stale');
   if (!items.length && !stale.length) return null;
   const live = items.filter((m) => !isParked(m));
   const parked = items.filter(isParked);
-  const lead = starting ? live.find((m) => m.state === 'sent') : undefined;
+  const lead = starting ? live.find((m) => m.state === 'sent' && !isForwarded(m)) : undefined;
   const path = (rest: string) => `/threads/${encodeURIComponent(threadId ?? '')}/requests${rest}`;
   const update = (uuid: string, fn: (d: EditDraft) => EditDraft | null) =>
     setDrafts((all) => all.flatMap((d) => (d.uuid === uuid ? (fn(d) ?? []) : [d])));
@@ -126,6 +128,8 @@ export function QueuedMessages({
               {m.task_id ? ` · ${m.task_id}` : ''}
             </span>
           </div>
+        ) : isForwarded(m) ? (
+          <PendingBubble key={m.uuid} m={m} label={forwardedLabel(m, trouble)} icon={trouble ? 'alert' : 'send'} threadId={threadId} />
         ) : threadId && isEditable(m) ? (
           ownRow(m, setup ? SETUP_LABEL : pendingLabel(m, false), 'clock')
         ) : (
@@ -247,7 +251,7 @@ function FileChip({ name, size, disabled, onRemove }: { name: string; size: numb
     <span className="flex h-8 max-w-[15rem] items-center gap-1.5 rounded-full bg-surface-2 pr-0.5 pl-2.5 text-[12px]">
       <Icon name="file" size={13} className="text-fg-3" />
       <span className="min-w-0 truncate font-medium text-fg-2">{name}</span>
-      <span className="font-num text-[10.5px] text-fg-4">{bytes(size)}</span>
+      <span className="font-num text-[10.5px] text-fg-3">{bytes(size)}</span>
       <IconButton icon="x" label={`Remove ${name}`} size={12} className="h-6 w-6" disabled={disabled} onClick={onRemove} />
     </span>
   );
@@ -349,7 +353,7 @@ export function PendingBubble({
       <div className="flex w-full flex-col items-end opacity-70">
         <div className="mb-1 flex items-center gap-1 text-[11.5px] font-medium text-fg-3">
           <Icon name={icon} size={12} /> {label}
-          {files.length && !threadId ? <span className="text-fg-4">· {plural(files.length, 'file')}</span> : null}
+          {files.length && !threadId ? <span className="text-fg-3">· {plural(files.length, 'file')}</span> : null}
         </div>
         {threadId && files.length ? <Attachments threadId={threadId} items={files} href={href} /> : null}
         <ContextChips records={m.context} align="end" className="mb-1.5 w-full max-w-[92%] sm:max-w-[80%]" />

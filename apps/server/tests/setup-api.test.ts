@@ -11,10 +11,11 @@ const home = mkdtempSync(join(tmpdir(), 'omni-home-'));
 const r = await startRunner({ HOME: home, OMNI_TZ: '' });
 delete process.env.OMNI_TZ;
 const { app } = await import('../app.ts');
-const { configPath, userConfig, resolved } = await import('../user-config.ts');
+const { configPath, userConfig, resolved, updateUserConfig } = await import('../user-config.ts');
 const { legacyConfig, migrateLegacyConfig } = await import('../config-migrate.ts');
 const { listCrew } = await import('../crew.ts');
-const { loadAutomations, setEnabled } = await import('../automations.ts');
+const { loadAutomations } = await import('../automations.ts');
+const { setAutomationEnabled, resetAutomation } = await import('../automation-files.ts');
 const { paths } = await import('../config.ts');
 
 const send = (method: string, path: string, body?: unknown) =>
@@ -47,6 +48,19 @@ describe('onboarding', () => {
     // Automation overrides go through their own endpoint.
     await send('PUT', '/api/setup', { automations: { 'weekly-review': { enabled: true } } });
     expect(userConfig().automations['weekly-review']).toBeUndefined();
+  });
+
+  it("saving one field, as Settings' Reset does, keeps the section's other fields", async () => {
+    await send('PUT', '/api/setup', { user: { name: 'Ada', timezone: 'Europe/London', email: 'ada@example.com' }, workspace: { githubOwner: 'ada' } });
+    const s = await json(await send('PUT', '/api/setup', { user: { email: '' } }));
+    expect(s.config.user).toMatchObject({ name: 'Ada', timezone: 'Europe/London', email: '' });
+    expect(s.config.workspace.githubOwner).toBe('ada');
+  });
+
+  it('saving Integrations keeps the integrations fields Sharing & access shows read-only', async () => {
+    updateUserConfig({ integrations: { tailscaleLogin: 'ada@example.com' } });
+    const s = await json(await send('PUT', '/api/setup', { integrations: { hermesUrl: '', centralBrainDir: '' } }));
+    expect(s.config.integrations.tailscaleLogin).toBe('ada@example.com');
   });
 
   it('complete marks it done, makes the workspace and leaves one welcome thread in #conductor', async () => {
@@ -111,14 +125,18 @@ describe('personal overrides', () => {
     expect(listCrew().find((c) => c.id === 'ticket')!.charter).not.toMatch(/\{\{|phillbert/);
   });
 
-  it('toggling a shared automation writes the user config, never the YAML', () => {
+  it('toggling a shared automation writes your own copy of its YAML, never the shipped file', () => {
     const before = loadAutomations().find((a) => a.id === 'weekly-review')!;
     const yaml = readFileSync(before.file, 'utf8');
-    setEnabled('weekly-review', !before.enabled);
-    expect(loadAutomations().find((a) => a.id === 'weekly-review')!.enabled).toBe(!before.enabled);
-    expect(userConfig().automations['weekly-review']).toEqual({ enabled: !before.enabled });
+    setAutomationEnabled('weekly-review', !before.enabled);
+    const after = loadAutomations().find((a) => a.id === 'weekly-review')!;
+    expect(after.enabled).toBe(!before.enabled);
+    expect(after.file).toBe(join(paths.personalAutomations, 'weekly-review.yaml'));
+    expect(readFileSync(after.file, 'utf8')).toContain(`enabled: ${!before.enabled}`);
+    expect(userConfig().automations['weekly-review']).toBeUndefined();
     expect(readFileSync(before.file, 'utf8')).toBe(yaml);
-    setEnabled('weekly-review', before.enabled);
+    resetAutomation('weekly-review');
+    expect(loadAutomations().find((a) => a.id === 'weekly-review')!.file).toBe(before.file);
   });
 
   it('an automation in data/automations wins over the shared one with the same id', () => {

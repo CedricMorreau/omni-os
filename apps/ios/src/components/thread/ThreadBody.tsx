@@ -5,12 +5,15 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-
 import { Text } from '../../ui/Text';
 
 import type { ThreadLive, ThreadView } from '../../live/hub';
-import { useMarkResultRead } from '../../live/react';
+import { useChannelLook, useMarkResultRead } from '../../live/react';
 import { openArtifact } from '../../navigation/open-artifact';
 import type { RootStackParamList } from '../../navigation/types';
 import { CLOSED, type Disclosure, threadRows, type ThreadRow } from '../../thread/rows';
+import { CONDUCTOR_CHANNEL } from '@omni/shared/channel-icon.ts';
 import { fontSize, minTarget, space, useOmniTheme, weight } from '../../theme';
+import { CrewQuestions } from './CrewQuestions';
 import { NeedsCards } from './NeedsCards';
+import { OpenItemsCard } from './OpenItemsCard';
 import { PendingRows } from './PendingRows';
 import type { SendAnswers } from './QuestionCard';
 import { type RowActions, RowActionsContext } from './rows/actions';
@@ -28,6 +31,8 @@ const toggled = <T,>(set: ReadonlySet<T>, v: T): ReadonlySet<T> => {
 function useThreadRows(view: ThreadView, disclosure: Disclosure): ThreadRow[] {
   const prev = useRef<readonly ThreadRow[]>([]);
   const { thread } = view;
+  const conductor = thread?.channel_id === CONDUCTOR_CHANNEL;
+  const look = useChannelLook(CONDUCTOR_CHANNEL);
   const rows = useMemo(() => {
     if (!thread) return [];
     return threadRows(
@@ -38,12 +43,13 @@ function useThreadRows(view: ThreadView, disclosure: Disclosure): ThreadRow[] {
         artifacts: view.artifacts,
         children: view.children,
         atStart: !view.hasOlder,
-        conductor: thread.channel_id === 'conductor',
+        conductor,
+        conductorChannel: conductor && look.name ? { name: look.name, icon: look.icon, avatar_bg: look.avatarBg } : null,
         disclosure,
       },
       prev.current,
     ).rows;
-  }, [thread, view.rows, view.spans, view.artifacts, view.children, view.hasOlder, disclosure]);
+  }, [thread, conductor, look.name, look.icon, look.avatarBg, view.rows, view.spans, view.artifacts, view.children, view.hasOlder, disclosure]);
   useEffect(() => {
     prev.current = rows;
   }, [rows]);
@@ -100,13 +106,15 @@ export function ThreadBody({ view, live }: { view: ThreadView; live: ThreadLive 
         ListHeaderComponent={
           live ? (
             <View>
+              <CrewQuestions threadId={view.threadId} />
               {view.thread ? <NeedsCards thread={view.thread} pending={view.pending} blocked={view.blocked !== null} act={(action) => live.act(action)} /> : null}
               <PendingRows view={view} live={live} />
+              {view.thread ? <OpenItemsCard thread={view.thread} live={live} waiting={view.pending.length > 0} /> : null}
             </View>
           ) : undefined
         }
         ListFooterComponent={<OlderFooter hasOlder={view.hasOlder} loading={view.loadingOlder} empty={rows.length === 0} onLoad={() => void live?.loadOlder()} />}
-        ListEmptyComponent={view.status === 'ready' ? <Text style={[styles.meta, { color: colors.fg3 }]}>No messages yet.</Text> : undefined}
+        ListEmptyComponent={view.status === 'ready' ? <Text style={[styles.meta, styles.empty, { color: colors.fg3 }]}>No messages yet.</Text> : undefined}
       />
     </RowActionsContext.Provider>
   );
@@ -141,6 +149,10 @@ function OlderFooter({ hasOlder, loading, empty, onLoad }: { hasOlder: boolean; 
 const styles = StyleSheet.create({
   meta: {
     fontSize: fontSize.meta,
+  },
+  // The list is inverted, so a top margin here shows as the gap below the label, above the pending cards.
+  empty: {
+    marginTop: space.s6,
   },
   content: {
     paddingHorizontal: space.s9,

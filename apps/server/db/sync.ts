@@ -4,10 +4,12 @@ import { db, now, tx } from './connection.ts';
 /**
  * What the sync relay carries. Events, artifacts, automation runs, completions and trigger deliveries are keyed by their uid, a
  * result_read, a limit_stop and an assignment by their thread's id, a remote_command by its command id, the rest by id or key.
+ * A review_note is keyed by its id, an automation_file (a YAML in data/automations/) by its automation id, an
+ * mcp_client (an OAuth client that reached /mcp, mcp-clients.ts) by its client id.
  */
 export type SyncEntity =
   | 'channel' | 'folder' | 'thread' | 'event' | 'artifact' | 'automation_run' | 'kv' | 'completion' | 'result_read' | 'limit_stop'
-  | 'trigger_delivery' | 'remote_command' | 'assignment';
+  | 'trigger_delivery' | 'remote_command' | 'assignment' | 'review_note' | 'automation_file' | 'mcp_client';
 export type SyncOp = 'upsert' | 'delete';
 
 export interface OutboxRow {
@@ -25,7 +27,7 @@ export interface OutboxRow {
  * the newest result read, whenever the write was (db/repos/needs-you.ts). A limit_stop is a thread's limit stop
  * alone, apart from the row, so a write to either never undoes the other.
  */
-const LWW = new Set<SyncEntity>(['channel', 'folder', 'thread', 'kv', 'artifact', 'limit_stop']);
+const LWW = new Set<SyncEntity>(['channel', 'folder', 'thread', 'kv', 'artifact', 'limit_stop', 'review_note', 'automation_file']);
 /** kv keys that stay on this machine: the sync cursor, machine id, switches and path map. */
 export const localKey = (key: string) => key.startsWith('sync.');
 
@@ -79,10 +81,12 @@ function seed(machineId: string) {
   q('trigger_delivery', 'SELECT uid AS k FROM trigger_deliveries ORDER BY created_at, uid');
   q('remote_command', 'SELECT id AS k FROM remote_commands ORDER BY created_at, id');
   q('assignment', 'SELECT thread_id AS k FROM assignments ORDER BY at, thread_id');
+  q('review_note', 'SELECT id AS k FROM review_notes ORDER BY created_at, id');
   q('kv', `SELECT key AS k FROM kv WHERE key NOT LIKE 'sync.%' ORDER BY key`);
+  q('mcp_client', MCP_CLIENTS);
   db.prepare(
     `INSERT OR REPLACE INTO sync_meta (entity, entity_id, ts, machine_id)
-     SELECT entity, entity_id, ts, ? FROM sync_outbox WHERE entity IN ('channel', 'folder', 'thread', 'kv', 'artifact', 'limit_stop')`,
+     SELECT entity, entity_id, ts, ? FROM sync_outbox WHERE entity IN ('channel', 'folder', 'thread', 'kv', 'artifact', 'limit_stop', 'review_note')`,
   ).run(machineId);
 }
 
@@ -97,6 +101,13 @@ function seedFolders(machineId: string) {
   ).run(SEED_TS, machineId);
   const filed = db.prepare('SELECT id FROM threads WHERE folder_id IS NOT NULL ORDER BY created_at, rowid').all() as { id: string }[];
   for (const t of filed) record('thread', t.id);
+}
+
+const MCP_CLIENTS = 'SELECT id AS k FROM mcp_clients ORDER BY first_seen, id';
+
+/** MCP clients synced from this build on. A Mac that armed before then queues the ones it has once. Call it armed. */
+function seedMcpClients() {
+  db.prepare(`INSERT INTO sync_outbox (entity, entity_id, op, ts) SELECT 'mcp_client', k, 'upsert', ? FROM (${MCP_CLIENTS})`).run(now());
 }
 
 /** The same read as kv.get. Inlined so this module does not import kv, which records through here. */
@@ -123,6 +134,7 @@ export const outbox = {
       if (hardware && stored !== hardware) setLocal('sync.hardware_id', hardware);
       if (armedId && !(hardware && stored && stored !== hardware)) {
         if (!kvGet<boolean>('sync.folders_seeded')) seedFolders(armedId), setLocal('sync.folders_seeded', true);
+        if (!kvGet<boolean>('sync.mcp_clients_seeded')) seedMcpClients(), setLocal('sync.mcp_clients_seeded', true);
         return armedId;
       }
       const moved = !!armedId;
@@ -133,11 +145,15 @@ export const outbox = {
         // fill gaps over there, so nothing here overwrites what that Mac has; everything it has comes back here.
         setLocal('sync.cursor', 0);
         db.exec('DELETE FROM sync_outbox; DELETE FROM sync_deferred');
+        // The phone alert sender id (push-sender.ts pushSenderId) is that Mac's too: sharing it, either Mac would settle
+        // the other's alerts. This one makes its own on its next alert.
+        db.exec(`DELETE FROM kv WHERE key = 'sync.push_sender'`);
       }
       // A thread mid-run as sync is set up is this machine's run, and its row should say so.
       db.prepare(`UPDATE threads SET run_machine = ? WHERE status IN ('running','queued') AND run_machine IS NULL`).run(id);
       seed(id);
       setLocal('sync.folders_seeded', true);
+      setLocal('sync.mcp_clients_seeded', true);
       armedId = id;
       return id;
     });

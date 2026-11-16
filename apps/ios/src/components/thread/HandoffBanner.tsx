@@ -3,6 +3,7 @@ import { handoffBanner, mayTakeOver, takeoverShown } from '@omni/shared/thread-m
 import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Text } from '../../ui/Text';
+import { Icon } from '../../ui/Icon';
 
 import type { ThreadView } from '../../live/hub';
 import type { ThreadMachineControl } from '../../machine/hooks';
@@ -15,8 +16,8 @@ type MachineActions = Pick<ThreadMachineControl, 'ui' | 'cancel' | 'ask' | 'canc
 
 /**
  * Between the header and the transcript: the handoff while it is under way or went wrong (with Cancel on the machine
- * that gave the thread, or asked for it, until the other one takes it), one quiet line once it settled, and the Take
- * over note when another machine holds the thread and nothing is moving it.
+ * that gave the thread, or asked for it, until the other one takes it), one quiet line once it settled, and one
+ * compact line with Take over when another machine holds the thread and nothing is moving it.
  */
 export function HandoffBanner({ view, machine }: { view: ThreadView; machine: MachineActions }) {
   const { colors } = useOmniTheme();
@@ -51,13 +52,16 @@ export function HandoffBanner({ view, machine }: { view: ThreadView; machine: Ma
         </Card>
       ) : null}
       {takeover ? (
-        <Card tone="waiting" lead={<Glyph tone="waiting" />}>
-          <Text style={[styles.text, { color: colors.fg }]}>{takeoverNote(takeover)}</Text>
-          {takeover.refused ? <Text style={[styles.sub, { color: colors.fg3 }]}>{takeover.refused}</Text> : null}
-          <View style={styles.action}>
-            <Button label="Take over" disabled={!mayTakeOver(takeover, handoff)} onPress={machine.ask} />
+        <>
+          <View accessibilityLiveRegion="polite" style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}>
+            <Icon name="clock" size={16} color={colors.fg3} />
+            <Text accessibilityLabel={takeoverNote(takeover)} numberOfLines={1} style={[styles.pillText, { color: colors.fg }]}>
+              {takeover.running ? `Running on ${takeover.from.name}` : `Last ran on ${takeover.from.name}`}
+            </Text>
+            <Button label="Take over" size="compact" disabled={!mayTakeOver(takeover, handoff)} onPress={machine.ask} />
           </View>
-        </Card>
+          {takeover.refused ? <Text style={[styles.sub, styles.refused, { color: colors.fg3 }]}>{takeover.refused}</Text> : null}
+        </>
       ) : null}
     </View>
   );
@@ -79,11 +83,7 @@ function Card({ tone, lead, children }: { tone: 'working' | 'waiting' | 'alert';
 
 function Glyph({ tone }: { tone: 'waiting' | 'alert' | 'working' }) {
   const { colors } = useOmniTheme();
-  return (
-    <Text accessibilityElementsHidden importantForAccessibility="no" style={[styles.glyph, { color: tone === 'alert' ? colors.fg : colors.fg3 }]}>
-      {tone === 'alert' ? '⚠' : '◷'}
-    </Text>
-  );
+  return <Icon name={tone === 'alert' ? 'alert' : 'clock'} size={18} color={tone === 'alert' ? colors.fg : colors.fg3} />;
 }
 
 const styles = StyleSheet.create({
@@ -117,13 +117,28 @@ const styles = StyleSheet.create({
     lineHeight: Math.round(fontSize.body * lineHeight.body),
   },
   sub: {
-    fontSize: fontSize.body - 1,
-    lineHeight: Math.round((fontSize.body - 1) * lineHeight.body),
+    fontSize: fontSize.ui,
+    lineHeight: Math.round(fontSize.ui * lineHeight.body),
   },
   action: {
     alignSelf: 'flex-start',
   },
-  glyph: {
-    fontSize: 18,
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    paddingVertical: space.s2,
+    paddingLeft: space.s6,
+    paddingRight: space.s2,
+  },
+  pillText: {
+    flex: 1,
+    fontSize: fontSize.body,
+    lineHeight: 20,
+  },
+  refused: {
+    paddingHorizontal: space.s6,
   },
 });

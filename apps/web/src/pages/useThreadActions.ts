@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { api, errorText, type SendMode, type Thread } from '../api.ts';
-import { OPEN_PR_PROMPT } from '../components/thread/ThreadPR.tsx';
+import { useMarkDone } from '../done-confirm.tsx';
+import { useEffect, useRef, useState } from 'react';
+import { stepOf, type PRStep, type StepPrompts } from '@omni/shared/thread-glance.ts';
+import { api, errorText, type PendingMsg, type SendMode, type Thread } from '../api.ts';
 import { useApp } from '../store.tsx';
 
 /**
@@ -11,39 +12,78 @@ export function useThreadActions({
   id,
   thread,
   slotBusy,
+  underway,
+  parked,
+  prompts,
   applyThread,
+  setQueued,
   setActionError,
   pin,
 }: {
   id: string;
   thread: Thread | null;
   slotBusy: boolean;
+  /** The step the thread itself shows underway (`stepUnderway`), which takes over from `sending` once it catches up. */
+  underway: PRStep | null;
+  /** A step prompt that was parked before the agent got it (`stepParked`). Asking for that step again resumes it. */
+  parked: { step: PRStep; uuid: string } | null;
+  /** The channel's step prompts (`stepPrompts`), so its own wording reads as the step too. */
+  prompts: StepPrompts;
   applyThread: (t: Thread, replace?: boolean) => void;
+  setQueued: (pending: PendingMsg[]) => void;
   setActionError: (e: string | null) => void;
   pin: () => void;
 }) {
-  const { reloadChannels, setDone } = useApp();
-  // The step prompt being sent, so its button turns to working at the click, before the thread shows the message.
+  const { reloadChannels } = useApp();
+  const markDone = useMarkDone();
+  // The step prompt sent from a button, so the button reads as working from the click to the end of the turn it starts.
+  // The thread's own state (`underway`) blinks off in between: the POST returns before the stream has the message, and
+  // the stream drops the pending row a frame before the recorded message arrives. So it holds until the thread has
+  // shown the step and then gone idle.
   const [sending, setSending] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const seen = useRef(false);
+  useEffect(() => {
+    if (!sending) return;
+    if (underway !== null && underway === stepOf(sending, prompts)) seen.current = true;
+    else if (seen.current && !slotBusy) setSending(null);
+  }, [sending, underway, slotBusy, prompts]);
+  // In case the thread never shows it (another client cleared the queue, the turn ended between two renders).
+  useEffect(() => {
+    if (!sent) return;
+    const t = setTimeout(() => {
+      if (!seen.current) setSending(null);
+      setSent(false);
+    }, 15_000);
+    return () => clearTimeout(t);
+  }, [sent]);
   const [restoring, setRestoring] = useState(false);
 
   const ask = async (prompt: string) => {
+    seen.current = false;
     setSending(prompt);
+    setSent(false);
     setActionError(null);
     try {
-      // Mid-turn, wait for the work to finish instead of steering it to commit halfway.
-      const mode: SendMode | undefined = slotBusy ? 'queue' : undefined;
-      const t = await api.post<Thread>(`/threads/${encodeURIComponent(id)}/messages`, { prompt, mode });
-      applyThread(t, true);
+      if (parked && parked.step === stepOf(prompt, prompts)) {
+        // The same prompt waits parked: send that one, so the thread does not end up asking twice.
+        const res = await api.post<{ thread: Thread; pending: PendingMsg[] }>(`/threads/${encodeURIComponent(id)}/requests/resume`, { ids: [parked.uuid] });
+        applyThread(res.thread);
+        setQueued(res.pending);
+      } else {
+        // Mid-turn, wait for the work to finish instead of steering it to commit halfway.
+        const mode: SendMode | undefined = slotBusy ? 'queue' : undefined;
+        applyThread(await api.post<Thread>(`/threads/${encodeURIComponent(id)}/messages`, { prompt, mode }), true);
+      }
       pin();
+      setSent(true);
     } catch (e) {
       setActionError(errorText(e));
-    } finally {
       setSending(null);
     }
   };
 
-  const openPR = () => ask(OPEN_PR_PROMPT);
+  const openPR = () => ask(prompts.open);
 
   // An archived thread opened from its channel's Archived list or a search: put it back in the lists.
   const restore = async () => {
@@ -63,7 +103,8 @@ export function useThreadActions({
   const toggleDone = async () => {
     setActionError(null);
     try {
-      applyThread(await setDone(thread!.id, !thread?.done_at), true);
+      const next = await markDone(thread!, !thread?.done_at);
+      if (next) applyThread(next, true);
     } catch (e) {
       setActionError(errorText(e));
     }

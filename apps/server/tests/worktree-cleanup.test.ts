@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { CleanupRun, CleanupState } from '@omni/shared/worktree-cleanup.ts';
 import type { WorktreeScan } from '@omni/shared/worktree-inventory.ts';
 import { startRunner } from './runner-boot.ts';
@@ -12,7 +12,8 @@ import { sleep } from './support.ts';
 // keeps a worktree: changes after the review, a turn, message or terminal that comes in during the checks, held
 // input, and anything the review did not list. A merged branch counts only when origin's default branch has it.
 
-const r = await startRunner({ OMNI_KEEPALIVE_SECONDS: '0' });
+// Teardown actions get a short limit, so the timeout case does not wait minutes.
+const r = await startRunner({ OMNI_KEEPALIVE_SECONDS: '0', OMNI_TEARDOWN_TIMEOUT_MS: '1500' });
 // Each test makes a few worktree threads in real repos, which takes seconds when the whole suite runs at once.
 const T = { timeout: 60_000 };
 const { app } = await import('../app.ts');
@@ -23,7 +24,7 @@ const { cleanupState, retentionPass, setRetentionPolicy, startCleanup } = await 
 const { withWorkspace, keptRef, trashOf } = await import('../workspace.ts');
 const { closeTerminal, openTerminal } = await import('../terminal.ts');
 const { runsHere } = await import('../runner/state.ts');
-const { startRun, stopRun } = await import('../actions.ts');
+const { runsFor, startRun, stopRun } = await import('../actions.ts');
 const { channelActions } = await import('../db.ts');
 
 const git = (cwd: string, ...args: string[]) =>
@@ -128,6 +129,30 @@ describe('cleanup: what it removes', T, () => {
     expect((await view()).scan!.items.map((i) => i.id)).not.toContain(t.id);
   });
 
+  it("removes a worktree holding copies of main's harness config and a server run's data folder, and keeps main's own copy", async () => {
+    const main = repo();
+    const { t, wt } = await worktreeThread(main);
+    // main tracks harness config the worktree never had; an older copy was put in it afterwards.
+    mkdirSync(join(main, '.codex'));
+    writeFileSync(join(main, '.codex', 'hooks.json'), '{"v":2}');
+    writeFileSync(join(main, 'AGENTS.md'), 'v2');
+    git(main, 'add', '.');
+    git(main, 'commit', '-q', '-m', 'harness config');
+    git(main, 'push', '-q', 'origin', 'main');
+    mkdirSync(join(wt, '.codex'));
+    writeFileSync(join(wt, '.codex', 'hooks.json'), '{"v":1}');
+    writeFileSync(join(wt, 'AGENTS.md'), 'v1');
+    appendFileSync(join(main, '.git', 'info', 'exclude'), 'data/\n');
+    mkdirSync(join(wt, 'data', 'threads'), { recursive: true });
+    writeFileSync(join(wt, 'data', 'omni.db'), 'x');
+    r.db.threads.update(t.id, { archived: 1 });
+
+    expect(outcomes(await cleanUp([t.id]))).toEqual({ [t.id]: 'removed' });
+    expect(existsSync(wt)).toBe(false);
+    expect(existsSync(trashOf(wt))).toBe(false);
+    expect(readFileSync(join(main, '.codex', 'hooks.json'), 'utf8')).toBe('{"v":2}');
+  });
+
   it('checks the branch out again on the next message, and makes the branch again from the kept commit when it is gone', async () => {
     const { t, repo: main, wt } = await worktreeThread();
     const head = commit(wt, 'kept.txt');
@@ -207,7 +232,12 @@ describe('cleanup: what it removes', T, () => {
     git(main, 'update-ref', '-d', keptRef(t.id));
     const res = await app.request(`/api/threads/${t.id}/messages`, json('POST', { prompt: 'again' }));
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { error: string }).error).toMatch(new RegExp(`its branch ${t.branch} is gone from .* Make it again at the commit`));
+    // The plain words first; git's reason, with the command to make the branch again, on a line of its own.
+    const body = (await res.json()) as { error: string; detail?: string; lives_on?: unknown };
+    expect(body.error).toBe("This thread's worktree is not on this machine, and Omni could not make it again.");
+    expect(body.detail).toMatch(new RegExp(`^Its branch ${t.branch} is gone from .* Make it again at the commit`));
+    // No other machine holds it, so there is nowhere else it lives.
+    expect(body.lives_on).toBeUndefined();
   });
 
   it('checks the worktree out again for a turn Omni starts itself, which skips the message path', async () => {
@@ -424,13 +454,13 @@ describe('cleanup: what it keeps', T, () => {
   it('keeps it while a channel action runs in it, and an action started during a removal checks the branch out again', async () => {
     const { t, wt } = await worktreeThread();
     r.db.threads.update(t.id, { archived: 1 });
-    const serve = channelActions.create(t.channel_id, { name: 'Serve', command: 'sleep 30', secrets: [], port: null, setup: null });
+    const serve = channelActions.create(t.channel_id, { name: 'Serve', command: 'sleep 30', secrets: [], port: null, setup: null, teardown: false });
     const { run: serving } = await startRun(r.thread(t.id), serve);
     await scanned();
     expect(currentWorktreeScan()!.items.find((i) => i.id === t.id)!.reasons.map((x) => x.code)).toContain('action');
     await stopRun(serving.id);
 
-    const check = channelActions.create(t.channel_id, { name: 'Check', command: 'git branch --show-current', secrets: [], port: null, setup: null });
+    const check = channelActions.create(t.channel_id, { name: 'Check', command: 'git branch --show-current', secrets: [], port: null, setup: null, teardown: false });
     const late: ReturnType<typeof startRun>[] = [];
     const run = await cleanUp([t.id], { between: (id) => void late.push(startRun(r.thread(id), check)) });
     expect(outcomes(run)).toEqual({ [t.id]: 'removed' });
@@ -442,6 +472,65 @@ describe('cleanup: what it keeps', T, () => {
   });
 });
 
+describe('teardown: the channel action run before removal', T, () => {
+  /** An archived worktree thread whose channel's teardown action runs `command`. */
+  async function withTeardown(command: string) {
+    const x = await worktreeThread();
+    r.db.threads.update(x.t.id, { archived: 1 });
+    const action = channelActions.create(x.t.channel_id, { name: 'Delete preview', command, secrets: [], port: null, setup: null, teardown: true });
+    return { ...x, action };
+  }
+  const teardownRun = (threadId: string, actionId: string) => runsFor(threadId).find((x) => x.action_id === actionId);
+
+  it('runs in the worktree, with the action environment, before a reviewed cleanup removes it', async () => {
+    const seen = join(r.tmp, `teardown-${n + 1}.txt`);
+    const x = await withTeardown(`test -f README.md && echo "$PWD|$OMNI_THREAD_ID|$OMNI_BRANCH" > '${seen}'`);
+    const run = await cleanUp([x.t.id]);
+    expect(outcomes(run)).toEqual({ [x.t.id]: 'removed' });
+    expect(run.items[0].errors).toEqual([]);
+    expect(existsSync(x.wt)).toBe(false);
+    const [cwd, thread, branch] = readFileSync(seen, 'utf8').trim().split('|');
+    const at = (p: string) => join(realpathSync(dirname(p)), basename(p));
+    expect(at(cwd)).toBe(at(x.wt));
+    expect([thread, branch]).toEqual([x.t.id, x.t.branch]);
+    expect(teardownRun(x.t.id, x.action.id)).toMatchObject({ state: 'succeeded', name: 'Delete preview' });
+  });
+
+  it('notes a failed teardown on the thread and the result, and removes the worktree anyway', async () => {
+    const x = await withTeardown('echo "theme not found" >&2; exit 3');
+    const run = await cleanUp([x.t.id]);
+    expect(outcomes(run)).toEqual({ [x.t.id]: 'removed' });
+    expect(run.items[0].errors.join(' ')).toMatch(/"Delete preview" failed with exit code 3/);
+    expect(existsSync(x.wt)).toBe(false);
+    expect(teardownRun(x.t.id, x.action.id)).toMatchObject({ state: 'failed', exit_code: 3, output: expect.stringContaining('theme not found') });
+  });
+
+  it('stops a teardown that runs past the limit and removes the worktree anyway', async () => {
+    const x = await withTeardown('echo stopping; sleep 30');
+    const run = await cleanUp([x.t.id]);
+    expect(outcomes(run)).toEqual({ [x.t.id]: 'removed' });
+    expect(run.items[0].errors.join(' ')).toMatch(/ran past 2 seconds and was stopped/);
+    expect(existsSync(x.wt)).toBe(false);
+    expect(teardownRun(x.t.id, x.action.id)).toMatchObject({ state: 'stopped', error: expect.stringMatching(/ran past/) });
+  });
+
+  it('runs before the retention pass removes a worktree too', async () => {
+    const seen = join(r.tmp, `teardown-retention-${n + 1}.txt`);
+    const x = await withTeardown(`echo "$OMNI_THREAD_ID" > '${seen}'`);
+    r.db.threads.update(x.t.id, { updated_at: daysAgo(20) });
+    setRetentionPolicy({ enabled: true, idleDays: 10 });
+    try {
+      await scanned();
+      const run = (await retentionPass())!;
+      expect(run.items.find((i) => i.id === x.t.id)).toMatchObject({ outcome: 'removed', errors: [] });
+      expect(existsSync(x.wt)).toBe(false);
+      expect(readFileSync(seen, 'utf8').trim()).toBe(x.t.id);
+    } finally {
+      setRetentionPolicy({ enabled: false, idleDays: 14 });
+    }
+  });
+});
+
 describe('retention settings', T, () => {
   it('saves the policy in this Mac\'s omni.config.json, rejects a bad one, and records nothing for sync', async () => {
     r.db.outbox.arm();
@@ -450,7 +539,7 @@ describe('retention settings', T, () => {
     const res = await app.request('/api/worktrees/retention', json('PUT', { enabled: true, idleDays: 30 }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as View).cleanup.policy).toEqual({ enabled: true, idleDays: 30 });
-    expect(JSON.parse(readFileSync(configPath(), 'utf8')).worktrees).toEqual({ retention: { enabled: true, idleDays: 30 } });
+    expect(JSON.parse(readFileSync(configPath(), 'utf8')).worktrees.retention).toEqual({ enabled: true, idleDays: 30 });
     expect((await app.request('/api/worktrees/retention', json('PUT', { idleDays: 0 }))).status).toBe(400);
     expect(queued()).toBe(before);
     await app.request('/api/worktrees/retention', json('PUT', { enabled: false }));

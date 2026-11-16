@@ -1,26 +1,29 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { api, errorText, type Artifact, type Thread } from '../api.ts';
 import { harnessLabel } from '../components/brand.tsx';
-import { ASKING_LABEL } from '../components/thread/QuestionCard.tsx';
 import { CrewQuestions } from '../components/thread/CrewQuestions.tsx';
-import { OPEN_PR_PROMPT, useThreadPR } from '../components/thread/ThreadPR.tsx';
+import { OpenItemsCard } from '../components/thread/OpenItemsCard.tsx';
+import { useThreadPR } from '../components/thread/ThreadPR.tsx';
 import { SetupCard } from '../components/thread/SetupCard.tsx';
 import { useTicket } from '../components/thread/RouteCard.tsx';
 import { RoutePanel, useTicketPanels } from '../components/thread/TicketPanels.tsx';
 import { StagePillButton } from '../components/StagePill.tsx';
 import { DraftPanel } from '../components/thread/DraftPanel.tsx';
 import { StaleSessionCard } from '../components/thread/StaleSessionCard.tsx';
+import { GoalLine } from '../components/thread/GoalLine.tsx';
 import { HistoryCtx, HistoryEdgeRow } from '../components/thread/HistoryEdgeRow.tsx';
 import { historyEdges } from '@omni/shared/history.ts';
+import { CONDUCTOR_CHANNEL } from '@omni/shared/channel-icon.ts';
 import { HandoffCard, type HandoffAnswer } from '../components/thread/Handoff.tsx';
 import { TakeoverConfirm } from '../components/thread/Takeover.tsx';
 import { useThreadMachine } from '../components/composer/MachineChip.tsx';
+import { HERE } from '@omni/shared/thread-machine.ts';
 import { MoContinueLinks } from '../components/ContinueLinks.tsx';
 import { ErrorNote, StatusPill } from '../components/ui.tsx';
 import { plural } from '../format.ts';
 import { reasonOf } from '../needs-you.ts';
-import { href } from '../router.ts';
-import { useApp, useNow } from '../store.tsx';
+import { href, type ThreadView } from '../router.ts';
+import { useApp, useHereName, useNow } from '../store.tsx';
 import { needsCard } from './activity.ts';
 import { MoComposer, type ComposerChip } from './MoComposer.tsx';
 import { NeedsCardView } from './NeedsCard.tsx';
@@ -32,17 +35,23 @@ import { RunOnSheet } from './RunOnSheet.tsx';
 import { Turn, useBranchChanges, type TurnCtx } from './ThreadTurn.tsx';
 import { useOpenOnNewestTurn } from './useOpenOnNewestTurn.ts';
 import { threadView } from '@omni/shared/thread-view.ts';
-import { crewLine, prLine } from '@omni/shared/thread-glance.ts';
-import { statusLabel } from '../status-line.ts';
-import { shownStatus } from '@omni/shared/delegate-count.ts';
+import { crewLine, prLine, prOffered, stepPrompts, stepUnderway } from '@omni/shared/thread-glance.ts';
+import { ThreadQuickCard } from '../components/thread/ThreadQuickCard.tsx';
+import type { PanelTab } from '../pages/useThreadSession.ts';
+import { statusLabel } from '@omni/shared/status-line.ts';
+import { STATUS, asksForYou, markOf, turnPhase, type Glyph } from '@omni/shared/status.ts';
+import { threadPill } from '../components/thread/thread-state.ts';
 import { shownDraft } from '../ticket-route.ts';
 
 /** The thread: the outcome first, steps folded behind a row, one secondary surface at a time from the menu. */
 export function ThreadScreen() {
   const shell = useShell();
   const s = useThread();
-  const { thread, parent, children, events, history, revealTarget, clearReveal, files, queued, setQueued, applyThread, slotBusy, interrupt, interrupting, notFound, error, actionError, load, ready, handoff, setHandoff, takeover } = s;
+  const { thread, parent, children, events, history, revealTarget, clearReveal, files, shots, queued, listed, setQueued, applyThread, slotBusy, interrupt, interrupting, notFound, error, actionError, load, ready, handoff, setHandoff, takeover, init, warm, crew: crewArtifacts } = s;
   const { needsYou, channel } = useApp();
+  const hereName = useHereName();
+  // The phone has no room beside the transcript, so the quick card is a popover off the header, closed on open.
+  const [quick, setQuick] = useState(false);
   const now = useNow(30_000);
   const [menu, setMenu] = useState(false);
   const [machineSheet, setMachineSheet] = useState(false);
@@ -50,11 +59,18 @@ export function ThreadScreen() {
   const view = useMemo(() => (thread ? threadView({ events, spans, thread, artifacts: files, children }) : null), [events, spans, thread, files, children]);
   const edges = useMemo(() => historyEdges({ spans }, view?.turns.map((t) => t.key) ?? []), [spans, view]);
   const status = useMemo(() => (thread?.status === 'running' ? statusLabel(events) : null), [events, thread?.status]);
+  const turn = useMemo(() => (thread?.status === 'running' ? turnPhase(events) : null), [events, thread?.status]);
   const changes = useBranchChanges(thread, slotBusy);
   const [ticket, setTicket] = useTicket(thread, events.length);
   const panels = useTicketPanels(ticket);
   const headerRef = useRef<HTMLDivElement>(null);
-  const pr = useThreadPR(thread, slotBusy, true);
+  const [pr] = useThreadPR(thread, slotBusy, true);
+  // The channel's own step prompts (Channel Settings), else the built-in ones.
+  const ownChannel = thread ? channel(thread.channel_id) : undefined;
+  const prompts = useMemo(() => stepPrompts(ownChannel), [ownChannel]);
+  const step = useMemo(() => stepUnderway(events, queued, slotBusy, prompts), [events, queued, slotBusy, prompts]);
+  const artifactCount = files.length + shots.length + crewArtifacts.files.length + crewArtifacts.shots.length;
+  const workCwd = init?.cwd || thread?.cwd || '';
   const { scroll, newest } = useOpenOnNewestTurn({ view, history, ready, revealTarget, clearReveal });
   const handedOff = (a: HandoffAnswer) => {
     applyThread(a.thread, true);
@@ -91,7 +107,7 @@ export function ThreadScreen() {
 
   const openPR = async () => {
     try {
-      applyThread(await api.post<Thread>(`/threads/${encodeURIComponent(thread.id)}/messages`, { prompt: OPEN_PR_PROMPT }), true);
+      applyThread(await api.post<Thread>(`/threads/${encodeURIComponent(thread.id)}/messages`, { prompt: prompts.open }), true);
       shell.toast(`Asked ${theirs} to open a PR`);
     } catch (e) {
       shell.toast(errorText(e));
@@ -101,11 +117,15 @@ export function ThreadScreen() {
   const chips: ComposerChip[] = [];
   const held = machine.machine;
   if (held) chips.push({ label: `On ${held.rows.find((r) => r.value === held.value)?.label ?? ''}`, icon: 'monitor', onClick: () => setMachineSheet(true), disabled: machine.sending });
+  const openChip: ComposerChip = { label: 'Open PR', icon: 'pr', onClick: () => void openPR() };
+  // The agent just asked whether to open a PR: answering yes sits next to the Machine chip.
+  const offered = prOffered(events, !slotBusy && !queued.length, pr?.pr);
+  if (offered) chips.push(openChip);
   if (report) chips.push({ label: 'Open report', icon: 'file', onClick: () => viewer(report) });
   if (pr?.pr) chips.push({ label: `Review #${pr.pr.number}`, icon: 'pr', diff: [pr.pr.additions, pr.pr.deletions], onClick: () => shell.open(href.threadView(thread.id, 'pr')) });
   else if (changes?.files.length) {
     chips.push({ label: slotBusy ? 'Changes so far' : 'Review changes', icon: 'diff', diff: [changes.add, changes.del], onClick: () => shell.open(href.threadView(thread.id, 'changes')) });
-    if (!slotBusy) chips.push({ label: 'Open PR', icon: 'pr', onClick: () => void openPR() });
+    if (!slotBusy && !offered) chips.push(openChip);
   }
   if (!slotBusy && !conductor) chips.push({ label: 'Ask the Conductor', icon: 'delegate', onClick: () => shell.sheet({ name: 'new' }) });
   if (!conductor) chips.push({ label: 'New thread', icon: 'plus', onClick: () => shell.sheet({ name: 'new', channel: thread.channel_id }) });
@@ -113,36 +133,83 @@ export function ThreadScreen() {
   const sub = conductor ? `Conductor · ${plural(crew.length, 'crew thread')}` : [`#${ch?.name ?? thread.channel_id}`, thread.role, harnessLabel(thread.harness)].filter(Boolean).join(' · ');
   // A Conductor thread needs Ben while any thread it delegated does.
   const kidIds = new Set(crew.map((c) => c.id));
-  const needs = card?.glyph === 'needs' || (conductor && !!needsYou?.items.some((i) => kidIds.has(i.thread.id) && reasonOf(i).glyph === 'needs'));
-  const ctx: TurnCtx = { thread, view, files, history, conductor, crew, ch, changes, pr, now, shell, status };
+  const needs: Glyph | null = card && asksForYou(card.glyph) ? card.glyph : conductor && needsYou?.items.some((i) => kidIds.has(i.thread.id) && asksForYou(reasonOf(i).glyph)) ? 'needs' : null;
+  const reconnecting = !s.live && ready;
+  const own = threadPill(thread, { asking: view.asking, reconnecting, now, turn, need: item, pr: pr?.pr });
+  const pill = needs && own.glyph !== needs && !reconnecting && !view.asking ? { glyph: needs, label: STATUS[needs].label, mark: needs === 'needs' ? ('crew_question' as const) : markOf(needs) } : own;
+  const conductorChannel = conductor ? channel(CONDUCTOR_CHANNEL) : undefined;
+  const ctx: TurnCtx = { thread, view, files, history, conductor, conductorChannel, crew, ch, changes, pr, now, shell, status, turn };
+
+  const openFromCard = (tab: PanelTab) => {
+    setQuick(false);
+    const map: Record<PanelTab, ThreadView> = {
+      details: 'details',
+      prs: 'pr',
+      changes: 'changes',
+      browser: 'browser',
+      terminal: 'terminal',
+      actions: 'actions',
+      artifacts: 'details',
+      web: 'browser',
+    };
+    shell.open(href.threadView(thread.id, map[tab]));
+  };
 
   return (
     <>
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onClose={panels.closeRoute} header={headerRef} mobile />
-        <div ref={headerRef} className="relative z-[8] shrink-0 bg-bg">
-          <MoHeader
-            onBack={shell.back}
-            title={
-              ticket ? (
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="min-w-0 truncate">{thread.title || 'Untitled'}</span>
-                  <StagePillButton ticket={ticket} expanded={panels.open === 'route'} onClick={() => panels.toggle('route')} />
-                </span>
-              ) : (
-                thread.title || 'Untitled'
-              )
-            }
-            sub={parent ? <span>{sub} · <a href={href.thread(parent.id)} className="text-fg-2 hover:text-fg" title={`Delegated from ${parent.title}`}>Parent: {parent.title}</a></span> : sub}
-            right={
-              <>
-                <StatusPill status={view.asking || needs ? 'needs' : shownStatus(thread)} label={view.asking ? ASKING_LABEL : needs ? 'Needs you' : undefined} />
-                <MoRound icon="more" label="Thread options" onClick={() => setMenu(true)} />
-              </>
-            }
-          />
-        </div>
-        <div ref={scroll} className="mo-scroll min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 [overflow-anchor:none]">
+      <RoutePanel ticket={ticket} onTicket={setTicket} open={panels.open === 'route'} onClose={panels.closeRoute} header={headerRef} mobile />
+      <div ref={headerRef} className="relative z-[8] shrink-0 bg-bg">
+      <MoHeader
+        onBack={shell.back}
+        title={
+          ticket ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate">{thread.title || 'Untitled'}</span>
+              <StagePillButton ticket={ticket} expanded={panels.open === 'route'} onClick={() => panels.toggle('route')} />
+            </span>
+          ) : (
+            thread.title || 'Untitled'
+          )
+        }
+        sub={parent ? <span>{sub} · <a href={href.thread(parent.id)} className="text-fg-2 hover:text-fg" title={`Delegated from ${parent.title}`}>Parent: {parent.title}</a></span> : sub}
+        right={
+          <>
+            <StatusPill mark={pill.mark} label={pill.label} />
+            <MoRound icon="panel" label={quick ? 'Hide quick actions' : 'Show quick actions'} ink={quick} onClick={() => setQuick((v) => !v)} />
+            <MoRound icon="more" label="Thread options" onClick={() => setMenu(true)} />
+          </>
+        }
+      />
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {quick && (
+          <>
+            <button type="button" aria-label="Close quick actions" tabIndex={-1} className="absolute inset-0 z-10 cursor-default" onClick={() => setQuick(false)} />
+            <div className="pop-in absolute top-2 right-2 z-20 w-[17rem] max-w-[calc(100%-1rem)]">
+              <ThreadQuickCard
+                thread={thread}
+                init={init}
+                warm={warm}
+                slotBusy={slotBusy}
+                prs={pr}
+                step={step}
+                artifactCount={artifactCount}
+                machineName={hereName}
+                cwd={workCwd}
+                asking={view.asking}
+                turn={turn}
+                reconnecting={reconnecting}
+                onOpen={openFromCard}
+                onOpenPR={(c, n) => {
+                  setQuick(false);
+                  shell.open(href.pr(c, n));
+                }}
+              />
+            </div>
+          </>
+        )}
+        <div ref={scroll} className="mo-scroll h-full min-h-0 overflow-y-auto px-4 pt-2 pb-4 [overflow-anchor:none]">
           <HistoryCtx.Provider value={history}>
             <div className="flex flex-col gap-4">
               <MoContinueLinks links={s.links} onOpen={(id) => shell.open(href.thread(id))} />
@@ -159,6 +226,7 @@ export function ThreadScreen() {
                 );
               })}
               {edges.get(-1) && <HistoryEdgeRow edge={edges.get(-1)!} history={history} touch />}
+              <GoalLine thread={thread} running={thread.status === 'running'} mobile onSent={(t) => applyThread(t, true)} />
               <CrewQuestions threadId={thread.id} touch onOpen={(id) => shell.open(href.thread(id))} />
               <HandoffCard thread={thread} handoff={handoff} mobile onChanged={handedOff} />
               {!view.turns.length && !thread.setup && <MoEmpty>Nothing here yet.</MoEmpty>}
@@ -186,21 +254,33 @@ export function ThreadScreen() {
                     setQueued(r.pending);
                   }} />}
               {queued.length > 0 && <Pending thread={thread} items={queued} onPending={setQueued} />}
-              <Sending threadId={thread.id} pending={queued} />
+              <Sending threadId={thread.id} pending={listed} />
+              {!queued.length && (
+                <OpenItemsCard
+                  thread={thread}
+                  mobile
+                  onThread={(t, reply) => applyThread(t, reply)}
+                  onSpawn={(prompt) => shell.sheet({ name: 'new', channel: thread.channel_id, prompt })}
+                />
+              )}
               {actionError && <ErrorNote>{actionError}</ErrorNote>}
             </div>
           </HistoryCtx.Provider>
         </div>
       </div>
+      </div>
       <MoComposer
         thread={thread}
         chips={chips}
-        // Nothing runs while the worktree is prepared, so there is nothing to stop.
-        stop={slotBusy && !thread.setup ? { busy: interrupting, run: () => void interrupt() } : null}
-        placeholder={(steers) => (conductor ? 'Reply to the Conductor' : !slotBusy ? 'Follow up' : steers ? `Steer ${theirs}` : 'Queue for after this turn')}
+        // Nothing runs while the worktree is prepared, so there is nothing to stop. A pending question waits on a reply,
+        // which steers in as the answer, so the box sends rather than stops.
+        stop={slotBusy && !thread.setup && !view.asking ? { busy: interrupting, run: () => void interrupt() } : null}
+        placeholder={(steers) => (conductor ? 'Reply to the Conductor' : !slotBusy ? 'Follow up' : view.asking && steers ? 'Reply' : steers ? `Steer ${theirs}` : 'Queue for after this turn')}
         onSent={(t) => applyThread(t, true)}
         onSwitched={(t) => applyThread(t)}
         onFork={() => shell.sheet({ name: 'continue', source: thread })}
+        takeover={takeover}
+        onTakeOver={() => void machine.pick(HERE)}
       />
       <DraftPanel threadId={thread.id} draft={shownDraft(ticket, thread)} ticketRef={ticket?.ref} open={panels.open === 'draft'} onToggle={() => panels.toggle('draft')} onClose={panels.closeDraft} mobile />
       {menu && (

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { apiToken } from '../../api-token.ts';
 import { config, paths, artifactsDir, memoryDir, threadDir } from '../../config.ts';
 import type { Thread } from '../../db.ts';
-import { DELEGATE_ONLY_DENIED } from '../../crew.ts';
+import { DELEGATE_ONLY_DENIED, type CrewRole } from '../../crew.ts';
 import { ASK_TIMEOUT_SEC } from '../../sandbox.ts';
 import { extraWorktreeDirs } from '../../extra-repos.ts';
 import { parseEvent, LineSplitter } from '../../stream.ts';
@@ -16,9 +16,11 @@ import { describeAttachments, inlinable, messageContent, type Attachment } from 
 import { harnessEnv } from '../env-guard.ts';
 import { processSession } from '../session.ts';
 import { normalizeClaudeCommands } from './commands.ts';
+import { syncClaudeLoginBeforeSpawn } from './login-sync.ts';
 import { fromClaudeContext, type ContextUsage } from '@omni/shared/context-meter.ts';
 import { CAPABILITIES } from '../types.ts';
 import { CLAUDE_ALIASES } from '../catalog.ts';
+import { AUTO } from '../auto.ts';
 import type { AdapterCallbacks, AdapterContext, ControlReply, HarnessAdapter, HarnessSession } from '../adapter.ts';
 
 /** Omni's own `initialize` request, whose answer lists the process's commands. */
@@ -102,6 +104,16 @@ export function compactEnv(model: string): Record<string, string> {
   return window ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(window) } : {};
 }
 
+/**
+ * The --model a thread runs on: its own, else its role's, else Omni's default. Auto is never one: Omni resolves it when
+ * the thread is made (harness/resolve.ts), and the CLI refuses "auto". A thread that names Claude Code over a role whose
+ * default is Auto, or a role set for another harness, gets the default model instead.
+ */
+export function claudeModel(threadModel: string | null | undefined, role: Pick<CrewRole, 'harness' | 'model'> | undefined): string {
+  const roleModel = !role?.harness || role.harness === 'claude-code' ? role?.model : undefined;
+  return [threadModel, roleModel].find((m) => m && m !== AUTO) || config.defaultModel;
+}
+
 // A run killed before its result event may still have written the session file.
 const sessionOnDisk = (t: Thread) => existsSync(sessionFile(t));
 
@@ -115,7 +127,7 @@ export const claudeAdapter: HarnessAdapter = {
   spawn(ctx: AdapterContext, cb: AdapterCallbacks): HarnessSession {
     const { thread, mcpFile, secretEnv, systemPrompt } = ctx;
     const resume = ctx.resume || sessionOnDisk(thread);
-    const model = thread.model || ctx.role?.model || config.defaultModel;
+    const model = claudeModel(thread.model, ctx.role);
 
     const args = [
       '-p',
@@ -140,6 +152,8 @@ export const claudeAdapter: HarnessAdapter = {
     for (const dir of modDirs()) args.push('--plugin-dir', dir);
     args.push(resume ? '--resume' : '--session-id', thread.session_id);
 
+    // A login made over ssh lands in the file, not the Keychain this process reads (login-sync.ts).
+    syncClaudeLoginBeforeSpawn();
     const child = spawn(config.claudeBin, args, {
       cwd: thread.cwd,
       env: harnessEnv('claude-code', {

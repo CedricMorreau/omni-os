@@ -1,4 +1,5 @@
 import type { ChannelWithRunning, NeedsYou, ThreadStub } from '@omni/client-core';
+import { statusLabel } from '@omni/shared/status.ts';
 
 type ConductorHandoff = NonNullable<ChannelWithRunning['handoffs']>[number];
 
@@ -80,13 +81,6 @@ export interface HandoffGroup {
   running: number;
 }
 
-const STATUS_LABEL: Partial<Record<ThreadStub['status'], string>> = {
-  queued: 'Queued',
-  running: 'Running',
-  failed: 'Failed',
-  stopped: 'Stopped',
-};
-
 /** Short relative time: "now", "5m", "3h", "2d". Clocks past a week show the date. */
 export function shortAgo(iso: string, now: number): string {
   const t = Date.parse(iso);
@@ -105,7 +99,7 @@ export function threadRow(t: ThreadStub, now: number): ThreadRow {
     title: t.title || 'Untitled',
     status: t.status,
     busy: t.status === 'running' || t.status === 'queued',
-    statusLabel: STATUS_LABEL[t.status] ?? null,
+    statusLabel: t.status === 'done' || t.status === 'imported' ? null : statusLabel(t.status),
     ago: shortAgo(t.updated_at ?? t.created_at, now),
     pinned: !!t.pinned_at,
     target: targetOfStub(t),
@@ -153,8 +147,16 @@ function handoffGroup(group: ConductorHandoff, channelName: (id: string) => stri
  * `channelName` names the channels a handoff's children run in. The Conductor's delegated threads nest under their
  * parent and leave the list, and a parent with a running child counts as active even when it finished itself, as on
  * phone web.
+ *
+ * `threads`, once loaded, is the channel's own paged list (GET /channels/:id/threads?paged=1): every thread, each in its
+ * folder. Until then the sidebar previews stand in, which stop at a few per list.
  */
-export function channelThreads(channel: ChannelWithRunning, now: number, channelName: (id: string) => string = (id) => id): ChannelThreads {
+export function channelThreads(
+  channel: ChannelWithRunning,
+  now: number,
+  channelName: (id: string) => string = (id) => id,
+  threads?: readonly ThreadStub[],
+): ChannelThreads {
   const handoffs = (channel.id === 'conductor' ? channel.handoffs ?? [] : []).filter((g) => g.children.length > 0);
   const groups = new Map(handoffs.map((g) => [g.parent.id, handoffGroup(g, channelName)]));
   const seen = new Set(handoffs.flatMap((g) => g.children.map((c) => c.id)));
@@ -169,8 +171,19 @@ export function channelThreads(channel: ChannelWithRunning, now: number, channel
     return handoff ? { ...threadRow(t, now), handoff } : threadRow(t, now);
   };
 
-  const folders = (channel.folders ?? []).map((f) => ({ folder: f, bucket: split(fresh(f.threads).map(rowOf)) }));
-  const loose = split(fresh([...(channel.active ?? []), ...(channel.recent ?? [])]).filter((t) => !t.folder_id).map(rowOf));
+  // A folder this channel no longer has, say one just deleted, leaves its threads ungrouped rather than hidden.
+  const known = new Set((channel.folders ?? []).map((f) => f.id));
+  const filed = (t: ThreadStub) => !!t.folder_id && known.has(t.folder_id);
+  let folders: { folder: NonNullable<ChannelWithRunning['folders']>[number]; bucket: Bucket }[];
+  let loose: Bucket;
+  if (threads) {
+    const listed = fresh(threads);
+    folders = (channel.folders ?? []).map((f) => ({ folder: f, bucket: split(listed.filter((t) => t.folder_id === f.id).map(rowOf)) }));
+    loose = split(listed.filter((t) => !filed(t)).map(rowOf));
+  } else {
+    folders = (channel.folders ?? []).map((f) => ({ folder: f, bucket: split(fresh(f.threads).map(rowOf)) }));
+    loose = split(fresh([...(channel.active ?? []), ...(channel.recent ?? [])]).filter((t) => !filed(t)).map(rowOf));
+  }
   const buckets = [loose, ...folders.map((f) => f.bucket)];
 
   for (const group of handoffs) {

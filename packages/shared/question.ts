@@ -10,7 +10,7 @@ export interface QuestionOption {
 
 export interface Question {
   question: string;
-  /** A short tag for the question, at most HEADER_MAX characters. */
+  /** A short tag for the question, at most HEADER_MAX characters. A longer one is shortened, not refused. */
   header?: string;
   options: QuestionOption[];
   multiSelect: boolean;
@@ -36,6 +36,12 @@ type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
+/**
+ * A header cut to HEADER_MAX characters, ending in an ellipsis. Agents on every harness overshoot the limit by a
+ * character or two, and refusing the whole call over a tag costs a round trip for nothing.
+ */
+export const shortHeader = (header: string) => (header.length > HEADER_MAX ? `${header.slice(0, HEADER_MAX - 1).trimEnd()}…` : header);
+
 /** An ask_user_question call's `questions`, or why it is refused. The error goes back to the agent, so it says what to fix. */
 export function parseQuestions(raw: unknown): Parsed<Question[]> {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > QUESTIONS_MAX) {
@@ -48,8 +54,7 @@ export function parseQuestions(raw: unknown): Parsed<Question[]> {
     const question = text(q.question);
     if (!question) return { ok: false, error: `${at}.question is empty` };
     if (out.some((o) => o.question === question)) return { ok: false, error: `${at}.question repeats an earlier question` };
-    const header = text(q.header);
-    if (header.length > HEADER_MAX) return { ok: false, error: `${at}.header is longer than ${HEADER_MAX} characters` };
+    const header = shortHeader(text(q.header));
     if (q.multiSelect !== undefined && typeof q.multiSelect !== 'boolean') return { ok: false, error: `${at}.multiSelect must be true or false` };
     if (!Array.isArray(q.options) || q.options.length < OPTIONS_MIN || q.options.length > OPTIONS_MAX) {
       return { ok: false, error: `${at}.options must have ${OPTIONS_MIN} to ${OPTIONS_MAX} options` };
@@ -154,6 +159,9 @@ export interface CrewQuestion {
   question: ThreadQuestion;
 }
 
+/** Who asks, on a crew question's card and its push alert: "T-4299 · Build the CSV export". */
+export const crewAsker = (c: Pick<CrewQuestion, 'task_id' | 'thread_title'>) => [c.task_id, c.thread_title].filter(Boolean).join(' · ');
+
 type EventLike = { id: number; kind: string; payload: string | object };
 const payloadOf = <T>(e: EventLike) => (typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload) as T;
 
@@ -189,10 +197,10 @@ export interface Draft {
   skipped: boolean[];
 }
 
-/** A fresh card: the first option picked on a single choice question, nothing on a multi select one. */
+/** A fresh card: nothing picked, so Send (and Cmd+Enter) waits for Ben to choose an answer himself. */
 export const newDraft = (questions: Question[]): Draft => ({
   page: 0,
-  picks: questions.map((q) => ({ selected: q.multiSelect ? [] : [q.options[0].label], otherOn: false, other: '' })),
+  picks: questions.map(() => ({ selected: [], otherOn: false, other: '' })),
   skipped: questions.map(() => false),
 });
 

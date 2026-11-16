@@ -1,72 +1,171 @@
-import { Fragment, useState } from 'react';
-import { type HarnessId, type MonthlyUsage, type Usage, type UsageWindow } from '../../api.ts';
-import { monthlyTitle, untilLabel, windowPct } from '../../format.ts';
-import { readPref, useApp, useNow, writePref } from '../../store.tsx';
+import { Fragment, useMemo, useState } from 'react';
+import { accountUsageKey, usageRows, type AccountUsage, type UsageRow } from '@omni/shared/account-usage.ts';
+import { type MonthlyUsage, type UsageWindow } from '../../api.ts';
+import { useAccounts } from '../../accounts.ts';
+import { resetAt, resetAtShort, resetIn, resetSentence } from '@omni/shared/usage-reset.ts';
+import { monthlyTitle, windowPct } from '../../format.ts';
+import { readPref, useApp, useFeed, useNow, writePref } from '../../store.tsx';
 import { HARNESS_ROWS, HarnessLogo, SLOT_ROWS } from '../brand.tsx';
 import { Icon, Ticks } from '../ui.tsx';
 
-/** One window's tick bar and percentage, with the reset time on hover. */
+const HARNESS_IDS = HARNESS_ROWS.map((r) => r.id);
+const NAMES: Record<string, string> = Object.fromEntries(HARNESS_ROWS.map((r) => [r.id, r.name]));
+
+/**
+ * When a window resets: "resets in 2h 10m" by its bar, the local time on hover, and a tap swaps the two (touch has no
+ * hover). `compact`, for the Usage card's narrow columns: "in 2h 10m", and "at 14:20" or "Fri 09:00" on a tap. Nothing
+ * when the source sent no reset time, or once it has passed.
+ */
+export function ResetTime({ resetsAt, label, compact = false, className = '' }: { resetsAt: number | undefined; label: string; compact?: boolean; className?: string }) {
+  const now = useNow(60_000);
+  const [local, setLocal] = useState(false);
+  const left = resetIn(resetsAt, now);
+  const at = resetAt(resetsAt, now);
+  if (!left || !at) return null;
+  const text = compact ? (local ? resetAtShort(resetsAt, now) : `in ${left}`) : local ? `resets ${at}` : `resets in ${left}`;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setLocal((v) => !v);
+      }}
+      title={`${label}: ${resetSentence(resetsAt, now)}`}
+      aria-label={`${label} resets in ${left}, ${at}`}
+      data-testid="usage-reset"
+      className={`block max-w-full truncate text-left font-num text-[10px] leading-tight text-fg-3 tabular-nums hover:text-fg-2 ${className}`}
+    >
+      {text}
+    </button>
+  );
+}
+
+/** What a window's tooltip says: the percent, then the reset when the source gave one. */
+function windowTitle(label: string, pct: number, resetsAt: number | undefined, now: number): string {
+  const reset = resetSentence(resetsAt, now);
+  return `${label}: ${Math.round(pct * 100)}% used.${reset ? ` ${reset}` : ''}`;
+}
+
+/** One window's tick bar and percentage, with when it resets under it. */
 function WindowCell({ w, label }: { w?: UsageWindow; label: string }) {
+  const now = useNow(60_000);
   const pct = windowPct(w);
-  if (pct === null) return <span className="flex-1 text-center font-num text-[10px] text-fg-4">—</span>;
+  if (pct === null) return <span className="flex-1 text-center font-num text-[10px] text-fg-3">—</span>;
   const tone = pct >= 0.9 ? 'needs' : undefined;
   return (
-    <div
-      className="flex min-w-0 flex-1 items-center gap-1.5"
-      title={`${label}: ${Math.round(pct * 100)}% used, resets ${new Date(w!.resetsAt * 1000).toLocaleString('en-GB')} (${untilLabel(w!.resetsAt)})`}
-    >
-      <Ticks responsive value={pct} count={10} height={10} tone={tone} className="min-w-0 flex-1" label={`${label} usage`} />
-      <span className="w-[26px] shrink-0 text-right font-num text-[10px] text-fg-2 tabular-nums">{Math.round(pct * 100)}%</span>
+    <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 items-center gap-1.5" title={windowTitle(label, pct, w!.resetsAt, now)}>
+        <Ticks responsive value={pct} count={10} height={10} tone={tone} className="min-w-0 flex-1" label={`${label} usage`} />
+        <span className="w-[26px] shrink-0 text-right font-num text-[10px] text-fg-2 tabular-nums">{Math.round(pct * 100)}%</span>
+      </div>
+      <ResetTime compact resetsAt={w!.resetsAt} label={label} className="pt-0.5" />
     </div>
   );
 }
 
-/** A monthly cycle across both columns: one tick bar, the percent, and "mo". */
+/** A monthly cycle across both columns: one tick bar, the percent, "mo", and when the cycle resets. */
 function MonthCell({ m, name }: { m: MonthlyUsage; name: string }) {
   const pct = windowPct(m)!;
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5" title={monthlyTitle(name, m)}>
-      <Ticks responsive value={pct} count={20} height={10} tone={pct >= 0.9 ? 'needs' : undefined} className="min-w-0 flex-1" label={`${name} month usage`} />
-      <span className="w-[26px] shrink-0 text-right font-num text-[10px] text-fg-2 tabular-nums">{Math.round(pct * 100)}%</span>
-      <span className="text-[10px] text-fg-4">mo</span>
+    <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 items-center gap-1.5" title={monthlyTitle(name, m)}>
+        <Ticks responsive value={pct} count={20} height={10} tone={pct >= 0.9 ? 'needs' : undefined} className="min-w-0 flex-1" label={`${name} month usage`} />
+        <span className="w-[26px] shrink-0 text-right font-num text-[10px] text-fg-2 tabular-nums">{Math.round(pct * 100)}%</span>
+        <span className="text-[10px] text-fg-3">mo</span>
+      </div>
+      <ResetTime compact resetsAt={m.resetsAt} label={`${name} month`} className="pt-0.5" />
     </div>
   );
 }
 
-/** One plan's row: the 5-hour and weekly windows, a monthly cycle (Cursor), or "no data" for a harness that reports none. */
-function HarnessUsageRow({ id, name, usage }: { id: HarnessId; name: string; usage?: Usage | null }) {
+/** Who a row's account is, in full: "ben@askphill.com · Max · Acme, on omarchy and Ben's MacBook Air". */
+function accountTitle(a: NonNullable<UsageRow['account']>): string {
+  const machines = a.machines.length ? `, on ${a.machines.join(' and ')}` : '';
+  return `${[a.label, a.plan, a.org && !a.org.toLowerCase().includes(a.label.toLowerCase()) ? a.org : null].filter(Boolean).join(' · ')}${machines}`;
+}
+
+/** Why an account row has no numbers yet, and what fills it in. */
+function waitingTitle(harness: string, name: string, a: NonNullable<UsageRow['account']>): string {
+  const on = a.machines.length ? ` on ${a.machines.join(' or ')}` : '';
+  const when =
+    harness === 'claude-code'
+      ? 'after the next Claude Code turn signed in as this account'
+      : `the next time ${name} reads this account's limits (at startup, every 15 minutes, or during a run)`;
+  return `No reading for ${a.label} yet. It fills in ${when}${on}.`;
+}
+
+/**
+ * One account's row: the 5-hour and weekly windows, a monthly cycle (Cursor), "no reading yet" when that account has
+ * none of its own yet, or "no data" when its reading went stale. A harness with several accounts names each under its
+ * row; one with a single account keeps the plain row, with the account on hover.
+ */
+function UsageRowView({ row, name: shown }: { row: UsageRow; name?: string }) {
   useNow(60_000);
+  const name = shown ?? NAMES[row.harness] ?? row.harness;
+  const usage = row.usage;
   const windows = !!usage && (!!usage.five_hour || !!usage.seven_day);
   const noData = !windows && !usage?.monthly;
+  const who = row.account && accountTitle(row.account);
+  // Several accounts on one harness: each bar's tooltip names the account it belongs to.
+  const label = row.several && row.account ? `${name} (${row.account.label})` : name;
   return (
-    <div className="flex items-center gap-2">
-      <span className="caption inline-flex w-[66px] shrink-0 items-center gap-1.5 text-fg-2">
-        <span className="text-fg"><HarnessLogo harness={id} size={12} /></span>
-        {name}
-      </span>
-      {noData ? (
-        <span className="flex-1 text-[10.5px] text-fg-4">no data</span>
-      ) : !windows ? (
-        <MonthCell m={usage!.monthly!} name={name} />
-      ) : (
-        <>
-          <WindowCell w={usage!.five_hour} label={`${name} 5h`} />
-          <WindowCell w={usage!.seven_day} label={`${name} week`} />
-        </>
+    <div>
+      <div className="flex items-start gap-2">
+        <span className="caption inline-flex h-[14px] w-[66px] shrink-0 items-center gap-1.5 text-fg-2" title={who ?? undefined}>
+          <span className="text-fg"><HarnessLogo harness={row.harness} size={12} /></span>
+          {name}
+        </span>
+        {noData && row.waiting && row.account ? (
+          <span className="flex-1 truncate text-[10.5px] text-fg-3" title={waitingTitle(row.harness, name, row.account)} data-testid="usage-waiting">
+            no reading yet
+          </span>
+        ) : noData ? (
+          <span className="flex-1 text-[10.5px] text-fg-3">no data</span>
+        ) : !windows ? (
+          <MonthCell m={usage!.monthly! as MonthlyUsage} name={label} />
+        ) : (
+          <>
+            <WindowCell w={usage!.five_hour} label={`${label} 5h`} />
+            <WindowCell w={usage!.seven_day} label={`${label} week`} />
+          </>
+        )}
+      </div>
+      {row.several && row.account && (
+        <div className="flex min-w-0 items-center gap-1 pl-[18px] pt-0.5 text-[10px] leading-tight text-fg-3" title={who ?? undefined} data-testid="usage-account">
+          <span className="min-w-0 truncate">{row.account.label}</span>
+          {/* The plan gives way too, at most half the line, so a narrow sidebar keeps room for the email. */}
+          {row.account.plan && <span className="min-w-0 max-w-[45%] shrink-0 truncate">· {row.account.plan}</span>}
+        </div>
       )}
     </div>
   );
 }
 
+/**
+ * The card's rows: one per signed-in account (GET /api/accounts), each with its own reading. Readings that come in on
+ * the feed replace the listed one for that account until the list loads again.
+ */
+export function useUsageRows(): UsageRow[] {
+  const { usage } = useApp();
+  const accounts = useAccounts();
+  const [live, setLive] = useState<Record<string, AccountUsage>>({});
+  useFeed((e) => {
+    if (e.type === 'account_usage') setLive((prev) => ({ ...prev, [accountUsageKey(e.usage)]: e.usage }));
+  });
+  const view = accounts.data;
+  return useMemo(() => usageRows(HARNESS_IDS, view, [...(view?.usage ?? []), ...Object.values(live)], usage), [view, live, usage]);
+}
+
 /** Plan usage per harness. Collapsed by default to one row with the live dot and the busiest window; click to open. */
 export function UsageCard() {
-  const { usage, status, feedLive } = useApp();
+  const { status, feedLive } = useApp();
+  const rows = useUsageRows();
   const [open, setOpen] = useState(() => readPref('usage.open', false));
   const toggle = () => setOpen((o) => { writePref('usage.open', !o); return !o; });
   const slots = status?.slots ?? {};
   const footer = SLOT_ROWS.filter((r) => slots[r.id]).map((r) => `${r.name} ${slots[r.id]!.running}/${slots[r.id]!.cap}`).join(' · ');
-  const peak = HARNESS_ROWS.reduce<number | null>((max, r) => {
-    const u = usage[r.id];
+  const peak = rows.reduce<number | null>((max, r) => {
+    const u = r.usage;
     for (const p of [windowPct(u?.five_hour), windowPct(u?.seven_day), windowPct(u?.fable_week), windowPct(u?.monthly)]) if (p !== null && (max === null || p > max)) max = p;
     return max;
   }, null);
@@ -91,19 +190,19 @@ export function UsageCard() {
             {Math.round(peak * 100)}%
           </span>
         )}
-        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={13} className="shrink-0 text-fg-4" />
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={13} className="shrink-0 text-fg-3" />
       </button>
       {open && (
         <div className="space-y-2 px-3 pb-3">
-          <div className="flex items-center gap-2 pb-0.5 text-[11px] font-medium text-fg-4">
+          <div className="flex items-center gap-2 pb-0.5 text-[11px] font-medium text-fg-3">
             <span className="w-[66px] shrink-0" />
             <span className="flex-1">5h</span>
             <span className="flex-1">Week</span>
           </div>
-          {HARNESS_ROWS.map((r) => (
-            <Fragment key={r.id}>
-              <HarnessUsageRow id={r.id} name={r.name} usage={usage[r.id]} />
-              {usage[r.id]?.fable_week && <HarnessUsageRow id={r.id} name="Fable" usage={{ seven_day: usage[r.id]!.fable_week }} />}
+          {rows.map((r) => (
+            <Fragment key={r.key}>
+              <UsageRowView row={r} />
+              {r.usage?.fable_week && <UsageRowView row={{ ...r, key: `${r.key}:fable`, usage: { seven_day: r.usage.fable_week } }} name="Fable" />}
             </Fragment>
           ))}
           <div className="flex items-center gap-2 border-t border-line pt-2.5 text-[11px] text-fg-3">

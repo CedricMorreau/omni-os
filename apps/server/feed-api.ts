@@ -1,10 +1,11 @@
-// /api/feed, /status, /tasks, /recent, /needs-you, /search: the global views across threads.
+// /api/feed, /status, /machines, /tasks, /recent, /needs-you, /search, /insights: the global views across threads.
 import { Hono } from 'hono';
 import { sessionSSE } from './sse.ts';
 import { about } from './about.ts';
 import { bus, publishFeed, type FeedEvent } from './bus.ts';
 import { config } from './config.ts';
-import { needsYou, resultReads, search, threads, type Thread } from './db.ts';
+import { diskView, refreshDisk } from './disk-space.ts';
+import { completions, needsYou, resultReads, search, threads, type Thread } from './db.ts';
 import { allWithDelegating, withDelegating } from './delegating.ts';
 import { handoffView } from './handoff/records.ts';
 import { grokBotConfigured } from './grokbot.ts';
@@ -12,6 +13,9 @@ import { fromThisMac } from './request-guard.ts';
 import { getProfile } from './profile.ts';
 import { activeMods, activeTasks, queuedCount, runningCount, slotsByHarness } from './runner.ts';
 import { usageByHarness } from './usage.ts';
+import { getInsights, validTimeZone } from './insights.ts';
+import { machinesView } from './machines.ts';
+import { isInsightRange } from '@omni/shared/insights.ts';
 
 export const feedApi = new Hono();
 
@@ -36,6 +40,15 @@ feedApi.get('/feed', (c) =>
   }),
 );
 
+// The Inbox dashboard for one range. `tz` is the viewer's IANA zone, which decides where each day starts.
+feedApi.get('/insights', async (c) => {
+  const range = c.req.query('range') ?? '30d';
+  if (!isInsightRange(range)) return c.json({ error: 'range must be today, 7d or 30d' }, 400);
+  const tz = c.req.query('tz') || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!validTimeZone(tz)) return c.json({ error: 'unknown time zone' }, 400);
+  return c.json(await getInsights(range, tz));
+});
+
 feedApi.get('/status', (c) =>
   c.json({
     usage: usageByHarness(),
@@ -51,6 +64,16 @@ feedApi.get('/status', (c) =>
     grokBot: grokBotConfigured(),
   }),
 );
+
+/**
+ * What each machine under this account runs now: this one, then every synced one with whether Tailscale sees it up,
+ * and each one's CPU and memory. Clients ask again on the feed's thread and tasks events, which a synced machine's runs
+ * raise here too; samples arrive as machine_stats events. `?stats=1` samples this machine even when it is the only one.
+ */
+feedApi.get('/machines', async (c) => c.json(await machinesView({ stats: c.req.query('stats') === '1' })));
+
+/** Free space on the disk with Omni's data and the temp folder, as last checked (every 10 minutes); checks now before the first. */
+feedApi.get('/disk', async (c) => c.json(diskView().checkedAt ? diskView() : await refreshDisk()));
 
 /** Sub-agents, background shells and workflows still running, across every thread. */
 feedApi.get('/tasks', (c) => c.json(activeTasks()));
@@ -81,4 +104,22 @@ feedApi.post('/needs-you/read', async (c) => {
   if (!read) return c.json({ error: 'No such result' }, 404);
   publishFeed({ type: 'needs_you', thread_id: read.thread_id });
   return c.json({ thread_id: read.thread_id, item: needsYou(undefined, read.thread_id).items[0] ?? null });
+});
+
+/**
+ * Ben has a thread on screen whose results Needs you never lists, `{ thread }`: a delegated thread's success went to
+ * its parent as a crew report, and a team member's turns go to its lead. Its newest result counts as read, so an alert
+ * on the phone for it settles (push-settled.ts). Nothing moves while it runs. `{ read }` says whether the watermark moved.
+ */
+feedApi.post('/needs-you/seen', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { thread?: unknown } | null;
+  if (typeof body?.thread !== 'string' || !body.thread) return c.json({ error: 'thread is required' }, 400);
+  const t = threads.get(body.thread);
+  if (!t) return c.json({ error: 'No such thread' }, 404);
+  const latest = completions.latest(t.id);
+  if (!latest || t.status === 'running' || t.status === 'queued' || resultReads.get(t.id)?.uid === latest.uid) return c.json({ read: false });
+  resultReads.read(latest.uid);
+  const read = resultReads.get(t.id)?.uid === latest.uid;
+  if (read) publishFeed({ type: 'needs_you', thread_id: t.id });
+  return c.json({ read });
 });

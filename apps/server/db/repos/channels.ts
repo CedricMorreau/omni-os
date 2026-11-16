@@ -1,3 +1,4 @@
+import { resolveAvatarColor } from '@omni/shared/avatar-color.ts';
 import { db, tx } from '../connection.ts';
 import { record } from '../sync.ts';
 
@@ -17,6 +18,8 @@ export interface Channel {
   notes: string | null;
   /** One emoji, or `icon:<name>` for a design system icon (packages/shared/channel-icon.ts), shown in place of the letter avatar and the sidebar's #. */
   icon: string | null;
+  avatar_bg?: string | null;
+  avatar_bg_manual?: number;
   /** What a new thread here runs on when neither the thread nor its role picks. Null for Claude Code's default. */
   default_harness: string | null;
   default_model: string | null;
@@ -24,6 +27,14 @@ export interface Channel {
   default_base: string | null;
   links: string | null;
   extra_repos: string | null;
+  /** Gitignore patterns copied into each new worktree on top of the repo's .worktreeinclude, one per line. */
+  worktree_include: string | null;
+  /** Folders linked from the main checkout into each new worktree instead of installed again, one per line. */
+  worktree_shared: string | null;
+  /** The channel's own prompts for the branch steps (packages/shared/thread-glance.ts stepPrompts). Null uses the built-in one. */
+  prompt_open_pr: string | null;
+  prompt_fix_conflicts: string | null;
+  prompt_fix_checks: string | null;
   /** A standalone HTML file the channel's threads follow for the pages they write. Kept out of the API: see publicChannel. */
   design_system: string | null;
   design_system_name: string | null;
@@ -47,11 +58,12 @@ export const channels = {
       .all() as unknown as Channel[],
   get: (id: string) => db.prepare('SELECT * FROM channels WHERE id = ?').get(id) as unknown as Channel | undefined,
   create(c: Partial<Channel> & { id: string; name: string }) {
+    c = { ...c, ...resolveAvatarColor(c) };
     return tx(() => {
       db.prepare(
-        `INSERT INTO channels (id, name, kind, repo_path, github_repo, use_worktree, base_dir, store_domain, portal_slug, browser_headless, notes, icon,
-           default_harness, default_model, default_effort, default_base, links, extra_repos)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO channels (id, name, kind, repo_path, github_repo, use_worktree, base_dir, store_domain, portal_slug, browser_headless, notes, icon, avatar_bg, avatar_bg_manual,
+           default_harness, default_model, default_effort, default_base, links, extra_repos, worktree_include, worktree_shared, prompt_open_pr, prompt_fix_conflicts, prompt_fix_checks)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         c.id,
         c.name,
@@ -65,22 +77,31 @@ export const channels = {
         c.browser_headless ?? 1,
         c.notes ?? null,
         c.icon ?? null,
+        c.avatar_bg ?? null,
+        c.avatar_bg_manual ?? 0,
         c.default_harness ?? null,
         c.default_model ?? null,
         c.default_effort ?? null,
         c.default_base ?? null,
         c.links ?? null,
         c.extra_repos ?? null,
+        c.worktree_include ?? null,
+        c.worktree_shared ?? null,
+        c.prompt_open_pr ?? null,
+        c.prompt_fix_conflicts ?? null,
+        c.prompt_fix_checks ?? null,
       );
       record('channel', c.id);
       return channels.get(c.id)!;
     });
   },
   update(id: string, patch: Partial<Channel>) {
+    patch = resolveAvatarColor(patch, channels.get(id));
     const allowed = [
       'name', 'kind', 'repo_path', 'github_repo', 'use_worktree', 'base_dir',
-      'store_domain', 'portal_slug', 'browser_headless', 'notes', 'icon', 'design_system', 'design_system_name', 'archived',
-      'default_harness', 'default_model', 'default_effort', 'default_base', 'links', 'extra_repos',
+      'store_domain', 'portal_slug', 'browser_headless', 'notes', 'icon', 'avatar_bg', 'avatar_bg_manual', 'design_system', 'design_system_name', 'archived',
+      'default_harness', 'default_model', 'default_effort', 'default_base', 'links', 'extra_repos', 'worktree_include', 'worktree_shared',
+      'prompt_open_pr', 'prompt_fix_conflicts', 'prompt_fix_checks',
     ] as const;
     const keys = allowed.filter((k) => k in patch);
     if (keys.length) {
@@ -93,6 +114,13 @@ export const channels = {
       });
     }
     return channels.get(id);
+  },
+  /**
+   * The channel's repository is at path on this machine (repo-clone.ts). Not recorded for sync: the path map sends the
+   * other machine its own path, which did not change.
+   */
+  relocateRepo(id: string, path: string) {
+    db.prepare('UPDATE channels SET repo_path = ? WHERE id = ?').run(path, id);
   },
 };
 

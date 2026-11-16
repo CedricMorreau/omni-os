@@ -4,12 +4,14 @@
 // "<user>/files/". Sign-in is Clerk (auth.ts): only the users on ALLOWED_USERS get a token.
 // Omni Connect (connect.ts, docs/adr/0009-omni-connect.md) lives in the same objects: a Cloudflare tunnel per
 // machine, and the /connect page that signs in once and opens any of them.
+import { conditionalPut, conditionOf, KeyLock } from './objects.ts';
 import { DurableObject } from 'cloudflare:workers';
 import { allowedUsers, CLIENT_PREFIX, newToken, RelayError, tokenUser, verifyIdToken, type ClerkTrust } from './auth.ts';
 import { CloudflareApi } from './cloudflare.ts';
 import { CLIENT_DAYS, ConnectStore, notConfigured } from './connect.ts';
 import { connectPage, errorPage, PAGE_HEADERS } from './page.ts';
 import { SIGNIN_OBJECT, SigninStore } from './signin.ts';
+import { Maintenance, SLICE_GAP_MS } from './maintain.ts';
 import { objectPath, RelayStore } from './store.ts';
 
 interface Env {
@@ -28,6 +30,9 @@ interface Env {
 const connectConfigured = (env: Env) => !!(env.CF_API_TOKEN && env.CF_ACCOUNT_ID && env.CF_ZONE_ID && env.CONNECT_ZONE);
 
 const COOKIE = 'omni_connect';
+
+/** Wait before the next slice of background work after one failed. */
+const UPKEEP_RETRY_MS = 60_000;
 
 function cookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get('cookie') ?? '').split(';')) {
@@ -189,6 +194,12 @@ export default {
 export class Relay extends DurableObject<Env> {
   private store: RelayStore | null = null;
   private connectStore: ConnectStore | null = null;
+  private upkeep: Maintenance | null = null;
+  private kicking: Promise<void> | null = null;
+  /** One write at a time per file object, so a conditional write checks and writes with nothing in between (objects.ts). */
+  private objectLock = new KeyLock();
+  /** The change log needs no more background work. */
+  private idle = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -208,6 +219,50 @@ export class Relay extends DurableObject<Env> {
       user,
     );
     return this.store;
+  }
+
+  private upkeepFor(store: RelayStore) {
+    const storage = this.ctx.storage;
+    this.upkeep ??= new Maintenance(storage.sql, storage, (fn) => storage.transactionSync(fn), store);
+    return this.upkeep;
+  }
+
+  /**
+   * Start the change log's background work (maintain.ts) when there is some and no alarm is set. A request starts
+   * it, since only a request names the user. The work itself runs a slice per alarm: as one loop behind a request
+   * it ran past the CPU limit, which reset the object and failed every request with it.
+   */
+  private kick(store: RelayStore, user: string) {
+    if (this.idle || this.kicking) return;
+    const storage = this.ctx.storage;
+    const upkeep = this.upkeepFor(store);
+    this.kicking = (async () => {
+      if (await upkeep.done()) return void (this.idle = true);
+      if ((await storage.getAlarm()) !== null) return;
+      // A full database takes no write, not even an alarm: the first slice deletes rows before it writes anything.
+      await upkeep.slice();
+      await storage.put('user', user);
+      await storage.setAlarm(Date.now());
+    })()
+      .catch((err: Error) => console.error(`[relay] could not start the change log's upkeep: ${err.message}`))
+      .finally(() => (this.kicking = null));
+    this.ctx.waitUntil(this.kicking);
+  }
+
+  /** One slice of the background work, then the next alarm while there is more. */
+  async alarm() {
+    const storage = this.ctx.storage;
+    const user = await storage.get<string>('user');
+    if (!user) return;
+    let wait = SLICE_GAP_MS;
+    try {
+      if (!(await this.upkeepFor(this.open(user)).slice())) return;
+    } catch (err) {
+      // Not thrown: a thrown alarm retries a few times and then stops for good.
+      console.error(`[relay] upkeep slice failed: ${(err as Error).message}`);
+      wait = UPKEEP_RETRY_MS;
+    }
+    await storage.setAlarm(Date.now() + wait);
   }
 
   private connectFor(user: string) {
@@ -257,6 +312,7 @@ export class Relay extends DurableObject<Env> {
       const user = req.headers.get('x-omni-user');
       if (!user) throw new RelayError(400, 'No user');
       const store = this.open(user);
+      this.kick(store, user);
 
       if (url.pathname.startsWith('/internal/') && url.pathname !== '/internal/token') return await this.internalRoute(req, user, url.pathname);
 
@@ -270,7 +326,7 @@ export class Relay extends DurableObject<Env> {
       const path = url.pathname;
 
       if (path === '/v1/changes' && req.method === 'POST') {
-        const pushers = await store.push(await req.json().catch(() => null));
+        const pushers = await store.push(await req.json().catch(() => null), tokenId);
         this.nudge(pushers);
         return json({ ok: true });
       }
@@ -318,14 +374,19 @@ export class Relay extends DurableObject<Env> {
         const key = `${user}/files/${rel}`;
         const bucket = this.env.BUCKET;
         if (req.method === 'PUT') {
-          await bucket.put(key, await req.arrayBuffer(), { httpMetadata: { contentType: req.headers.get('content-type') ?? 'application/octet-stream' } });
-          return json({ ok: true });
+          const contentType = req.headers.get('content-type') ?? 'application/octet-stream';
+          const etag = await conditionalPut(bucket, this.objectLock, key, await req.arrayBuffer(), contentType, conditionOf(req.headers));
+          if (etag === null) return json({ error: 'The object changed since it was read' }, 412);
+          return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json', ...(etag ? { etag } : {}) } });
         }
-        if (req.method === 'HEAD') return new Response(null, { status: (await bucket.head(key)) ? 200 : 404 });
+        if (req.method === 'HEAD') {
+          const head = await bucket.head(key);
+          return new Response(null, { status: head ? 200 : 404, headers: head ? { etag: head.httpEtag } : {} });
+        }
         if (req.method === 'GET') {
           const obj = await bucket.get(key);
           if (!obj) return json({ error: 'No such object' }, 404);
-          return new Response(obj.body, { headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream' } });
+          return new Response(obj.body, { headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream', etag: obj.httpEtag } });
         }
       }
 

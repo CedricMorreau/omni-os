@@ -1,4 +1,5 @@
-import { FIX_CONFLICTS_PROMPT, OPEN_PR_PROMPT } from '@omni/shared/thread-glance.ts';
+import { LinkBrand } from '../ui/Brand';
+import { stepParkedText, type PRStep } from '@omni/shared/thread-glance.ts';
 import { watchCopy } from '@omni/shared/pr-watch.ts';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -10,12 +11,18 @@ import { Notice } from '../components/Notice';
 import { useThreadLive, useThreadView } from '../live/react';
 import type { RootScreenProps } from '../navigation/types';
 import { MERGE_ADVICE, prContent, type PRContent } from '../pr/model';
-import { useMerge, usePRWatch, useThreadPR } from '../pr/hooks';
+import { useMerge, usePRWatch, useRerunChecks, useThreadPR } from '../pr/hooks';
 import type { MergeOutcome } from '../pr/actions';
 import { CheckDot } from '../pr/CheckDot';
-import { Chip, DiffCount, Loading, Section } from '../review/parts';
+import { stepWorking } from '../pr/step';
+import { usePRStep } from '../pr/use-step';
+import { CrewPRList } from '../pr/CrewPRs';
+import { AutoMergeRow } from '../pr/AutoMerge';
+import { DiffCount, Loading, Section } from '../review/parts';
+import { Chip } from '../ui/Chip';
 import { fontSize, lineHeight, minTarget, mono, space, useOmniTheme, weight } from '../theme';
 import { Button } from '../ui/Button';
+import { GroupedList, ListRow } from '../ui/GroupedList';
 import { Callout } from '../ui/Callout';
 import { SlideToConfirm } from '../ui/SlideToConfirm';
 
@@ -27,41 +34,54 @@ export function PullRequestScreen({ route, navigation }: RootScreenProps<'PullRe
   const live = useThreadLive(id);
   const view = useThreadView(live);
   const thread = view?.thread ?? null;
-  const pr = useThreadPR(thread);
-  const watch = usePRWatch(id, pr.number !== null, pr.page.kind === 'pr' ? pr.page.pr : null);
-  const merge = useMerge(pr.channelId, pr.number, pr.reloadDetail);
+  const [picked, setPicked] = useState<string | null>(null);
+  const pr = useThreadPR(thread, picked);
+  // A delegated thread's PR is watched from that thread, so the watch here is for this thread's own PR only.
+  const watch = usePRWatch(id, pr.number !== null && !pr.from, pr.page.kind === 'pr' && !pr.from ? pr.page.pr : null);
+  const merge = useMerge(pr.channelId, pr.number, pr.refresh);
+  const rerun = useRerunChecks(pr.channelId, pr.number, pr.page.kind === 'pr' ? pr.page.pr : null);
   const [asked, setAsked] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<MergeOutcome | null>(null);
   const insets = useSafeAreaInsets();
 
+  const step = usePRStep(live, view);
   const page = pr.page;
-  const content = page.kind === 'pr' ? prContent(page.pr) : null;
+  const content = page.kind === 'pr' ? prContent(page.pr, step.prompts) : null;
   const url = content?.url;
+  const crewOnly = page.kind === 'empty' && !thread?.branch && page.crew.length > 0;
   useEffect(() => {
     navigation.setOptions({
-      title: content ? `#${content.number}` : 'Pull request',
+      title: content ? `#${content.number}` : crewOnly ? 'Delegated PRs' : 'Pull request',
       headerRight: url ? () => <HeaderButton label="GitHub" accessibilityLabel="Open on GitHub" onPress={() => void Linking.openURL(url)} /> : undefined,
     });
-  }, [navigation, content?.number, url]);
+  }, [navigation, content?.number, url, crewOnly]);
 
   const ask = useCallback(
     async (prompt: string) => {
-      if (!live || !thread) return;
       setAsked(null);
-      if (live.send.state.get().outbox.item) return setAsked('Another message is still sending. Try again in a moment.');
-      const sent = await live.send.submit(thread, prompt);
-      if (sent) navigation.goBack();
-      else setAsked(live.send.state.get().outbox.item?.phase === 'failed' ? 'The message did not send. It is kept in the thread.' : 'Could not send the message.');
+      const out = await step.ask(prompt);
+      if (out.kind === 'sent') navigation.goBack();
+      else setAsked(out.kind === 'busy' ? 'Another message is still sending. Try again in a moment.' : out.message);
     },
-    [live, thread, navigation],
+    [step.ask, navigation],
   );
+  // A step's button reads as working while the agent is on it, and a step that never reached the agent says why.
+  const stepButton = (kind: PRStep, label: string) => ({ label: stepWorking(step.working, kind) ?? label, busy: step.working === kind });
+  const parkedNote = (kind: PRStep) => (step.parked?.step === kind && thread ? stepParkedText(kind, thread) : null);
 
+  const from = pr.from;
+  const openCrew = useCallback((p: { url: string }) => {
+    setOutcome(null);
+    setPicked(p.url);
+  }, []);
   const slide = useCallback(async () => {
     setOutcome(null);
+    // Keep the PR on screen once merged, though the first open one would move on to the next.
+    if (from) setPicked(from.url);
     const out = await merge();
     setOutcome(out.kind === 'merged' ? null : out);
     return out.kind === 'merged';
-  }, [merge]);
+  }, [merge, from]);
 
   if (!view || view.status === 'loading') return <Notice title="Loading thread" />;
   if (view.status === 'missing') return <Notice title="Thread not found" body="It may have been archived or removed on the server." />;
@@ -77,19 +97,28 @@ export function PullRequestScreen({ route, navigation }: RootScreenProps<'PullRe
   }
   if (page.kind === 'empty') {
     return (
-      <View style={[styles.screen, styles.empty, { backgroundColor: colors.bg }]}>
-        <Text style={[styles.emptyTitle, { color: colors.fg }]}>Pull request</Text>
-        <Text style={[styles.emptyBody, { color: colors.fg3 }]}>{page.text}</Text>
-        {page.canOpen ? <Button label="Open PR" accessibilityHint="Asks the agent to push the branch and open a pull request" onPress={() => void ask(OPEN_PR_PROMPT)} /> : null}
+      <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={[styles.empty, { paddingBottom: Math.max(insets.bottom, space.s9) }]}>
+        {page.text ? (
+          <>
+            <Text style={[styles.emptyTitle, { color: colors.fg }]}>Pull request</Text>
+            <Text style={[styles.emptyBody, { color: colors.fg3 }]}>{page.text}</Text>
+          </>
+        ) : null}
+        {page.canOpen ? (
+          <Button {...stepButton('open', 'Open PR')} disabled={step.working !== null} accessibilityHint="Asks the agent to push the branch and open a pull request" onPress={() => void ask(step.prompts.open)} />
+        ) : null}
+        {parkedNote('open') ? <Text style={[styles.meta, { color: colors.fg3 }]}>{parkedNote('open')}</Text> : null}
         {asked ? <Text style={[styles.meta, { color: colors.fg3 }]}>{asked}</Text> : null}
-      </View>
+        {page.crew.length > 0 ? <CrewPRList crew={page.crew} shown={null} onOpen={openCrew} /> : null}
+      </ScrollView>
     );
   }
 
   const c = content as PRContent;
   const { action, line } = watchCopy(watch.watch);
-  const canWatch = c.open || watch.watching;
-  const fix = c.next?.kind === 'conflicts' || c.next?.kind === 'checks' ? c.next : null;
+  const canWatch = !from && (c.open || watch.watching);
+  // The fix prompts go to this thread, so a delegated thread's PR has none here: its row opens that thread instead.
+  const fix = !from && (c.next?.kind === 'conflicts' || c.next?.kind === 'checks') ? c.next : null;
   return (
     <View style={[styles.screen, { backgroundColor: colors.bg }]}>
       <ScrollView contentContainerStyle={styles.body}>
@@ -103,17 +132,44 @@ export function PullRequestScreen({ route, navigation }: RootScreenProps<'PullRe
             <Text style={[styles.meta, { color: colors.fg3 }]}>· {plural(c.files.length, 'file')}</Text>
           </View>
           <Text style={[styles.branches, { color: colors.fg3 }]}>{c.branches}</Text>
-          {pr.githubRepo ? <Text style={[styles.meta, { color: colors.fg3 }]}>{pr.githubRepo}</Text> : null}
+          {pr.githubRepo ? <View style={styles.row}><LinkBrand brand="github" /><Text style={[styles.meta, { color: colors.fg3 }]}>{pr.githubRepo}</Text></View> : null}
           <Text style={[styles.status, { color: c.status.tone === 'needs' ? colors.needs : colors.fg2 }]}>{c.status.text}</Text>
           {fix ? (
             <View style={styles.inline}>
-              <Button variant="secondary" label={fix.label} onPress={() => void ask(fix.prompt)} />
+              <Button variant="secondary" {...stepButton(fix.kind, fix.label)} disabled={step.working !== null} onPress={() => void ask(fix.prompt)} />
             </View>
           ) : null}
+          {fix && parkedNote(fix.kind) ? <Text style={[styles.meta, { color: colors.fg3 }]}>{parkedNote(fix.kind)}</Text> : null}
           {asked ? <Text style={[styles.meta, { color: colors.fg3 }]}>{asked}</Text> : null}
+          {rerun.can ? (
+            <View style={styles.inline}>
+              <Button
+                variant="secondary"
+                label="Rerun failed checks"
+                busy={rerun.busy}
+                accessibilityHint="Starts the failed GitHub Actions jobs again, with no message to the agent"
+                onPress={() => void rerun.run()}
+              />
+            </View>
+          ) : null}
+          {rerun.outcome?.kind === 'started' ? <Text accessibilityLiveRegion="polite" style={[styles.meta, { color: colors.fg2 }]}>{rerun.outcome.text}</Text> : null}
+          {rerun.outcome?.kind === 'failed' ? <Callout message={rerun.outcome.message} /> : null}
         </View>
 
-        {canWatch || watch.watch ? (
+        {from ? (
+          <GroupedList>
+            <ListRow
+              first
+              icon="message"
+              title={from.thread_title || 'Untitled'}
+              detail="The delegated thread that opened it"
+              chevron
+              onPress={() => navigation.push('Thread', { id: from.thread_id })}
+            />
+          </GroupedList>
+        ) : null}
+
+        {!from && (canWatch || watch.watch) ? (
           <View style={styles.block}>
             <Section title="Watch">
               <Pressable
@@ -136,6 +192,8 @@ export function PullRequestScreen({ route, navigation }: RootScreenProps<'PullRe
             {watch.error ? <Callout message={watch.error} /> : null}
           </View>
         ) : null}
+
+        {c.open && page.kind === 'pr' ? <AutoMergeRow channelId={pr.channelId} number={c.number} request={page.pr.autoMergeRequest} draft={!c.canMerge} reload={pr.refresh} /> : null}
 
         {c.review.reviewers.length > 0 || c.reviewLine ? (
           <Section title="Reviews">
@@ -179,12 +237,14 @@ export function PullRequestScreen({ route, navigation }: RootScreenProps<'PullRe
             </View>
           ))}
         </Section>
+
+        {page.crew.length > 0 ? <CrewPRList crew={page.crew} shown={from?.url ?? null} onOpen={openCrew} /> : null}
       </ScrollView>
 
       {c.open ? (
         <View style={[styles.merge, { paddingBottom: Math.max(insets.bottom, space.s8), borderTopColor: colors.line }]}>
           {c.note ? <Text style={[styles.note, { color: colors.fg3 }]}>{c.note}</Text> : null}
-          {outcome ? <MergeOutcomeNote outcome={outcome} onAsk={ask} /> : null}
+          {outcome ? <MergeOutcomeNote outcome={outcome} fixPrompt={step.prompts.conflicts} onAsk={from ? undefined : ask} /> : null}
           <SlideToConfirm label="Slide to squash and merge" doneLabel={`Merged #${c.number}`} busyLabel="Merging" disabled={!c.canMerge} onConfirm={slide} />
           {!c.canMerge ? <Text style={[styles.note, { color: colors.fg3 }]}>A draft cannot be merged. Mark it ready for review on GitHub.</Text> : null}
         </View>
@@ -193,7 +253,8 @@ export function PullRequestScreen({ route, navigation }: RootScreenProps<'PullRe
   );
 }
 
-function MergeOutcomeNote({ outcome, onAsk }: { outcome: MergeOutcome; onAsk: (prompt: string) => Promise<void> }) {
+/** `onAsk` is left out for a delegated thread's PR: Fix conflicts would ask this thread, not the one on the PR's branch. */
+function MergeOutcomeNote({ outcome, fixPrompt, onAsk }: { outcome: MergeOutcome; fixPrompt: string; onAsk?: (prompt: string) => Promise<void> }) {
   const { colors } = useOmniTheme();
   if (outcome.kind === 'merged') return null;
   if (outcome.kind === 'refused') {
@@ -202,7 +263,7 @@ function MergeOutcomeNote({ outcome, onAsk }: { outcome: MergeOutcome; onAsk: (p
       <Callout message={failure.title}>
         <Text style={[styles.meta, { color: colors.fg2 }]}>{failure.detail}</Text>
         <Text style={[styles.meta, { color: colors.fg3 }]}>{MERGE_ADVICE[failure.kind]}</Text>
-        {failure.kind === 'conflict' ? <Button variant="secondary" label="Fix conflicts" onPress={() => void onAsk(FIX_CONFLICTS_PROMPT)} /> : null}
+        {failure.kind === 'conflict' && onAsk ? <Button variant="secondary" label="Fix conflicts" onPress={() => void onAsk(fixPrompt)} /> : null}
       </Callout>
     );
   }
@@ -232,12 +293,12 @@ const styles = StyleSheet.create({
     gap: space.s4,
   },
   meta: {
-    fontSize: fontSize.meta + 1,
-    lineHeight: Math.round((fontSize.meta + 1) * lineHeight.body),
+    fontSize: fontSize.caption,
+    lineHeight: Math.round(fontSize.caption * lineHeight.body),
   },
   branches: {
     fontFamily: mono,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
   },
   status: {
     fontSize: fontSize.body,
@@ -264,7 +325,7 @@ const styles = StyleSheet.create({
   },
   watchText: {
     flex: 1,
-    gap: 2,
+    gap: space.s1,
   },
   rowLabel: {
     fontSize: fontSize.body,
@@ -275,8 +336,8 @@ const styles = StyleSheet.create({
     gap: space.s2,
   },
   excerpt: {
-    fontSize: fontSize.body - 1,
-    lineHeight: Math.round((fontSize.body - 1) * lineHeight.body),
+    fontSize: fontSize.ui,
+    lineHeight: Math.round(fontSize.ui * lineHeight.body),
     borderLeftWidth: 2,
     paddingLeft: space.s4,
     marginTop: space.s2,
@@ -294,7 +355,7 @@ const styles = StyleSheet.create({
   },
   path: {
     fontFamily: mono,
-    fontSize: fontSize.body - 1,
+    fontSize: fontSize.ui,
   },
   merge: {
     gap: space.s4,
@@ -303,8 +364,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   note: {
-    fontSize: fontSize.meta + 1,
-    lineHeight: Math.round((fontSize.meta + 1) * lineHeight.body),
+    fontSize: fontSize.caption,
+    lineHeight: Math.round(fontSize.caption * lineHeight.body),
     textAlign: 'center',
   },
   empty: {

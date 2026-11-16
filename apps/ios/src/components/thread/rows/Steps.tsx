@@ -2,11 +2,13 @@ import { toolLabel, toolSummary, type ToolCall } from '@omni/shared/transcript-f
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../../../ui/Text';
+import { Icon } from '../../../ui/Icon';
+import { toolIcon } from '../../../thread/tool-icon';
 
 import { callDetail } from '../../../thread/call-detail';
 import type { ThreadRow } from '../../../thread/rows';
 import { fontSize, minTarget, radius, space, useOmniTheme, weight } from '../../../theme';
-import { type DotTone, StatusDot } from '../../StatusDot';
+import { type Glyph, StatusDot } from '../../StatusDot';
 import { Markdown } from '../Markdown';
 import { useRowActions } from './actions';
 
@@ -22,7 +24,7 @@ function stateOf(call: ToolCall, running: boolean): CallState {
   return call.result.is_error ? 'failed' : 'done';
 }
 
-const TONE: Record<CallState, DotTone> = { running: 'ok', stopped: 'muted', failed: 'warn', done: 'muted' };
+const GLYPH: Record<CallState, Glyph> = { running: 'running', stopped: 'settled', failed: 'needs', done: 'done' };
 const WORD: Record<CallState, string | null> = { running: 'Running', stopped: 'Stopped', failed: 'Failed', done: null };
 
 const peek = (call: ToolCall): string => (call.result && (call.result.is_error || call.name === 'Bash') ? call.result.text.trim().split('\n').slice(0, 3).join('\n').slice(0, 240) : '');
@@ -73,12 +75,14 @@ export function CallRow({ row }: Of<'call'>) {
         style={({ pressed }) => [styles.head, pressed && { backgroundColor: colors.surface2 }]}
       >
         <View style={styles.dot}>
-          <StatusDot tone={TONE[state]} />
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} color={colors.fg4} />
+          <Icon name={toolIcon(call.name)} size={14} color={colors.fg3} />
+          <StatusDot glyph={GLYPH[state]} size={6} />
         </View>
         <View style={styles.grow}>
           <Text numberOfLines={1} style={[styles.name, { color: colors.fg2 }]}>
             {toolLabel(call.name)}
-            {word ? <Text style={{ color: colors.fg3 }}>{`  ${word}`}</Text> : null}
+            {word ? <Text style={{ color: state === 'running' ? colors.live : state === 'failed' ? colors.fg : colors.fg3 }}>{`  ${word}`}</Text> : null}
           </Text>
           {summary ? (
             <Text numberOfLines={open ? 3 : 1} style={[styles.summary, { color: colors.fg3 }]}>
@@ -160,16 +164,16 @@ function CallDetail({ call }: { call: ToolCall }) {
 const styles = StyleSheet.create({
   note: { borderLeftWidth: 2, paddingLeft: space.s6 },
   more: { minHeight: 32, justifyContent: 'center' },
-  small: { fontSize: 12.5, lineHeight: 18 },
-  indent: { paddingLeft: space.s8, gap: 2 },
+  small: { fontSize: fontSize.small, lineHeight: 18 },
+  indent: { paddingLeft: space.s8, gap: space.s1 },
   call: { gap: space.s2 },
   head: { minHeight: minTarget - 8, flexDirection: 'row', alignItems: 'flex-start', gap: space.s6, paddingVertical: space.s2, borderRadius: radius.md - 4 },
-  dot: { paddingTop: 6 },
-  grow: { flex: 1, gap: 2 },
+  dot: { paddingTop: space.s3, flexDirection: 'row', alignItems: 'center', gap: space.s2 },
+  grow: { flex: 1, gap: space.s1 },
   name: { fontSize: fontSize.body - 0.5, fontWeight: weight.medium },
-  summary: { fontSize: 12.5, lineHeight: 17, fontFamily: MONO },
-  preview: { marginLeft: space.s8, borderRadius: 8, paddingHorizontal: space.s4, paddingVertical: space.s2, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, overflow: 'hidden' },
+  summary: { fontSize: fontSize.small, lineHeight: 17, fontFamily: MONO },
+  preview: { marginLeft: space.s8, borderRadius: 8, paddingHorizontal: space.s4, paddingVertical: space.s2, fontFamily: MONO, fontSize: fontSize.code, lineHeight: 16, overflow: 'hidden' },
   detail: { marginLeft: space.s8, borderRadius: radius.md - 4, borderWidth: StyleSheet.hairlineWidth, padding: space.s4, gap: space.s2 },
-  code: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16 },
+  code: { fontFamily: MONO, fontSize: fontSize.code, lineHeight: 16 },
   sep: { paddingTop: space.s4 },
 });

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from './Text';
+import { Icon } from './Icon';
 
-import { fontSize, lineHeight, minTarget, space, useOmniTheme, weight } from '../theme';
+import { fontSize, lineHeight, minTarget, radius, space, useOmniTheme, weight } from '../theme';
 
 interface OptionRowProps {
   label: string;
@@ -40,7 +41,7 @@ export function OptionRow({ label, sub, leading, selected, opens, disabled, onPr
           {sub ? <Text style={[styles.sub, { color: colors.fg3 }]}>{sub}</Text> : null}
         </View>
         {selected === undefined ? null : <Radio on={selected} />}
-        {opens ? <Text style={[styles.chevron, { color: colors.fg4 }]}>›</Text> : null}
+        {opens ? <Icon name="chevronRight" size={13} color={colors.fg4} /> : null}
       </View>
     </Pressable>
   );
@@ -96,18 +97,14 @@ const styles = StyleSheet.create({
   },
   text: {
     flex: 1,
-    gap: 2,
+    gap: space.s1,
   },
   label: {
     fontSize: fontSize.input,
   },
   sub: {
-    fontSize: fontSize.meta + 1,
-    lineHeight: Math.round((fontSize.meta + 1) * lineHeight.body),
-  },
-  chevron: {
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: fontSize.caption,
+    lineHeight: Math.round(fontSize.caption * lineHeight.body),
   },
   radio: {
     width: 22,
@@ -137,7 +134,7 @@ const styles = StyleSheet.create({
   },
   card: {
     marginHorizontal: space.s8,
-    borderRadius: 14,
+    borderRadius: radius.xl,
     overflow: 'hidden',
   },
 });

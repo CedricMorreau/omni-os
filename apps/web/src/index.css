@@ -18,11 +18,13 @@
   --fg: light-dark(#17181a, #eceae5);
   --fg-2: light-dark(#3c3b37, #b8b7b1);
   --fg-3: light-dark(#62615c, #a09f99);
+  /* fg-4 is 2.75:1 on white: placeholders, disabled labels and decoration only, never text that must be read
+     (apps/web/tests/fg4-contrast.test.ts). --fg-disabled names that use. */
   --fg-4: light-dark(#9d9c96, #83827c);
+  --fg-disabled: var(--fg-4);
   --on-ink: light-dark(#ffffff, #101114);
   --line: light-dark(rgb(23 24 26 / 0.08), rgb(236 235 231 / 0.08));
   --line-strong: light-dark(rgb(23 24 26 / 0.16), rgb(236 235 231 / 0.16));
-  --thumb: light-dark(#ffffff, rgb(255 255 255 / 0.14));
   /* Status is the only color: ultramarine = running, vermilion = needs you, volt = done.
      Full saturation, never tinted. Needs and done carry ink text; vermilion is never text on white. */
   --ink: #17181a;
@@ -35,7 +37,7 @@
   --done: #c6f52b;
   --on-done: var(--ink);
   --done-edge: light-dark(var(--ink), transparent);
-  /* Amber for "getting full" (the context meter from 70%). Darker in light mode so it reads on white. */
+  /* Amber for "getting full" (the context meter from 70%) and the Limited status. Darker in light mode so it reads on white. */
   --warn: light-dark(#b45309, #f5b544);
   --phase-intake: light-dark(#6b7280, #9ca3af);
   --phase-plan: light-dark(#2563eb, #60a5fa);
@@ -45,6 +47,8 @@
   --phase-deploy: light-dark(#dc2626, #f87171);
   --phase-closing: light-dark(#16a34a, #4ade80);
   --phase-closed: var(--phase-intake);
+  /* Destructive labels (Button variant="danger"): a red that reads as text, unlike vermilion. */
+  --danger-text: light-dark(#c0300f, #ff8a6e);
   /* Categorical series for charts, in fixed order (html_render pages read them as --chart-1 to --chart-6). */
   --chart-1: light-dark(#2a78d6, #3987e5);
   --chart-2: light-dark(#eb6834, #d95926);
@@ -56,10 +60,14 @@
   --bubble: var(--surface-2);
   --code-bg: var(--surface);
   --mark: light-dark(rgb(245 158 11 / 0.28), rgb(245 181 68 / 0.28));
-  /* Diffs are the one place a line gets a wash, drawn from the done and needs pops. */
-  --diff-add: color-mix(in srgb, var(--done) 22%, transparent);
-  --diff-del: color-mix(in srgb, var(--needs) 12%, transparent);
+  /* Diffs are the one place a line gets a wash. Green and red of their own, not the done and needs status hues. */
+  --diff-add-bg: light-dark(rgb(26 127 55 / 0.1), rgb(74 222 128 / 0.12));
+  --diff-add-fg: light-dark(#1a6b34, #7ee2a0);
+  --diff-del-bg: light-dark(rgb(196 45 15 / 0.08), rgb(255 122 92 / 0.12));
+  --diff-del-fg: light-dark(#a3290f, #ff9a80);
   --wash: color-mix(in srgb, var(--fg) 6%, transparent);
+  /* A selected or pressed item (.item): one step past the hover wash, as Polaris's 8% selected fill is past its 5% hover. */
+  --wash-selected: light-dark(color-mix(in srgb, var(--fg) 9%, transparent), color-mix(in srgb, var(--fg) 14%, transparent));
   --pane-edge: light-dark(rgb(23 24 26 / 0.07), rgb(255 255 255 / 0.09));
   --shadow-menu:
     0 0 0 0.5px light-dark(rgb(23 24 26 / 0.08), rgb(255 255 255 / 0.08)),
@@ -67,7 +75,6 @@
     0 18px 44px -10px light-dark(rgb(23 24 26 / 0.2), rgb(0 0 0 / 0.65));
   --shadow-panel: 0 2px 8px light-dark(rgb(23 24 26 / 0.05), rgb(0 0 0 / 0.25));
   --shadow-card: 0 0 0 0.5px var(--pane-edge), 0 1px 2px light-dark(rgb(23 24 26 / 0.05), rgb(0 0 0 / 0.4));
-  --shadow-thumb: 0 1px 2px light-dark(rgb(23 24 26 / 0.09), rgb(0 0 0 / 0.3)), 0 0 0 0.5px light-dark(rgb(23 24 26 / 0.05), rgb(255 255 255 / 0.06));
   /* Bencho motion: spring overshoot, settle, stretch, a soft ease-out; fluid drives the mark. */
   --ease-spring: cubic-bezier(0.24, 1.34, 0.38, 1);
   --ease-settle: cubic-bezier(0.28, 1.28, 0.36, 1);
@@ -117,6 +124,8 @@
   --sp-11: 32px;
   --sp-12: 40px;
   --r-xs: 6px;
+  /* A selectable item: nav rows, tabs and menu rows (Polaris border-radius-200). */
+  --r-item: 8px;
   --r-sm: 12px;
   --r-md: 14px;
   --r-lg: 18px;
@@ -124,12 +133,37 @@
   --r-2xl: 22px;
   --r-3xl: 28px;
   --r-pill: 999px;
+  /* Content widths: reading and forms, and list pages. Both centred in the pane. */
+  --measure: 768px;
+  --h-search: 40px;
+  --w-page: 896px;
 }
 :root[data-theme="light"] {
   color-scheme: light;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
+}
+/* Apple's typefaces (developer.apple.com/fonts). Their license rules out serving them as web fonts,
+   so these name the local install; without it, Safari and iOS reach the same system copies through
+   system-ui and ui-*. SF Pro adjusts to each size by itself: its optical-size axis moves from Text to
+   Display, and its tracking table spaces letters the way macOS does, so body text adds no letter-spacing.
+   Kept out of the `:root, .scheme-dark` rule so a dark-scheme block inherits the rail's faces below. */
+:root {
+  --face-sans: "SF Pro", "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --face-head: "SF Pro", "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --face-rounded: "SF Pro Rounded", ui-rounded, system-ui, -apple-system, sans-serif;
+  --face-serif: "New York", ui-serif, Georgia, serif;
+  --face-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* The channel rail Beta (App.tsx sets data-layout) sets type the way the Linux desktop app does on GNOME and
+   Omarchy: Adwaita Sans for text, headings and initials, JetBrains Mono for code. main.tsx bundles both (OFL), so a
+   Mac shows them too; a browser downloads them only once the rail uses them. */
+:root[data-layout="rail"] {
+  --face-sans: "Adwaita Sans", system-ui, sans-serif;
+  --face-head: var(--face-sans);
+  --face-rounded: var(--face-sans);
+  --face-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 }
 /* The sidebar always draws with the dark tokens. The tokens re-declare here (see the :root rule)
    so light-dark() resolves against this scheme, not the root's. */
@@ -160,17 +194,16 @@
   --color-done: var(--done);
   --color-on-done: var(--on-done);
   --color-warn: var(--warn);
+  --color-danger-text: var(--danger-text);
+  --color-fg-disabled: var(--fg-disabled);
   --color-bubble: var(--bubble);
   --color-code: var(--code-bg);
-  /* Apple's typefaces (developer.apple.com/fonts). Their license rules out serving them as web fonts,
-     so these name the local install; without it, Safari and iOS reach the same system copies through
-     system-ui and ui-*. SF Pro adjusts to each size by itself: its optical-size axis moves from Text to
-     Display, and its tracking table spaces letters the way macOS does, so body text adds no letter-spacing. */
-  --font-sans: "SF Pro", "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  --font-head: "SF Pro", "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  --font-rounded: "SF Pro Rounded", ui-rounded, system-ui, -apple-system, sans-serif;
-  --font-serif: "New York", ui-serif, Georgia, serif;
-  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The faces live on :root (below), so the channel rail Beta can swap them. */
+  --font-sans: var(--face-sans);
+  --font-head: var(--face-head);
+  --font-rounded: var(--face-rounded);
+  --font-serif: var(--face-serif);
+  --font-mono: var(--face-mono);
   /* Numbers are sans with tabular figures; mono is only for code (ids, branches, commits, paths). */
   --font-num: var(--font-sans);
   /* Tailwind's font-normal … font-bold read the weight scale. */
@@ -268,6 +301,13 @@
     scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent;
   }
+  /* Scrolls without a visible bar: the thread transcript. */
+  .scroll-none {
+    scrollbar-width: none;
+  }
+  .scroll-none::-webkit-scrollbar {
+    display: none;
+  }
 
   /* Headline type: SF Pro, tight. */
   .font-display {
@@ -323,39 +363,58 @@
     transform: scale(0.96);
   }
 
-  /* ---- status glyphs: running pings ultramarine, needs is a still vermilion diamond,
-     done is a volt disc with an ink edge on white, settled is grey, idle and queued are hollow ---- */
+  /* ---- status marks (Mark in packages/shared/status.ts, drawn by StatusDot) ----
+     Shape says who has the ball: a circle the agent, a square a system outside Omni, a diamond Ben, a cross or a
+     triangle that it broke. Color repeats it, so neither is needed alone: ultramarine, amber, vermilion, red, then
+     volt for done and grey where nothing happens. Fill says how far along, a satellite dot that it is the crew's.
+     The shapes are StatusDot's SVG; this sets their color only. Motion sits with .ping and .breathe below. */
   .glyph {
     position: relative;
     display: inline-block;
     flex: none;
+    /* Grey where nothing happens (queued, stopped, idle): a mark, never text. */
+    --mark: var(--fg-4);
+    color: var(--mark);
   }
-  .glyph > i {
+  .glyph > svg {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+  .glyph > .ping {
     position: absolute;
     inset: 0;
     border-radius: 50%;
+    background: currentColor;
+    /* Seen only while it animates: still (reduced motion), no disc sits behind a hollow mark. */
+    opacity: 0;
   }
-  .glyph[data-s="running"] > i {
-    background: var(--live);
+  .glyph[data-family="agent"] {
+    --mark: var(--live);
   }
-  .glyph[data-s="running"] > i.ping {
-    animation: omni-ping var(--dur-ping) var(--ease-out) infinite;
+  .glyph[data-family="system"] {
+    --mark: var(--warn);
   }
-  .glyph[data-s="needs"] > i {
-    border-radius: 1.5px;
-    background: var(--needs);
-    transform: rotate(45deg) scale(0.86);
+  .glyph[data-family="you"] {
+    --mark: var(--needs);
   }
-  .glyph[data-s="done"] > i {
-    background: var(--done);
-    box-shadow: inset 0 0 0 1.5px var(--done-edge);
+  .glyph[data-family="broken"] {
+    --mark: var(--danger-text);
   }
-  .glyph[data-s="settled"] > i {
-    background: var(--fg-4);
+  .glyph[data-mark="loading"] {
+    color: inherit;
   }
-  .glyph[data-s="idle"] > i,
-  .glyph[data-s="queued"] > i {
-    box-shadow: inset 0 0 0 1.5px var(--fg-4);
+  /* Done is the volt disc with an ink edge on white, and an ink tick. */
+  .glyph .mark-done {
+    fill: var(--done);
+    stroke: var(--done-edge);
+    stroke-width: 1.6;
+  }
+  .glyph .mark-tick {
+    stroke: var(--on-done);
   }
   /* Status pill: neutral, except needs and done which fill with their pop and carry ink text. */
   .spill {
@@ -377,16 +436,30 @@
     background: var(--needs);
     color: var(--on-needs);
   }
-  .spill[data-s="needs"] .glyph > i {
-    background: var(--on-needs);
+  .spill[data-s="needs"] .glyph {
+    --mark: var(--on-needs);
+  }
+  .spill[data-s="failed"] {
+    color: var(--danger-text);
+  }
+  .spill[data-s="limited"] {
+    color: var(--warn);
   }
   .spill[data-s="done"] {
     background: var(--done);
     color: var(--on-done);
   }
-  .spill[data-s="done"] .glyph > i {
-    background: var(--on-done);
-    box-shadow: none;
+  .spill[data-s="done"] .glyph .mark-done {
+    fill: var(--on-done);
+    stroke: none;
+  }
+  .spill[data-s="done"] .glyph .mark-tick {
+    stroke: var(--done);
+  }
+  /* Ready for review is a finished thread: its pill stays quiet and the diamond keeps its vermilion. */
+  .spill[data-mark="review"] {
+    background: var(--surface-2);
+    color: var(--fg-2);
   }
   /* The mark takes the text color; attention turns it vermilion. */
   .mark {
@@ -399,75 +472,155 @@
     color: var(--needs);
   }
 
-  /* ---- segmented pill with a sliding thumb (Bencho "pill") ---- */
-  .seg {
+  /* ---- selectable items: nav rows, tabs and menu rows (Shopify Polaris) ----
+     Each item paints its own state; nothing travels between items. Hover takes --wash, selected and pressed take
+     --wash-selected and stay put on hover, keyboard focus draws a 2px ink ring inside the item so a scrolling or
+     folding parent never clips it. Only the fill and the text color fade, over 150ms, and not at all under reduced
+     motion. Utilities win over this layer: a rounded-* class reshapes an item (the phone tab bar's pills), and an item
+     carries no hover:bg-* or transition-* class of its own. */
+  .item {
+    border-radius: var(--r-item);
+    transition:
+      background-color 150ms var(--ease-out),
+      color 150ms var(--ease-out);
+  }
+  .item:hover {
+    background: var(--wash);
+  }
+  .item:is(:active, [data-active="true"]):not(:disabled, [aria-disabled="true"]) {
+    background: var(--wash-selected);
+  }
+  .item:focus-visible {
+    outline: 2px solid var(--fg);
+    outline-offset: -2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .item {
+      transition: none;
+    }
+  }
+
+  /* ---- the thread tree (ThreadTree.tsx) ----
+     Each row hangs off one vertical line from its parent's status mark; the last row's line curves into it at the
+     row's middle, as the sidebar's sub-agent rows do. A row's children nest inside its node, so the line runs past them. */
+  .tree-node {
     position: relative;
-    display: inline-flex;
-    gap: 2px;
-    padding: 3px;
-    border-radius: 999px;
-    background: var(--surface-2);
+    --tree-mid: 16px;
   }
-  .seg[data-orientation="vertical"] {
-    flex-direction: column;
-    border-radius: 18px;
+  @media (min-width: 768px) {
+    .tree-node {
+      --tree-mid: 14px;
+    }
   }
-  .seg[data-bare] {
-    background: transparent;
-    padding: 0;
+  .tree-node[data-variant="phone"] {
+    --tree-mid: 18px;
   }
-  .seg-thumb {
+  .tree-node::before {
+    content: "";
     position: absolute;
     top: 0;
+    bottom: 0;
     left: 0;
-    border-radius: 999px;
-    background: var(--thumb);
-    box-shadow: var(--shadow-thumb);
+    border-left: 1px solid var(--line-strong);
     pointer-events: none;
-    will-change: transform, width, height;
   }
-  .seg-thumb[data-tone="wash"] {
-    background: var(--surface-3);
-    box-shadow: none;
+  .tree-node.tree-last::before {
+    bottom: auto;
+    width: 8px;
+    height: var(--tree-mid);
+    border-bottom: 1px solid var(--line-strong);
+    border-bottom-left-radius: 6px;
   }
-  .seg-thumb[data-phase="stretch"] {
+
+  /* ---- a row with its tree, as one block (InboxView.tsx, SidebarRows.tsx) ----
+     A job whose rows show under it sits apart from its neighbours in a list, with space and a hairline inset like the
+     rows' wash, so one job's last row and the next job's header don't read as one run. Rows with nothing nested under
+     them (no tree, or a closed one with nothing waiting on Ben) stay packed. Padding, not margin: the lists' space-y-*
+     sets every card's top margin from the utilities layer, which beats this one. */
+  .tree-group {
+    position: relative;
+  }
+  .tree-group:has(.tree-node, [data-agent-row]) + .tree-group,
+  .tree-group + .tree-group:has(.tree-node, [data-agent-row]) {
+    padding-block-start: 14px;
+  }
+  .tree-group:has(.tree-node, [data-agent-row]) + .tree-group::before,
+  .tree-group + .tree-group:has(.tree-node, [data-agent-row])::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    inset-inline: 12px;
+    border-top: 1px solid var(--line);
+    pointer-events: none;
+  }
+
+  /* ---- channel rail items (ChannelRail.tsx) ----
+     Discs rest in greyscale and take their colour back on hover or keyboard focus, unless Settings, Appearance sets
+     the rail to full colour (data-color="full"). The selected disc and the status badges (outside the disc) always
+     keep theirs. Hover and focus grow the 48px item to 110% about its centre, which
+     the rail's width (72px, 98px on a Mac) and the scroll area's 6px padding leave room for, and round its wash and
+     focus ring into a circle. Reduced motion keeps the colour and drops the growth and every transition. */
+  .rail-item {
+    border-radius: var(--radius-2xl);
     transition:
-      transform 0.19s var(--ease-stretch),
-      width 0.19s var(--ease-stretch),
-      height 0.19s var(--ease-stretch),
-      border-radius 0.19s var(--ease-stretch);
+      scale 0.38s var(--ease-out),
+      border-radius 0.38s var(--ease-out),
+      background-color 0.3s var(--ease-out),
+      transform 220ms var(--ease-settle);
   }
-  .seg-thumb[data-phase="settle"] {
+  .rail-item:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--fg);
+  }
+  .rail-item:is(:hover, :focus-visible) {
+    scale: 1.1;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--fg) 11%, transparent);
+  }
+  .rail-disc {
+    filter: grayscale(1);
     transition:
-      transform 0.42s var(--ease-settle),
-      width 0.42s var(--ease-spring),
-      height 0.42s var(--ease-spring),
-      border-radius 0.42s var(--ease-spring);
+      filter 0.38s var(--ease-out),
+      color 150ms var(--ease-out),
+      background-color 150ms var(--ease-out);
+  }
+  .rail-item:is(:hover, :focus-visible, [aria-current="page"], [data-marked]) .rail-disc,
+  .rail-chrome[data-color="full"] .rail-disc {
+    filter: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rail-item,
+    .rail-disc {
+      transition: none;
+    }
+    .rail-item:is(:hover, :focus-visible) {
+      scale: none;
+    }
+  }
+
+  /* ---- tabs and segmented choices: a row of items, no track ---- */
+  .seg {
+    display: inline-flex;
+    gap: 4px;
   }
   .seg-item {
-    position: relative;
-    z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border-radius: 999px;
-    padding: 0 14px;
+    padding: 0 12px;
     height: 30px;
     font-size: 13px;
-    color: var(--fg-3);
-    white-space: nowrap;
-    transition: color 0.26s var(--ease-stretch);
-  }
-  .seg-item:hover {
     color: var(--fg-2);
+    white-space: nowrap;
   }
+  .seg-item:hover,
   .seg-item[data-active="true"] {
     color: var(--fg);
   }
   .seg[data-size="sm"] .seg-item {
     height: 26px;
-    padding: 0 11px;
+    padding: 0 10px;
     font-size: 12.5px;
   }
 
@@ -899,7 +1052,7 @@
   color: var(--fg-3);
 }
 .md li::marker {
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 .md a {
   color: var(--fg);
@@ -1056,16 +1209,22 @@
     opacity: 0;
   }
 }
+/* A status mark moves in one of two ways (StatusDot): a halo leaves it while the agent's own turn works (.ping), and
+   it fades and returns while it waits on other work, as crew, checks or a limit's clock (.breathe). */
 .ping {
-  animation: omni-ping 1.6s var(--ease-out) infinite;
+  animation: omni-ping var(--dur-ping) var(--ease-out) infinite;
 }
-@keyframes omni-spin {
-  to {
-    transform: rotate(360deg);
+@keyframes omni-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
   }
 }
-.spin {
-  animation: omni-spin 0.9s linear infinite;
+.breathe {
+  animation: omni-breathe calc(var(--dur-ping) * 1.5) var(--ease-fluid) infinite;
 }
 /* The browser panel's loading bar, Chrome style: a sliver sweeping under the address bar. */
 @keyframes omni-load {
@@ -1160,6 +1319,12 @@
 /* Thread side panel: slides in from the right and settles. */
 .panel-in {
   animation: omni-panel 0.5s var(--ease-settle);
+}
+/* Its tab strip: 32px tabs, icon-only but for the open one, which also shows its name. */
+.seg.inspector-tabs .seg-item {
+  height: 32px;
+  padding: 0 9px;
+  font-size: 12.5px;
 }
 @keyframes say-burn {
   from {
@@ -1264,7 +1429,7 @@
   }
   .pulse,
   .ping,
-  .spin,
+  .breathe,
   .shimmer-text {
     animation: none !important;
   }
@@ -1378,6 +1543,50 @@ html:has(.mo-app) body {
   padding-left: 84px;
 }
 [data-desktop="darwin"] .desktop-titlebar :is(a, button, input, select, textarea, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+/* The channel rail layout: the native traffic lights sit centred at the rail's top, 15 window points down as in the
+   Claude desktop app (window-rules.ts trafficLights centres them in the 98px rail), on a liquid-glass capsule. The
+   rail's top strip holds them above the Inbox disc, and it and the list panel's title row drag the window. Linux draws
+   its own frame, so none of this changes there.
+   The three lights are 14px with 9px gaps (macOS 27), so they end 78 window pixels in. The rail widens from 72px to
+   98px to keep them off the list panel down to the smallest zoom (0.8 x 98 = 78.4).
+   The lights never zoom, so the capsule's sizes are window points divided by --desktop-zoom (desktop.ts): 7pt round
+   the 60 x 14pt cluster, from 8pt down to 36pt. The top strip clears the capsule's bottom by 8px at every zoom. */
+[data-desktop="darwin"] .rail-shell .rail-chrome {
+  width: 98px;
+}
+[data-desktop="darwin"] .rail-shell .rail-top {
+  -webkit-app-region: drag;
+  padding-top: calc(36px / var(--desktop-zoom, 1) + 8px);
+}
+.rail-lights-glass {
+  display: none;
+}
+[data-desktop="darwin"] .rail-shell .rail-lights-glass {
+  display: block;
+  position: absolute;
+  top: calc(8px / var(--desktop-zoom, 1));
+  left: 50%;
+  width: calc(74px / var(--desktop-zoom, 1));
+  height: calc(28px / var(--desktop-zoom, 1));
+  translate: -50% 0;
+  border-radius: 999px;
+  pointer-events: none;
+  /* The design system's dark glass pill (iOS.jsx IOSGlassPill): blur and tint, a shine on the rim, a soft drop. */
+  background: rgb(120 120 128 / 0.28);
+  backdrop-filter: blur(12px) saturate(180%);
+  border: 0.5px solid rgb(255 255 255 / 0.15);
+  box-shadow:
+    inset 1.5px 1.5px 1px rgb(255 255 255 / 0.15),
+    inset -1px -1px 1px rgb(255 255 255 / 0.08),
+    0 2px 6px rgb(0 0 0 / 0.35),
+    0 6px 16px rgb(0 0 0 / 0.2);
+}
+[data-desktop="darwin"] .rail-shell .rail-panel-top {
+  -webkit-app-region: drag;
+}
+[data-desktop="darwin"] .rail-shell :is(.rail-top, .rail-panel-top) :is(a, button, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
 }
 /* The phone layout, in a narrow window: a strip above it for the traffic lights, to drag the window by

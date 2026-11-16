@@ -24,6 +24,8 @@ import { addEvent, emitThread, isShuttingDown, refusal, requestMsg, runsHere, th
 import { bindResume, retrySetup, saveStart, setUpThread, START_REQUEST } from './setup.ts';
 import { dismissQuestions } from './questions.ts';
 import { runnerPorts } from './ports.ts';
+import { interruptThread } from './session.ts';
+import { parseGoalCommand } from '@omni/shared/goal.ts';
 import { assignRouted, remoteHolder } from '../ownership.ts';
 import { sendUploads } from '../sync/files.ts';
 
@@ -97,6 +99,11 @@ export interface CreateThreadInput {
   base?: BasePick | null;
   /** Files Ben attached to the first message. Validate them with `checkUploads` before calling. */
   files?: File[];
+  /**
+   * Records on the first message, already normalized (parseContexts), as on a message Ben posts. Only for a thread
+   * that runs here: one sent to another machine is refused, since its first prompt travels as text.
+   */
+  context?: MessageContext[];
   /**
    * The machine to run it on (run-on.ts): a synced machine's id, or "here". Left out, Settings' default. A thread for
    * another machine is made here and sent there with its first prompt; nothing runs here.
@@ -175,6 +182,8 @@ export async function createThread(input: CreateThreadInput): Promise<Thread> {
   // Team members stay with their lead, which runs once with all their replies. A delegated thread may go: its report
   // comes back to the parent (run-on.ts).
   const route = input.source === 'team' ? null : await runnerPorts().routing.targetFor(input.device);
+  const context = input.context?.length ? input.context : undefined;
+  if (route && context) throw refusal(`A first message with attachments from Omni runs here, not on ${route.to.name}.`, 409);
   if (route) {
     // In Storage before the thread is made, so a failed upload leaves nothing behind and the other machine finds them.
     const bodies = await Promise.all((input.files ?? []).map(async (f) => new Uint8Array(await f.arrayBuffer())));
@@ -199,7 +208,7 @@ export async function createThread(input: CreateThreadInput): Promise<Thread> {
   const attachments = saved.length ? saved : undefined;
   if (thread.setup) {
     // A worktree thread: its prompt and files are saved first, and sent once the worktree is made and checked.
-    saveStart(thread, input.prompt, attachments);
+    saveStart(thread, input.prompt, attachments, context);
     if (!input.title) void generateTitle(thread.id, input.prompt);
     void setUpThread(thread.id);
     return threads.get(thread.id)!;
@@ -211,10 +220,11 @@ export async function createThread(input: CreateThreadInput): Promise<Thread> {
     text: withMentions(text, { cwd: thread.cwd, threadId: thread.id }),
     mode: 'steer',
     attachments,
+    contexts: context,
     commands,
     event: {
       kind: 'user',
-      payload: { text: input.prompt, source: thread.source, ...(slash && { slash }), ...(attachments && { attachments }) },
+      payload: { text: input.prompt, source: thread.source, ...(slash && { slash }), ...(attachments && { attachments }), ...(context && { context }) },
     },
   });
   if (!input.title) void generateTitle(thread.id, input.prompt);
@@ -422,11 +432,12 @@ export function wakePrepared(r: MessageRequest): Promise<void> {
 export async function postMessage(
   threadId: string,
   prompt: string,
-  opts: Parameters<typeof sendMessage>[2] & { requestId?: string; fingerprint?: string } = {},
+  opts: Parameters<typeof sendMessage>[2] & { requestId?: string; fingerprint?: string; ifAway?: 'ask' | 'send' } = {},
 ): Promise<PostedThread> {
   const thread = threads.get(threadId);
   if (!thread) throw new Error('thread not found');
-  const mode = opts.mode ?? 'steer';
+  const goal = goalSend(thread, prompt, opts.attachments?.length ?? 0);
+  const mode = goal ? 'queue' : (opts.mode ?? 'steer');
   const source = opts.from ?? 'ben';
   const files = (opts.attachments ?? []).map((a) => ({ name: a.name, size: a.size, sha256: '' }));
   const fingerprint = opts.fingerprint ?? requestFingerprint({ prompt, mode, source, files, context: opts.context });
@@ -437,9 +448,17 @@ export async function postMessage(
   // Ben wrote instead of answering the agent's questions: a call waiting on them returns, so this message is read now.
   // On a thread that runs elsewhere the dismissal syncs to the machine whose call waits.
   const dismiss = source === 'ben' && mode !== 'queue';
-  // A thread routed to another machine runs there: the message goes to it (run-on.ts).
+  // A thread that stays on the machine holding it (sent there, delegated, or a worktree thread) runs there: the
+  // message goes to it (run-on.ts). Moving it here is Take over, which brings its branch and files along.
   if (remoteHolder(thread)) {
-    const forwarded = (await runnerPorts().routing.forwardMessage(thread, prompt, { mode, from: source, requestId: opts.requestId, attachments: opts.attachments, context: opts.context })) as PostedThread;
+    const forwarded = (await runnerPorts().routing.forwardMessage(thread, prompt, {
+      mode,
+      from: source,
+      requestId: opts.requestId,
+      attachments: opts.attachments,
+      context: opts.context,
+      ifAway: opts.ifAway,
+    })) as PostedThread;
     if (dismiss) dismissQuestions(threadId);
     return forwarded;
   }
@@ -462,8 +481,25 @@ export async function postMessage(
   });
   // The same id posted twice at once: the second waits for nothing.
   if (!fresh) return acceptedAgain(threadId, row.request_id, fingerprint)!;
-  await inOrder(threadId, () => deliverRequest(row, () => messageRequests.remove(row.id)));
+  await inOrder(threadId, () => {
+    // Stopped before the command queues: Stop drops what is held behind the turn, and what queues behind a stop runs
+    // next. Checked here, in order, so the command never stops the turn it starts itself.
+    if (goal?.stops && threads.get(threadId)?.status === 'running') interruptThread(threadId);
+    return deliverRequest(row, () => messageRequests.remove(row.id));
+  });
   return accepted(threadId, row);
+}
+
+/**
+ * A `/goal` message to Claude Code, which runs it only as a turn of its own: steered into a running turn it is plain
+ * text. It queues instead. A new goal, or a clear while a goal is active, stops the running turn so it applies now;
+ * a bare `/goal` waits for the turn. Null for anything else, and for a message with files, which is a prompt.
+ */
+function goalSend(thread: Thread, prompt: string, files: number): { stops: boolean } | null {
+  if (thread.harness !== 'claude-code' || files) return null;
+  const cmd = parseGoalCommand(prompt);
+  if (!cmd) return null;
+  return { stops: cmd.type === 'set' || (cmd.type === 'clear' && thread.goal_status === 'active') };
 }
 
 /**

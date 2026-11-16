@@ -1,9 +1,11 @@
 // The Omni mobile design system's parts (ui_kits/omni-mobile/MobileParts.jsx), on the Web UI's own components.
 // Metrics are the design's, in CSS pixels on a 390-wide phone.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CONDUCTOR_CHANNEL, hasOwnLook } from '@omni/shared/channel-icon.ts';
 import { CrewMark, isCrewRole } from '../components/brand.tsx';
 import { Folded } from '../components/Folded.tsx';
 import { Avatar, Icon, StatusDot, type Glyph, type IconName } from '../components/ui.tsx';
+import type { Mark, Phase } from '@omni/shared/status.ts';
 import type { RowItem } from './rows.ts';
 
 /** Safe-area insets: a home-screen app draws under the status bar and the home indicator. */
@@ -76,7 +78,7 @@ export function MoSection({ title, count, right, children, pad = true }: { title
     <section className={`flex flex-col gap-2 ${pad ? 'px-4' : ''}`}>
       <div className="flex items-baseline gap-1.5 px-1">
         <span className="text-[12px] leading-[1.3] font-medium text-fg-3">{title}</span>
-        {count != null && <span className="text-[12px] leading-[1.3] text-fg-4 tabular-nums">{count}</span>}
+        {count != null && <span className="text-[12px] leading-[1.3] text-fg-3 tabular-nums">{count}</span>}
         <span className="flex-1" />
         {right}
       </div>
@@ -102,22 +104,24 @@ export function MoEmpty({ children }: { children: ReactNode }) {
 }
 
 /**
- * Who works the thread: its crew mark, or the channel's letter when it runs without a role, with its status on the
- * corner.
+ * Who works the thread: its crew mark, or the channel's avatar when it runs without a role, with its status on the
+ * corner. A Conductor thread wears the Conductor's saved icon and background once it has them, as on the desktop Inbox
+ * and the iPhone; its crew ring is only the default.
  */
-export function MoAvatar({ role, channel, channelIcon, state, size = 36 }: { role?: string | null; channel?: string; channelIcon?: string | null; state?: Glyph | string | null; size?: number }) {
+export function MoAvatar({ role, channel, channelIcon, avatarBg, state, phase, mark, size = 36 }: { role?: string | null; channel?: string; channelIcon?: string | null; avatarBg?: string | null; state?: Glyph | string | null; phase?: Phase | null; mark?: Mark | null; size?: number }) {
+  const ring = isCrewRole(role) && !(role === 'conductor' && hasOwnLook({ icon: channelIcon, avatar_bg: avatarBg }));
   return (
     <span className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }}>
-      {isCrewRole(role) ? (
+      {ring ? (
         <span className="grid h-full w-full place-items-center rounded-full bg-surface-2 text-fg-2">
           <CrewMark role={role} size={Math.round(size * 0.46)} />
         </span>
       ) : (
-        <Avatar name={channel ?? '?'} channelIcon={channelIcon} omni={channel === 'conductor'} size={size} />
+        <Avatar name={channel ?? '?'} channelIcon={channelIcon} avatarBg={avatarBg} omni={channel === CONDUCTOR_CHANNEL} size={size} />
       )}
       {state && (
         <span className="absolute -right-px -bottom-px grid h-3.5 w-3.5 place-items-center rounded-full bg-bg">
-          <StatusDot status={state} size={8} />
+          <StatusDot status={state} phase={phase} mark={mark} size={8} />
         </span>
       )}
     </span>
@@ -137,7 +141,7 @@ export function MoDiff({ add, del }: { add: number; del: number }) {
 export function MoRow({ it, onOpen, last, trailing }: { it: RowItem; onOpen: () => void; last?: boolean; trailing?: ReactNode }) {
   return (
     <button type="button" onClick={onOpen} className="mo-row flex min-w-0 w-full items-center gap-3 px-1 py-2.5 text-left">
-      <MoAvatar role={it.role} channel={it.channelId} channelIcon={it.channelIcon} state={it.status} />
+      <MoAvatar role={it.role} channel={it.channelId} channelIcon={it.channelIcon} avatarBg={it.avatarBg} state={it.status} phase={it.phase} />
       <span className={`-mb-2.5 flex min-w-0 flex-1 flex-col gap-0.5 pb-2.5 ${last ? '' : 'border-b border-line'}`}>
         <span className="flex items-baseline gap-2">
           <span className={`min-w-0 flex-1 truncate text-[15px] leading-[1.3] ${it.settled ? 'text-fg-2' : 'text-fg'}`}>{it.title}</span>
@@ -183,10 +187,13 @@ export function MoListRow({
   chevron = true,
   last,
   disabled,
+  wrapSub,
 }: {
   icon?: IconName | ReactNode;
   label: ReactNode;
   sub?: ReactNode;
+  /** Let the sub line wrap instead of cutting it off, for a row whose sub must be read whole. */
+  wrapSub?: boolean;
   right?: ReactNode;
   onClick?: () => void;
   chevron?: boolean;
@@ -199,11 +206,11 @@ export function MoListRow({
       <span className={`flex min-w-0 flex-1 items-center gap-2.5 self-stretch ${last ? '' : 'border-b border-line'}`}>
         <span className="flex min-w-0 flex-1 flex-col gap-px py-2.5">
           <span className="truncate text-[15px] leading-[1.3]">{label}</span>
-          {sub && <span className="truncate text-[12.5px] leading-[1.35] text-fg-3">{sub}</span>}
+          {sub && <span className={`${wrapSub ? 'text-pretty' : 'truncate'} text-[12.5px] leading-[1.35] text-fg-3`}>{sub}</span>}
         </span>
         {right && <span className="flex items-center gap-1.5 text-[13px] leading-none text-fg-3 tabular-nums">{right}</span>}
         {chevron && onClick && (
-          <span className="grid text-fg-4">
+          <span className="grid text-fg-3">
             <Icon name="chevronRight" size={16} />
           </span>
         )}

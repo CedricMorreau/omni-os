@@ -1,19 +1,38 @@
-// The app's own updates, from the GitHub Releases its build names (electron-builder.config.cjs). It checks at start
-// and every 4 hours, downloads in the background and tells every window. A downloaded update installs as the app
-// quits, once the quit flow (quit.ts) has stopped the server this app started. Keep Server Running leaves it for a
-// later quit. Relaunch to Update runs the same flow, without that choice, and opens the app again.
+// The app's own updates, from the GitHub Releases its build names (electron-builder.config.cjs). With Check
+// automatically on (the default) it checks at start and every 4 hours and downloads in the background; off, only
+// Check for Updates looks and Download fetches. It tells every window, release notes included. A downloaded update
+// installs as the app quits, once the quit flow (quit.ts) has stopped the server this app started. Keep Server
+// Running leaves it for a later quit. Relaunch to Update runs the same flow, without that choice, and opens the app
+// again.
 import { app } from 'electron';
 import { spawn } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { AppUpdater } from 'electron-updater';
+import type { AppUpdater, UpdateInfo } from 'electron-updater';
 import type { DesktopUpdateView } from '@omni/shared/desktop-bridge.ts';
+import type { DesktopUpdateCommand, DesktopUpdateReport } from '@omni/shared/update-fleet.ts';
 import type { AppContext } from './context.ts';
 import { handle, on } from './handle.ts';
-import { quitPlan, quitToUpdate } from './quit.ts';
-import { initialView, installOnQuit, reduceUpdate, releasesPage, sameView, shouldCheck, updateErrorText, type UpdateHost, type UpdaterEvent } from './update-state.ts';
+import { quitPlan, quitToUpdate, updateWhenIdle } from './quit.ts';
+import { createUpdateReporter } from './update-report.ts';
+import {
+  commandStep,
+  initialView,
+  installOnQuit,
+  reduceUpdate,
+  releaseNotes,
+  releasePage,
+  releasesPage,
+  sameView,
+  shouldCheck,
+  updateErrorText,
+  type UpdateHost,
+  type UpdaterEvent,
+} from './update-state.ts';
 
 const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
+/** How often the app reports its updater to the server it started, when no view change did. */
+const REPORT_EVERY_MS = 5000;
 /** How long a held quit waits for Squirrel.Mac to fetch, check and stage the update before the app exits anyway. */
 const MAC_INSTALL_WAIT_MS = 120_000;
 
@@ -44,12 +63,12 @@ function host(): UpdateHost {
   };
 }
 
-/** The releases page this build's feed names, for a Download link while checks fail. */
-function downloadUrl(): string | undefined {
+/** The feed this build names (app-update.yml), for the releases page and each release's own. */
+function feedYml(): string | null {
   try {
-    return releasesPage(readFileSync(join(process.resourcesPath, 'app-update.yml'), 'utf8')) ?? undefined;
+    return readFileSync(join(process.resourcesPath, 'app-update.yml'), 'utf8');
   } catch {
-    return undefined;
+    return null;
   }
 }
 
@@ -62,17 +81,25 @@ function startAfterExit(file: string, args: string[]): void {
 export function installUpdates(ctx: AppContext): void {
   let view: DesktopUpdateView = initialView(host());
   let updater: AppUpdater | null = null;
-  const download = view.state === 'unsupported' ? undefined : downloadUrl();
+  const yml = view.state === 'unsupported' ? null : feedYml();
+  /** The releases page this build's feed names, for a Download link while checks fail. */
+  const download = (yml ? releasesPage(yml) : null) ?? undefined;
+  const notes = (info: UpdateInfo) => releaseNotes(info.releaseNotes, yml ? releasePage(yml, info.version) : null);
+  const auto = () => ctx.settings.get().autoUpdate;
 
   const apply = (event: UpdaterEvent) => {
     const next = reduceUpdate(view, event);
     if (sameView(next, view)) return;
     view = next;
     ctx.broadcast({ type: 'update', update: view });
+    void report();
   };
 
-  const check = async () => {
+  /** `downloads`: go on to download what it finds, whatever Check automatically says. */
+  const check = async (downloads = auto()) => {
     if (!updater || !shouldCheck(view)) return;
+    // Read as the check finds an update: off, it waits for Download.
+    updater.autoDownload = downloads;
     try {
       await updater.checkForUpdates();
     } catch (err) {
@@ -84,6 +111,37 @@ export function installUpdates(ctx: AppContext): void {
   handle('omni:updates:check', async () => {
     await check();
     return view;
+  });
+  const startDownload = () => {
+    if (!updater || view.state !== 'available') return;
+    apply({ type: 'download-started' });
+    // Not awaited: the page gets `downloading` now, then the progress, the finished download or a failure as the
+    // updater's events. A failure is its error event too, which apply() already took.
+    updater.downloadUpdate().catch(() => {});
+  };
+
+  handle('omni:updates:download', async () => {
+    startDownload();
+    return view;
+  });
+
+  // A command from the server this app started, for a fleet ask. Check and download take the page buttons' steps; install waits for idle like Update When They Finish.
+  const carryOut = (command: DesktopUpdateCommand): boolean => {
+    const step = commandStep(command, view);
+    if (step === 'check') void check();
+    else if (step === 'check-and-download') void check(true);
+    else if (step === 'download') startDownload();
+    else if (step === 'install') void updateWhenIdle(ctx);
+    return step !== 'wait';
+  };
+  const report = createUpdateReporter({
+    // A copy that cannot update itself reports too, so the other machines show it as one to update by hand.
+    canReport: () => (!!updater || view.state === 'unsupported') && ctx.backend.current.kind === 'ready' && ctx.backend.info().startedHere,
+    current: () => ({ version: app.getVersion(), view }),
+    send: (body: DesktopUpdateReport) =>
+      ctx.backend.api('/api/update/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+    carryOut,
+    onFirstFailure: (err) => console.warn('[omni] update: the server did not take the update report:', updateErrorText(err)),
   });
 
   let handedOff = false;
@@ -134,6 +192,7 @@ export function installUpdates(ctx: AppContext): void {
     setImmediate(() => app.quit());
   });
 
+  setInterval(() => void report(), REPORT_EVERY_MS).unref();
   if (view.state === 'unsupported') return;
 
   void import('electron-updater').then(({ autoUpdater }) => {
@@ -144,17 +203,26 @@ export function installUpdates(ctx: AppContext): void {
       warn: (message: unknown) => console.warn('[omni] update:', updateErrorText(message)),
       error: (message: unknown) => console.error('[omni] update:', updateErrorText(message)),
     };
-    autoUpdater.autoDownload = true;
+    // check() sets autoDownload from Check automatically before each check.
     // will-quit above installs, and only when the server stopped. electron-updater's own install at quit does not
     // ask: on a Mac, Squirrel.Mac would install at any quit once it had staged the update.
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.on('checking-for-update', () => apply({ type: 'checking' }));
-    autoUpdater.on('update-available', (info) => apply({ type: 'available', version: info.version }));
+    autoUpdater.on('update-available', (info) =>
+      apply({ type: 'available', version: info.version, notes: notes(info), autoDownload: autoUpdater.autoDownload }),
+    );
     autoUpdater.on('update-not-available', () => apply({ type: 'not-available', at: new Date().toISOString() }));
     autoUpdater.on('download-progress', (progress) => apply({ type: 'progress', percent: progress.percent }));
-    autoUpdater.on('update-downloaded', (info) => apply({ type: 'downloaded', version: info.version }));
+    autoUpdater.on('update-downloaded', (info) => apply({ type: 'downloaded', version: info.version, notes: notes(info) }));
     autoUpdater.on('error', (err) => apply({ type: 'error', message: updateErrorText(err), downloadUrl: download }));
-    void check();
-    setInterval(() => void check(), CHECK_EVERY_MS).unref();
+    if (auto()) void check();
+    setInterval(() => {
+      if (auto()) void check();
+    }, CHECK_EVERY_MS).unref();
+    void report();
+    // Turned on: look now rather than at the next tick.
+    ctx.settings.onChange((next, previous) => {
+      if (next.autoUpdate && !previous.autoUpdate) void check();
+    });
   });
 }

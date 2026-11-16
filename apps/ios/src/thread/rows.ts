@@ -3,6 +3,8 @@ import type { Span } from '@omni/shared/history.ts';
 import { same, type CloudAgentP, type Item, type ModLine, type ReportP, type SwitchItem, type ToolCall } from '@omni/shared/transcript-fold.ts';
 import { threadView, type NowDoing, type PlanView, type Prompt, type ThreadView, type TurnView } from '@omni/shared/thread-view.ts';
 import type { ThreadQuestion } from '@omni/shared/question.ts';
+import { statusLabel } from '@omni/shared/status-line.ts';
+import { hasOwnLook } from '@omni/shared/channel-icon.ts';
 
 import { harnessLabel } from './format';
 
@@ -22,7 +24,8 @@ export type ThreadRow =
   | { kind: 'report'; key: string; r: ReportP }
   | { kind: 'question'; key: string; q: ThreadQuestion }
   | { kind: 'outcome'; key: string; status: IosTurn['status']; tookMs: number | undefined; steps: number; harness: string }
-  | { kind: 'conductor'; key: string }
+  /** The quiet "Conductor" line over its answer. `look`: the icon and background saved for it, null for the Omni mark. */
+  | { kind: 'conductor'; key: string; look: ConductorLook | null }
   | { kind: 'error'; key: string; text: string }
   | { kind: 'cloud'; key: string; p: CloudAgentP }
   | { kind: 'prose'; key: string; text: string; clipped: number | null }
@@ -34,6 +37,8 @@ export type ThreadRow =
   | { kind: 'mod'; key: string; lines: ModLine[] }
   | { kind: 'switch'; key: string; it: SwitchItem; running: boolean }
   | { kind: 'now'; key: string; now: NowDoing; meta: string | null }
+  /** The running turn's thinking line (web: ThinkingLine): the mark, the label shimmering and the time since `since`. */
+  | { kind: 'thinking'; key: string; label: string; since: string }
   | { kind: 'plan'; key: string; plan: PlanView };
 
 export type RowKind = ThreadRow['kind'];
@@ -51,6 +56,13 @@ export const ITEM_ROWS: Record<Item['type'], readonly RowKind[]> = {
   question: ['question'],
 };
 
+/** The Conductor channel's saved look, as the thread list reads it. */
+export interface ConductorLook {
+  name: string;
+  icon: string | null;
+  avatar_bg: string | null;
+}
+
 export interface RowsInput {
   events: readonly HistoryEvent[];
   spans?: readonly Span[];
@@ -59,7 +71,13 @@ export interface RowsInput {
   children: Thread[];
   atStart: boolean;
   conductor?: boolean;
+  /** The Conductor's channel, for its saved icon and background on the turns it answered. */
+  conductorChannel?: { name: string; icon?: string | null; avatar_bg?: string | null } | null;
   disclosure?: Disclosure;
+}
+
+function conductorLook(c: RowsInput['conductorChannel']): ConductorLook | null {
+  return c && hasOwnLook(c) ? { name: c.name, icon: c.icon ?? null, avatar_bg: c.avatar_bg ?? null } : null;
 }
 
 function caption(thread: Thread, p: Prompt, first: boolean, k: number, atStart: boolean): string | null {
@@ -96,11 +114,9 @@ function* turnRows(t: IosTurn, i: number, last: boolean, view: IosThreadView, in
   const open = disclosure.turns.has(t.key);
   const steps = (): ThreadRow => ({ kind: 'steps', key: `s${t.key}`, turn: t.key, steps: t.steps, failed: t.failed, live, open });
   if (live) {
+    // As phone web: the thinking line stays up for the whole turn, tool calls included, and gives way to a question.
     if (t.status === 'queued') yield { kind: 'now', key: `now${t.key}`, now: { verb: 'Waiting for a free slot', target: '' }, meta: null };
-    else if (view.now) {
-      const meta = view.plan ? `step ${Math.min(view.plan.done + 1, view.plan.todos.length)}/${view.plan.todos.length}` : null;
-      yield { kind: 'now', key: `now${t.key}`, now: view.now, meta };
-    }
+    else if (!view.asking) yield { kind: 'thinking', key: `th${t.key}`, label: statusLabel(input.events) ?? 'Thinking', since: t.at || thread.created_at };
     if (view.plan) yield { kind: 'plan', key: `plan${t.key}`, plan: view.plan };
     if (t.cloud) yield { kind: 'cloud', key: `cl${t.key}`, p: t.cloud };
     if (t.prose) yield { kind: 'prose', key: `a${t.key}`, text: t.prose, clipped: t.proseClipped?.key ?? null };
@@ -108,7 +124,7 @@ function* turnRows(t: IosTurn, i: number, last: boolean, view: IosThreadView, in
     if (t.steps > 0) yield steps();
   } else {
     const quiet = input.conductor && t.status === 'done';
-    if (quiet && (t.prose || t.children.length)) yield { kind: 'conductor', key: `co${t.key}` };
+    if (quiet && (t.prose || t.children.length)) yield { kind: 'conductor', key: `co${t.key}`, look: conductorLook(input.conductorChannel) };
     else if (t.result || t.error || t.status !== 'done') yield { kind: 'outcome', key: `o${t.key}`, status: t.status, tookMs: t.result?.duration_ms, steps: t.steps, harness: t.harness };
     if (t.error) yield { kind: 'error', key: `e${t.key}`, text: t.error };
     if (t.cloud) yield { kind: 'cloud', key: `cl${t.key}`, p: t.cloud };

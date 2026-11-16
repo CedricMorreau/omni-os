@@ -1,15 +1,22 @@
 import { Pressable, StyleSheet } from 'react-native';
 import { Text } from '../ui/Text';
 
-import { fontSize, minTarget, useOmniTheme, weight } from '../theme';
+import { fontSize, minTarget, space, useOmniTheme, weight } from '../theme';
+import { Icon, type IconName } from '../ui/Icon';
 
+/**
+ * A button in the navigation bar. With `icon` it draws the shared icon and the label is read aloud instead, as phone web's
+ * round icon buttons are; without it, the label is the button (Cancel, Start).
+ */
 export function HeaderButton({
   label,
+  icon,
   onPress,
   accessibilityLabel,
   disabled = false,
 }: {
   label: string;
+  icon?: IconName;
   onPress: () => void;
   accessibilityLabel?: string;
   disabled?: boolean;
@@ -23,9 +30,9 @@ export function HeaderButton({
       disabled={disabled}
       onPress={onPress}
       hitSlop={8}
-      style={styles.button}
+      style={[styles.button, icon ? styles.square : styles.text, { opacity: disabled ? 0.4 : 1 }]}
     >
-      <Text style={[styles.label, { color: colors.fg, opacity: disabled ? 0.4 : 1 }]}>{label}</Text>
+      {icon ? <Icon name={icon} size={19} color={colors.fg} /> : <Text style={[styles.label, { color: colors.fg }]}>{label}</Text>}
     </Pressable>
   );
 }
@@ -33,7 +40,16 @@ export function HeaderButton({
 const styles = StyleSheet.create({
   button: {
     minHeight: minTarget,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  square: {
+    minWidth: minTarget - 8,
+  },
+  /** A word ("Add", "Done") gets room on both sides, so iOS's glass capsule around it does not hug the letters. */
+  text: {
+    minWidth: minTarget,
+    paddingHorizontal: space.s6,
   },
   label: {
     fontSize: fontSize.input,

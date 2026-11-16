@@ -67,7 +67,7 @@ export function RolesPage() {
                   <div className="min-w-0 flex-1">
                     <div className="pt-1 text-[13.5px] font-medium">{s.name}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {s.roles.length ? s.roles.map((r) => <RoleChip key={r.id} role={r} onOpen={() => setEditing(r.id)} />) : <span className="text-[12.5px] text-fg-4">No roles</span>}
+                      {s.roles.length ? s.roles.map((r) => <RoleChip key={r.id} role={r} onOpen={() => setEditing(r.id)} />) : <span className="text-[12.5px] text-fg-3">No roles</span>}
                     </div>
                   </div>
                 </li>

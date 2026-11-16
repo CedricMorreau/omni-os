@@ -20,6 +20,7 @@ export function fakeClerk(opts: { interval?: number; issuer?: string; clientId?:
   const kid = 'key-1';
   const jwk = { ...publicKey.export({ format: 'jwk' }), kid, alg: 'RS256', use: 'sig' };
   const codes = new Map<string, Pending>();
+  const authCodes = new Map<string, { who: Who; client: string; resource: string | null }>();
   const accessTokens = new Map<string, Who>();
   const calls: string[] = [];
 
@@ -81,6 +82,14 @@ export function fakeClerk(opts: { interval?: number; issuer?: string; clientId?:
         });
       }
       case '/oauth/token': {
+        if (form.get('grant_type') === 'authorization_code') {
+          // Clerk's authorization code grant: the access token's aud is the RFC 8707 resource the client sent, if any.
+          const grant = authCodes.get(form.get('code') ?? '');
+          if (!grant || form.get('client_id') !== grant.client) return json({ error: 'invalid_grant' }, 400);
+          authCodes.delete(form.get('code')!);
+          const resource = form.get('resource') ?? grant.resource;
+          return json({ access_token: jwtAccessToken(grant.who, { client: grant.client, ...(resource ? { aud: resource } : {}) }), token_type: 'bearer' });
+        }
         const p = codes.get(form.get('device_code') ?? '');
         if (!p || form.get('client_id') !== clientId) return json({ error: 'invalid_grant' }, 400);
         if (p.state === 'pending') return json({ error: 'authorization_pending' }, 400);
@@ -108,5 +117,20 @@ export function fakeClerk(opts: { interval?: number; issuer?: string; clientId?:
   };
   const revoke = (token: string) => accessTokens.delete(token);
 
-  return { issuer, clientId, fetch, approve, deny, sign, idToken, accessToken, revoke, calls };
+  /** A new JWT OAuth access token for `who`, issued to `client`, with `aud` when given. Userinfo answers for it too. */
+  const jwtAccessToken = (who: Who, opts: { client?: string; aud?: string | string[]; exp?: number } = {}) => {
+    const now = Math.floor(Date.now() / 1000);
+    const token = sign({ iss: issuer, sub: who.sub, jti: randomBytes(8).toString('hex'), client_id: opts.client ?? 'client_dcr', ...(opts.aud ? { aud: opts.aud } : {}), iat: now, exp: opts.exp ?? now + 3600 });
+    accessTokens.set(token, who);
+    return token;
+  };
+
+  /** `who` signs in and consents for `client`: the code its redirect carries. `resource`: what the authorize request named. */
+  const authorize = (who: Who, client: string, resource: string | null = null) => {
+    const code = randomBytes(16).toString('hex');
+    authCodes.set(code, { who, client, resource });
+    return code;
+  };
+
+  return { issuer, clientId, fetch, approve, deny, sign, idToken, accessToken, jwtAccessToken, authorize, revoke, calls, privateKey, jwk };
 }

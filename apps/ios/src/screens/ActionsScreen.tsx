@@ -4,11 +4,14 @@ import { Text } from '../ui/Text';
 import { anyRunning, liveRun, SETUP_MODE_LABEL, type ActionRun, type ChannelAction } from '@omni/shared/channel-actions.ts';
 
 import { StatusDot } from '../components/StatusDot';
+import { StatusPill } from '../components/StatusPill';
+import { Icon } from '../ui/Icon';
 import { Notice } from '../components/Notice';
-import { actionDetail, outputCut, RUN_STATE_LABEL, runTone, runWhen } from '../live/actions-model';
+import { actionDetail, outputCut, RUN_STATE_LABEL, runGlyph, runWhen } from '../live/actions-model';
 import { useActionsLive, useActionsView } from '../live/react';
 import type { RootScreenProps } from '../navigation/types';
 import { Button } from '../ui/Button';
+import { Chip } from '../ui/Chip';
 import { fontSize, minTarget, radius, space, useOmniTheme, weight } from '../theme';
 
 const MONO = 'Menlo';
@@ -64,9 +67,9 @@ export function ActionsScreen({ route }: RootScreenProps<'Actions'>) {
                 <View style={styles.cardRow}>
                   <ActionLine action={a} />
                   {running ? (
-                    <Button label="Stop" variant="secondary" busy={view.busy.has(running.id)} onPress={() => void live.stop(running)} />
+                    <Button label="Stop" variant="secondary" size="compact" busy={view.busy.has(running.id)} onPress={() => void live.stop(running)} />
                   ) : (
-                    <Button label="Run" busy={view.busy.has(a.id)} disabled={!!data.blocked} onPress={() => void live.run(a)} accessibilityHint={`Runs ${a.name} in this thread`} />
+                    <Button label="Run" size="compact" busy={view.busy.has(a.id)} disabled={!!data.blocked} onPress={() => void live.run(a)} accessibilityHint={`Runs ${a.name} in this thread`} />
                   )}
                 </View>
                 {view.errors[a.id] ? <Text style={[styles.error, { color: colors.fg2 }]}>{view.errors[a.id]}</Text> : null}
@@ -116,20 +119,16 @@ function ActionLine({ action }: { action: ChannelAction }) {
         <Text numberOfLines={1} style={[styles.name, { color: colors.fg }]}>
           {action.name}
         </Text>
-        {action.setup ? <Chip label="Setup" /> : null}
+        {action.setup ? <Chip label="Setup" tone="outline" /> : null}
       </View>
       <Text numberOfLines={1} style={[styles.command, { color: colors.fg3 }]}>
         {action.command}
       </Text>
-      <Text style={[styles.meta, { color: colors.fg4 }]}>{[actionDetail(action), action.setup && SETUP_MODE_LABEL[action.setup]].filter(Boolean).join(' · ')}</Text>
+      <Text style={[styles.meta, { color: colors.fg4 }]}>{[actionDetail(action), action.setup && SETUP_MODE_LABEL[action.setup], action.teardown && 'Before removal'].filter(Boolean).join(' · ')}</Text>
     </View>
   );
 }
 
-function Chip({ label }: { label: string }) {
-  const { colors } = useOmniTheme();
-  return <Text style={[styles.chip, { color: colors.fg3, borderColor: colors.lineStrong }]}>{label}</Text>;
-}
 
 interface RunCardProps {
   run: ActionRun;
@@ -159,19 +158,24 @@ function RunCard({ run, latest, setup, now, busy, error, blocked, onStop, onRetr
           style={styles.lineText}
         >
           <View style={styles.nameRow}>
-            <Text style={[styles.chevron, { color: colors.fg4, transform: [{ rotate: open ? '90deg' : '0deg' }] }]}>›</Text>
-            <StatusDot tone={runTone(run.state)} />
+            <View style={[styles.chevron, { transform: [{ rotate: open ? '90deg' : '0deg' }] }]}>
+              <Icon name="chevronRight" size={11} color={colors.fg4} />
+            </View>
+            <StatusDot glyph={runGlyph(run.state)} />
             <Text numberOfLines={1} style={[styles.name, { color: colors.fg }]}>
               {run.name}
             </Text>
-            {setup ? <Chip label="Setup" /> : null}
+            {setup ? <Chip label="Setup" tone="outline" /> : null}
           </View>
-          <Text style={[styles.meta, { color: colors.fg3 }]}>{[RUN_STATE_LABEL[run.state], runWhen(run, now)].filter(Boolean).join(' · ')}</Text>
+          <View style={styles.stateRow}>
+            <StatusPill glyph={runGlyph(run.state)} label={RUN_STATE_LABEL[run.state]} />
+            {runWhen(run, now) ? <Text style={[styles.meta, { color: colors.fg3 }]}>{runWhen(run, now)}</Text> : null}
+          </View>
         </Pressable>
         {running ? (
-          <Button label="Stop" variant="secondary" busy={busy} onPress={onStop} />
+          <Button label="Stop" variant="secondary" size="compact" busy={busy} onPress={onStop} />
         ) : run.action_id ? (
-          <Button label="Retry" variant="secondary" busy={busy} disabled={blocked} onPress={onRetry} />
+          <Button label="Retry" variant="secondary" size="compact" busy={busy} disabled={blocked} onPress={onRetry} />
         ) : null}
       </View>
       {run.error ? <Text style={[styles.error, { color: colors.fg2 }]}>{run.error}</Text> : null}
@@ -210,7 +214,7 @@ const styles = StyleSheet.create({
     paddingTop: space.s9,
   },
   blocked: {
-    fontSize: fontSize.body - 1,
+    fontSize: fontSize.ui,
     lineHeight: 19,
     padding: space.s6,
     borderRadius: radius.md,
@@ -230,7 +234,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: minTarget,
     justifyContent: 'center',
-    gap: 2,
+    gap: space.s1,
   },
   nameRow: {
     flexDirection: 'row',
@@ -239,32 +243,28 @@ const styles = StyleSheet.create({
   },
   name: {
     flexShrink: 1,
-    fontSize: fontSize.body + 1,
+    fontSize: fontSize.subhead,
     fontWeight: weight.semibold,
   },
   command: {
     fontFamily: MONO,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
   },
   meta: {
     fontSize: fontSize.meta,
   },
   chevron: {
     width: 12,
-    fontSize: fontSize.body + 4,
-    lineHeight: 20,
-    textAlign: 'center',
+    alignItems: 'center',
   },
-  chip: {
-    fontSize: fontSize.meta - 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    overflow: 'hidden',
+  stateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s4,
+    marginTop: space.s2,
   },
   error: {
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
     lineHeight: 16,
   },
   output: {
@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
   },
   outputText: {
     fontFamily: MONO,
-    fontSize: fontSize.meta + 1,
+    fontSize: fontSize.caption,
     lineHeight: 17,
     padding: space.s6,
   },

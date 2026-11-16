@@ -1,16 +1,16 @@
-import type { HarnessUsage, OmniApi, PinnedThread, Thread, Usage } from '@omni/client-core';
+import type { OmniApi, PinnedThread, Thread } from '@omni/client-core';
+import { latestOnly } from '@omni/shared/latest.ts';
 
 import { serial } from './serial';
 import { createStore, type Store } from './store';
 
-/** How many threads the recent list holds, as phone web asks for. */
-export const RECENT_LIMIT = 60;
+/** How many threads the recent list holds, as phone web's Inbox asks for (apps/web/src/app/useInbox.ts). */
+export const RECENT_LIMIT = 200;
 
 export interface ActivityState {
   /** Newest activity first. Null until the first load. */
   recent: readonly Thread[] | null;
   pinned: readonly PinnedThread[];
-  usage: HarnessUsage;
   /** The largest file the server takes, from the status the load already read. Null until it says. */
   maxUploadMb: number | null;
   loading: boolean;
@@ -23,7 +23,11 @@ export interface ActivityLive {
   readonly state: Store<ActivityState>;
   /** Loads everything again: on open, on every feed reconnect and on return to the front. */
   refresh(): Promise<void>;
+  /** A thread Ben just changed here (pin, rename): it goes in now, and a load already in flight cannot put the old copy back. */
+  applyThread(thread: Thread): void;
+  /** Patches the recent list from a feed message. The pinned list it may move reloads through the hub's batched refetch. */
   applyFeed(message: unknown): void;
+  refreshPinned(): Promise<void>;
 }
 
 export interface ActivityLiveOptions {
@@ -34,22 +38,31 @@ export interface ActivityLiveOptions {
 
 /** Activity's data, kept live from the feed the way phone web's store keeps it. */
 export function createActivityLive({ api, withAuth, now }: ActivityLiveOptions): ActivityLive {
-  const state = createStore<ActivityState>({ recent: null, pinned: [], usage: {}, maxUploadMb: null, loading: false, error: null, loadedAt: null });
+  const state = createStore<ActivityState>({ recent: null, pinned: [], maxUploadMb: null, loading: false, error: null, loadedAt: null });
   const failed = (e: unknown) => state.set((s) => ({ ...s, error: messageOf(e) }));
+  // A load that started before a local change answers with the older lists (@omni/shared/latest.ts). Feed updates are
+  // server state the next load already carries, so they patch the list without making it stale.
+  const recentReads = latestOnly();
+  const pinnedReads = latestOnly();
 
   const refresh = serial(async () => {
     if (!api) return;
     state.set((s) => ({ ...s, loading: true }));
+    const recentToken = recentReads.begin();
+    const pinnedToken = pinnedReads.begin();
     const [recent, pinned, status] = await Promise.allSettled([
       withAuth(() => api.recent(RECENT_LIMIT)),
       withAuth(() => api.pinned()),
       withAuth(() => api.status()),
     ]);
+    if (!recentReads.holds(recentToken)) {
+      void refresh();
+      return;
+    }
     const failure = [recent, pinned, status].find((r) => r.status === 'rejected');
     state.set((s) => ({
       recent: recent.status === 'fulfilled' ? recent.value : s.recent,
-      pinned: pinned.status === 'fulfilled' ? pinned.value : s.pinned,
-      usage: status.status === 'fulfilled' ? (status.value.usage ?? {}) : s.usage,
+      pinned: pinnedReads.holds(pinnedToken) && pinned.status === 'fulfilled' ? pinned.value : s.pinned,
       maxUploadMb: status.status === 'fulfilled' ? (status.value.maxUploadMb ?? null) : s.maxUploadMb,
       loading: false,
       error: failure ? messageOf(failure.reason) : null,
@@ -60,8 +73,9 @@ export function createActivityLive({ api, withAuth, now }: ActivityLiveOptions):
   const refreshPinned = serial(async () => {
     if (!api) return;
     try {
+      const token = pinnedReads.begin();
       const pinned = await withAuth(() => api.pinned());
-      state.set((s) => ({ ...s, pinned }));
+      if (pinnedReads.holds(token) && JSON.stringify(pinned) !== JSON.stringify(state.get().pinned)) state.set((s) => ({ ...s, pinned }));
     } catch (e) {
       failed(e);
     }
@@ -69,19 +83,15 @@ export function createActivityLive({ api, withAuth, now }: ActivityLiveOptions):
 
   function applyFeed(message: unknown) {
     if (!isRecord(message)) return;
-    switch (message.type) {
-      case 'thread':
-        if (!isRecord(message.thread) || typeof message.thread.id !== 'string') return;
-        patchRecent(message.thread as unknown as Thread);
-        void refreshPinned();
-        return;
-      case 'usage': {
-        const harness = typeof message.harness === 'string' ? message.harness : 'claude-code';
-        const usage = isRecord(message.usage) ? (message.usage as Usage) : null;
-        state.set((s) => ({ ...s, usage: { ...s.usage, [harness]: usage } }));
-        return;
-      }
-    }
+    if (message.type !== 'thread' || !isRecord(message.thread) || typeof message.thread.id !== 'string') return;
+    patchRecent(message.thread as unknown as Thread);
+  }
+
+  function applyThread(thread: Thread) {
+    recentReads.edit();
+    pinnedReads.edit();
+    patchRecent(thread);
+    void refreshPinned();
   }
 
   /** The thread's new copy in its place by activity. An archived one leaves the list. */
@@ -95,7 +105,7 @@ export function createActivityLive({ api, withAuth, now }: ActivityLiveOptions):
     });
   }
 
-  return { state, refresh, applyFeed };
+  return { state, refresh, applyFeed, applyThread, refreshPinned };
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

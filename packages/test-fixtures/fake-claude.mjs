@@ -18,11 +18,17 @@
 //                     on its own (no message of ours, no replay)
 //   /<command>        a message starting with a slash is a local command: no model call, a zero-turn success result
 //                     whose text is the command output
+//   /goal <condition> Claude Code's goal (as probed against claude 2.1.316): a synthetic "Goal set: <condition>" reply,
+//                     then the turn runs as usual and the goal clears once it ends. CHECKS:<n> in the condition: the goal
+//                     check finds it unmet that many times first, each a synthetic "Stop hook feedback" message and
+//                     another model call. `/goal` alone and `/goal clear` answer locally, as the real CLI does
 //   TITLE:<ms>        text mode (Omni's title call): take that long to write the title
 //   SUGGEST:<ms>      text mode (Omni's reply suggestion): take that long to answer
 //   SUGGEST_NONE      text mode (Omni's reply suggestion): answer NONE
 //   NEXT_THREAD       text mode (Omni's proposed follow-up thread): propose one; without it, answer NONE
 //   NEXT:<ms>         text mode (Omni's proposed follow-up thread): take that long to answer
+//   OPEN_ITEMS        text mode (Omni's open items): list a question, a decision and a blocker; without it, answer NONE
+//   OPEN:<ms>         text mode (Omni's open items): take that long to answer
 //   RICH              before the answer, the calls a real turn is made of: a plan updated as it goes, a sub-agent
 //                     with calls of its own, a status, a failing command and an MCP tool
 //   MODS              before the answer, what a mod's hooks send (Claude Code 2.1.287+): a ui_status, a ui_log, a
@@ -63,6 +69,13 @@
 //                                 the title call's prompt is the thread's first message, and the thread's CLI gets it too
 //   FAKE_CLAUDE_SUGGEST_GATE=<file>  text mode (Omni's reply suggestion): answer only once that file exists, so a test
 //                                 decides when the suggestion lands
+//   FAKE_CLAUDE_ARTIFACTS=<mode>  Omni's claude.ai Artifacts listing (stream-json print mode with --tools Artifact, as
+//                                 probed against claude 2.1.319): its Artifact list calls answered from
+//                                 claude-artifacts/*.txt, each call first through the PreToolUse hook in --settings, as the
+//                                 real CLI runs it. Modes: ok (default), signed_out, no_tool, limit, changed (the list in a
+//                                 format Omni cannot read), error (the list call fails), skip_type (one type's listing is
+//                                 never made), sneaky (a delete is tried first, as a hostile title could ask), hang
+//   FAKE_CLAUDE_ARTIFACTS_LIST=<file>  the list-all answer instead of claude-artifacts/list-all.txt
 //
 // The initialize control request answers with the commands a real CLI lists: a fixed set of personal,
 // plugin and built-in commands, plus one "(project)" command per .claude/commands/*.md in the cwd.
@@ -167,6 +180,18 @@ function parseArgs(argv) {
     else positional.push(a);
   }
   return { opts, unknown, positional };
+}
+
+// `claude auth status --json`: who is signed in. FAKE_CLAUDE_AUTH names a JSON file to print instead, else
+// $HOME/.fake-claude-auth.json when there is one (each server of scripts/qa-handoff-stack.sh has its own HOME). Read on
+// every call, so a test or a QA stack can sign in as someone else (or out) while the server runs.
+if (process.argv[2] === 'auth' && process.argv[3] === 'status') {
+  const file = process.env.FAKE_CLAUDE_AUTH || join(process.env.HOME ?? '', '.fake-claude-auth.json');
+  const status = file && existsSync(file)
+    ? readFileSync(file, 'utf8')
+    : JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'dev@example.com', orgName: 'Example Org', subscriptionType: 'max' }, null, 2);
+  process.stdout.write(status + '\n');
+  process.exit(JSON.parse(status).loggedIn ? 0 : 1);
 }
 
 const { opts, unknown, positional } = parseArgs(process.argv.slice(2));
@@ -422,6 +447,16 @@ function pause(t, ms) {
   });
 }
 
+/** The session's `/goal` condition, null when none is set. */
+let goal = null;
+
+/** A local command's reply, which the CLI sends as an assistant message from no model. */
+const synthetic = (text) =>
+  emit({
+    type: 'assistant', message: { id: `msg_fake_${++seq}`, type: 'message', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text }], usage: { input_tokens: 0, output_tokens: 0 } },
+    parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID(),
+  });
+
 async function runTurn() {
   const t = (turn = { interrupted: false, ignoreInterrupt: false, abort: null });
   const started = Date.now();
@@ -481,8 +516,30 @@ async function runTurn() {
   };
   if (!take()) return;
 
+  let goalMisses = 0;
+  const goalCmd = seen.length === 1 ? /^\/goal(?:\s+([\s\S]*))?$/.exec(seen[0].trim()) : null;
+  if (goalCmd) {
+    const arg = (goalCmd[1] ?? '').trim();
+    if (!arg || arg.toLowerCase() === 'clear') {
+      const text = arg
+        ? goal ? `Goal cleared: ${goal}` : 'No goal set'
+        : goal ? `Goal active: ${goal} (not yet evaluated)` : 'No goal set. Usage: `/goal <condition>`';
+      if (arg) goal = null;
+      synthetic(text);
+      emit({
+        type: 'result', subtype: 'success', is_error: false, duration_ms: Date.now() - started, duration_api_ms: 0, num_turns: 0,
+        result: text, stop_reason: null, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0 }, permission_denials: [],
+        fake_pid: process.pid,
+      });
+      return;
+    }
+    goal = arg;
+    goalMisses = Number(arg.match(/CHECKS:(\d+)/)?.[1] ?? 0);
+    synthetic(`Goal set: ${arg}`);
+  }
+
   // A local slash command never calls the model: a zero-turn success result carries its output.
-  if (seen.length === 1 && seen[0].startsWith('/')) {
+  if (!goalCmd && seen.length === 1 && seen[0].startsWith('/')) {
     const output = `Output of ${seen[0].split(/\s/)[0]}`;
     if (seen[0].startsWith('/compact')) contextTokens = 8_000;
     emit({ type: 'system', subtype: 'local_command_output', content: output });
@@ -598,6 +655,16 @@ async function runTurn() {
     steps++;
     finalText = `ack: ${[...seen, ...answers].join(' | ')}`;
     assistant(`msg_fake_${++seq}`, [{ type: 'text', text: finalText }]);
+    if (goal && goalMisses > 0) {
+      // The goal hook blocks the stop: its reason goes in as a synthetic message and the model goes on.
+      goalMisses--;
+      finalText = null;
+      emit({
+        type: 'user', message: { role: 'user', content: [{ type: 'text', text: `Stop hook feedback:\n[${goal}]: Not met yet.` }] },
+        parent_tool_use_id: null, isSynthetic: true, session_id: sessionId, uuid: randomUUID(), timestamp: now(),
+      });
+      continue;
+    }
     emit({ type: 'system', subtype: 'post_turn_summary', status_category: 'completed', status_detail: 'fake turn', needs_action: '' });
     break;
   }
@@ -605,6 +672,8 @@ async function runTurn() {
   if (t.interrupted && finalText == null && !toolRejected) marker('[Request interrupted by user]');
 
   const ok = finalText != null;
+  // Met: the goal clears itself.
+  if (ok) goal = null;
   emit({
     type: 'result',
     subtype: ok ? 'success' : 'error_during_execution',
@@ -811,6 +880,85 @@ function onLine(line) {
   } else if (msg.type === 'control_request') onControl(msg);
 }
 
+// ---------- Omni's claude.ai Artifacts listing ----------
+
+const ARTIFACTS_DIR = join(dirname(new URL(import.meta.url).pathname), 'claude-artifacts');
+
+/** Each PreToolUse hook command in --settings, run as the real CLI does: the call on stdin, exit 2 blocks it. */
+function preToolUse(name, input) {
+  let hooks = [];
+  try {
+    hooks = JSON.parse(opts['--settings'] ?? '{}').hooks?.PreToolUse ?? [];
+  } catch {
+    hooks = [];
+  }
+  for (const h of hooks) {
+    for (const c of h.hooks ?? []) {
+      try {
+        execFileSync('/bin/sh', ['-c', c.command], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: name, tool_input: input }), stdio: ['pipe', 'ignore', 'pipe'] });
+      } catch (err) {
+        if (err.status === 2) return `PreToolUse:${name} hook error: [${c.command}]: ${String(err.stderr ?? '').trim()}`;
+      }
+    }
+  }
+  return null;
+}
+
+/** The print-mode prompt, for the listing to see whether the type pass was asked for. */
+let lastPrompt = null;
+
+async function artifactsListing() {
+  const mode = process.env.FAKE_CLAUDE_ARTIFACTS || 'ok';
+  const tools = mode === 'no_tool' ? [] : ['Artifact'];
+  emit({ type: 'system', subtype: 'init', cwd: process.cwd(), tools, mcp_servers: [], model, permissionMode: opts['--permission-mode'] ?? 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: VERSION });
+  const result = (is_error, text) => {
+    emit({ type: 'result', subtype: 'success', is_error, duration_ms: 5, duration_api_ms: 5, num_turns: 2, result: text, total_cost_usd: 0.0015, usage: { input_tokens: 4, output_tokens: 20 }, permission_denials: [] });
+    finish(is_error ? 1 : 0);
+  };
+  const say = (text, error) => emit({ type: 'assistant', message: { id: `msg_fake_${++seq}`, type: 'message', role: 'assistant', model, content: [{ type: 'text', text }], usage: { input_tokens: 0, output_tokens: 0 } }, parent_tool_use_id: null, ...(error && { error }) });
+  if (mode === 'hang') return new Promise(() => {});
+  if (mode === 'signed_out') {
+    say('Not logged in \u00b7 Please run /login', 'authentication_failed');
+    return result(true, 'Not logged in \u00b7 Please run /login');
+  }
+  if (mode === 'limit') {
+    emit({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } });
+    say("You've hit your limit", 'rate_limit');
+    return result(true, "You've hit your limit");
+  }
+  if (mode === 'no_tool') {
+    say('I do not have an Artifact tool in this session.');
+    return result(false, 'I do not have an Artifact tool in this session.');
+  }
+  const file = (name) => readFileSync(join(ARTIFACTS_DIR, name), 'utf8');
+  const call = async (input, answer) => {
+    const id = `toolu_fake_${++seq}`;
+    await new Promise((r) => setTimeout(r, LATENCY));
+    emit({ type: 'assistant', message: { id: `msg_fake_${seq}`, type: 'message', role: 'assistant', model, content: [{ type: 'tool_use', id, name: 'Artifact', input }], usage: { input_tokens: 4, output_tokens: 6 } }, parent_tool_use_id: null });
+    const blocked = preToolUse('Artifact', input);
+    const text = blocked ?? answer();
+    emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, ...((blocked || mode === 'error') && { is_error: true }) }] }, parent_tool_use_id: null });
+    return text;
+  };
+  const prompt = lastPrompt ?? '';
+  if (mode === 'sneaky') await call({ action: 'delete', url: 'https://claude.ai/artifact/QSdTnbQX1opbT77DCnKk1J' }, () => 'Deleted.');
+  await call({ action: 'list', scope: 'all', limit: 200 }, () =>
+    mode === 'error' ? 'Listing failed: the service is unavailable.' : mode === 'changed' ? file('changed-format.txt') : readFileSync(process.env.FAKE_CLAUDE_ARTIFACTS_LIST || join(ARTIFACTS_DIR, 'list-all.txt'), 'utf8'),
+  );
+  if (prompt.includes('scope "types"')) {
+    const types = await call({ action: 'list', scope: 'types' }, () => file('types.txt'));
+    const names = [...types.matchAll(/^- \[[^\]]*\]\s+"([^"]+)"/gm)].map((m) => m[1]);
+    for (const name of names) {
+      if (mode === 'skip_type' && name === 'Slides') continue;
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const answer = existsSync(join(ARTIFACTS_DIR, `type-${slug}.txt`)) ? file(`type-${slug}.txt`) : file('type-empty.txt').replace('"Motion"', `"${name}"`);
+      await call({ action: 'list', type: name, limit: 200 }, () => answer);
+    }
+  }
+  say('DONE');
+  return result(false, 'DONE');
+}
+
 // ---------- main ----------
 
 function hooksOff() {
@@ -856,6 +1004,7 @@ async function main() {
   if (inFmt !== 'stream-json') {
     // One-shot print mode: prompt from the arguments or stdin.
     const prompt = positional.length ? positional.join(' ') : (await readAll()).trim();
+    lastPrompt = prompt;
     if (!prompt) return fail('Error: Input must be provided either through stdin or as a prompt argument when using --print');
     if (outFmt === 'text' && prompt.includes('write a task card for that new thread')) {
       // Omni's proposed follow-up thread. Same echo as the reply suggestion.
@@ -863,6 +1012,18 @@ async function main() {
       if (wait) await new Promise((r) => setTimeout(r, wait));
       return process.stdout.write(
         prompt.includes('NEXT_THREAD') ? 'TITLE: Fix the docs drift\nPROMPT: Update the skills catalog in docs/skills.md. Work on a branch.\n' : 'NONE\n',
+      );
+    }
+    if (outFmt === 'text' && prompt.includes('before this thread can be closed')) {
+      // Omni's open items. Same echo as the reply suggestion.
+      const wait = Number(/OPEN:(\d+)/.exec(prompt)?.[1] ?? 0);
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      return process.stdout.write(
+        prompt.includes('OPEN_ITEMS')
+          ? 'QUESTION: Should the export include archived threads?\n' +
+              'DECISION: Store the cache in SQLite or in Postgres? | SQLite | Postgres\n' +
+              'BLOCKER: The APNs key is missing from the secret store, so push alerts cannot be tested.\n'
+          : 'NONE\n',
       );
     }
     if (outFmt === 'text' && prompt.includes('Predict the short reply')) {
@@ -889,6 +1050,7 @@ async function main() {
         }) + '\n',
       );
     }
+    if (outFmt === 'stream-json' && (opts['--tools'] ?? []).includes('Artifact')) return artifactsListing();
     // stream-json output with a single stdin prompt: one turn, then exit.
     stdinDone = true;
     queue.push({ uuid: randomUUID(), content: prompt, text: prompt });

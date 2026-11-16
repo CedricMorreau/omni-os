@@ -10,23 +10,29 @@ import {
   type CleanupState,
   type RetentionPolicy,
 } from '@omni/shared/worktree-cleanup.ts';
+import { SLIM_DAYS, SLIM_NOTE, type SlimCandidate, type SlimOutcome, type SlimPolicy, type SlimResult, type SlimRun, type SlimState } from '@omni/shared/worktree-slim.ts';
 import { relTime } from '@omni/shared/format.ts';
 import { api, errorText, useApi } from '../api.ts';
-import { Button, Chip, ConfirmDialog, ErrorNote, Icon, Loading, Picker, StatusDot, Toggle } from '../components/ui.tsx';
+import { Button, Chip, ConfirmDialog, ErrorNote, Loading, Picker, StatusDot } from '../components/ui.tsx';
 import { plural } from '../format.ts';
 import { href } from '../router.ts';
+import { Card, Origin, SettingRow, SwitchRow } from './settings-parts.tsx';
 
-// Settings, Worktrees: the worktrees Omni made in data/worktrees, what each uses on disk, why each must stay
-// or may go, and the cleanup that removes the ones that may: reviewed here, or on a schedule with this Mac's
-// retention policy. The scan and a cleanup run on the server; this section starts them and polls while either runs.
+// Settings, Worktrees: the worktrees Omni made in data/worktrees, what each uses on disk, why each must stay or may
+// go, and the cleanups: removing the ones that may go and stripping the build output from idle ones, reviewed here
+// or run daily by this machine's Automatic cleanup, one card with a labelled threshold for each. The scan, a cleanup
+// and a strip run on the server; this section starts them and polls while any runs.
 
 interface Inventory {
   scan: WorktreeScan | null;
   summary: InventorySummary | null;
   cleanup: CleanupState;
+  slim: SlimState;
 }
 
 const OUTCOME_DOT: Record<CleanupOutcome, string> = { removed: 'done', kept: 'idle', failed: 'needs' };
+const SLIM_DOT: Record<SlimOutcome, string> = { slimmed: 'done', skipped: 'idle', failed: 'needs' };
+const SLIM_LABEL: Record<SlimOutcome, string> = { slimmed: 'Stripped', skipped: 'Skipped', failed: 'Failed' };
 const DAY_CHOICES = [3, 7, 14, 30, 60, 90];
 
 const DOT: Record<WorktreeVerdict, string> = { eligible: 'done', kept: 'idle', unknown: 'needs' };
@@ -39,7 +45,7 @@ const GROUPS: { verdict: WorktreeVerdict; title: string; note: string }[] = [
 export function StorageSection() {
   const res = useApi<Inventory>('/worktrees/scan');
   const { reload } = res;
-  const cleaning = !!res.data && Object.values(res.data.cleanup.runs).some((r) => r?.state === 'running');
+  const cleaning = !!res.data && [...Object.values(res.data.cleanup.runs), ...Object.values(res.data.slim.runs)].some((r) => r?.state === 'running');
   const running = res.data?.scan?.state === 'running' || cleaning;
 
   useEffect(() => {
@@ -49,35 +55,20 @@ export function StorageSection() {
   }, [running, reload]);
 
   const scan = res.data?.scan ?? null;
+  if (res.error) return <ErrorNote onRetry={reload}>{res.error}</ErrorNote>;
+  if (!res.data) return <Loading />;
   return (
     <>
-      <div className="flex gap-3 rounded-[20px] bg-surface p-4 text-[12.5px] leading-relaxed text-fg-2">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-bg text-fg-3">
-          <Icon name="archive" size={15} />
-        </span>
-        <div>
-          The worktrees in <code>data/worktrees</code>, and a cleanup for the ones that are safe to remove. {CLEANUP_NOTE} {PRUNE_NOTE}
-        </div>
-      </div>
-
-      {res.error ? (
-        <ErrorNote onRetry={reload}>{res.error}</ErrorNote>
-      ) : !res.data ? (
-        <Loading />
-      ) : (
-        <>
-          <ScanCard scan={scan} cleaning={cleaning} onChange={reload} />
-          <CleanupCard cleanup={res.data.cleanup} scan={scan} onChange={reload} />
-          <RetentionCard cleanup={res.data.cleanup} scanning={scan?.state === 'running'} onChange={reload} />
-          {scan && res.data.summary && <Summary summary={res.data.summary} />}
-          {scan && <Items scan={scan} />}
-        </>
-      )}
+      <ScanCard scan={scan} summary={res.data.summary} cleaning={cleaning} onChange={reload} />
+      <CleanupCard cleanup={res.data.cleanup} scan={scan} onChange={reload} />
+      <SlimCard slim={res.data.slim} scan={scan} onChange={reload} />
+      <AutoCleanupCard cleanup={res.data.cleanup} slim={res.data.slim} scanning={scan?.state === 'running'} onChange={reload} />
+      {scan && <Items scan={scan} />}
     </>
   );
 }
 
-function ScanCard({ scan, cleaning, onChange }: { scan: WorktreeScan | null; cleaning: boolean; onChange: () => void }) {
+function ScanCard({ scan, summary, cleaning, onChange }: { scan: WorktreeScan | null; summary: InventorySummary | null; cleaning: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = scan?.state === 'running';
@@ -97,31 +88,34 @@ function ScanCard({ scan, cleaning, onChange }: { scan: WorktreeScan | null; cle
 
   const pct = scan && scan.total ? Math.round((scan.done / scan.total) * 100) : 0;
   return (
-    <section className={CARD}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-display text-[16px]">{running ? 'Scanning' : scan ? 'Last scan' : 'Not scanned yet'}</h2>
-          <p className="mt-0.5 text-[12.5px] text-fg-3" role="status">
-            {!scan && 'A scan measures each folder and checks its git state. It takes a minute or two and does not slow running threads.'}
-            {running && (scan!.phase === 'listing' ? 'Finding the folders' : `Checking ${scan!.done} of ${scan!.total}`)}
-            {scan?.state === 'done' && `Scanned ${scan.finishedAt ? relTime(scan.finishedAt) : ''}`}
-            {scan?.state === 'cancelled' && `Cancelled after ${scan.done} of ${scan.total}. What was checked is below.`}
-            {scan?.state === 'failed' && `The scan failed: ${scan.error ?? 'unknown error'}`}
-          </p>
-        </div>
-        {running ? (
+    <Card
+      entry="worktree-storage"
+      title="On disk"
+      subtitle={
+        <span role="status">
+          {!scan && 'A scan measures each folder in data/worktrees and checks its git state. It takes a minute or two and does not slow running threads.'}
+          {running && (scan!.phase === 'listing' ? 'Finding the folders' : `Checking ${scan!.done} of ${scan!.total}`)}
+          {scan?.state === 'done' && `Scanned ${scan.finishedAt ? relTime(scan.finishedAt) : ''}.`}
+          {scan?.state === 'cancelled' && `Cancelled after ${scan.done} of ${scan.total}. What was checked is below.`}
+          {scan?.state === 'failed' && `The scan failed: ${scan.error ?? 'unknown error'}`}
+        </span>
+      }
+      actions={
+        running ? (
           <Button size="sm" icon="stop" busy={busy} onClick={() => act('/worktrees/scan/cancel')}>
             Cancel
           </Button>
         ) : (
-          <Button variant="primary" size="sm" icon="refresh" busy={busy} disabled={cleaning} onClick={() => act('/worktrees/scan')}>
+          <Button variant={scan ? 'secondary' : 'primary'} size="sm" icon="refresh" busy={busy} disabled={cleaning} onClick={() => act('/worktrees/scan')}>
             {scan ? 'Scan again' : 'Scan'}
           </Button>
-        )}
-      </div>
+        )
+      }
+    >
       {running && <Progress pct={pct} />}
+      {scan && summary && <Summary summary={summary} />}
       {error && <ErrorNote>{error}</ErrorNote>}
-    </section>
+    </Card>
   );
 }
 
@@ -132,8 +126,6 @@ function Progress({ pct }: { pct: number }) {
     </div>
   );
 }
-
-const CARD = 'space-y-3 rounded-[24px] p-5 shadow-[inset_0_0_0_1px_var(--line)]';
 
 /** Review what the last scan found eligible, then remove it. The server checks each again right before it goes. */
 function CleanupCard({ cleanup, scan, onChange }: { cleanup: CleanupState; scan: WorktreeScan | null; onChange: () => void }) {
@@ -169,20 +161,19 @@ function CleanupCard({ cleanup, scan, onChange }: { cleanup: CleanupState; scan:
           ? `${plural(n, 'worktree')} (${formatBytes(preview!.bytes)}) can be removed now. Each is checked again right before it goes.`
           : 'Nothing to clean up.';
   return (
-    <section className={CARD}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-display text-[16px]">Clean up</h2>
-          <p className="mt-0.5 text-[12.5px] text-fg-3" role="status">
-            {note}
-          </p>
-        </div>
-        {!running && n > 0 && (
-          <Button size="sm" variant="primary" icon="trash" onClick={() => (setError(null), setReviewing(true))}>
-            Review
+    <Card
+      title="Clean up now"
+      subtitle={<span role="status">{note}</span>}
+      actions={
+        !running &&
+        n > 0 && (
+          <Button size="sm" variant="danger" icon="trash" onClick={() => (setError(null), setReviewing(true))}>
+            Review and remove
           </Button>
-        )}
-      </div>
+        )
+      }
+    >
+      {!running && n > 0 && <p className="text-[12.5px] text-fg-3">{CLEANUP_NOTE}</p>}
       {running && <Progress pct={run.total ? Math.round((run.done / run.total) * 100) : 0} />}
       {run && !running && <RunResult run={run} />}
       <ConfirmDialog
@@ -203,7 +194,7 @@ function CleanupCard({ cleanup, scan, onChange }: { cleanup: CleanupState; scan:
           Frees about <span className="font-num">{formatBytes(preview?.bytes ?? 0)}</span>. One that changed since the scan is kept, with the reason.
         </p>
       </ConfirmDialog>
-    </section>
+    </Card>
   );
 }
 
@@ -277,20 +268,24 @@ function ResultRow({ r }: { r: CleanupResult }) {
   );
 }
 
-/** This Mac's policy: off by default; on, a pass a minute after startup and daily removes what it covers. */
-function RetentionCard({ cleanup, scanning, onChange }: { cleanup: CleanupState; scanning: boolean; onChange: () => void }) {
+/** Strip caches now: review the idle worktrees with build output in them and delete it. The worktrees stay. */
+function SlimCard({ slim, scan, onChange }: { slim: SlimState; scan: WorktreeScan | null; onChange: () => void }) {
+  const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { policy } = cleanup;
-  const run = cleanup.runs.retention;
-  const p = cleanup.preview?.retention ?? null;
-  const n = p?.candidates.length ?? 0;
+  const { policy } = slim;
+  const manual = slim.runs.manual;
+  const going = [manual, slim.runs.scheduled].find((r) => r?.state === 'running') ?? null;
+  const last = [manual, slim.runs.scheduled].filter((r): r is SlimRun => !!r && r.state !== 'running').sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
+  const preview = slim.preview;
+  const n = preview?.candidates.length ?? 0;
 
-  const save = async (patch: Partial<RetentionPolicy>) => {
+  const strip = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api.put('/worktrees/retention', patch);
+      await api.post('/worktrees/slim', { ids: preview!.candidates.map((c) => c.id) });
+      setReviewing(false);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -299,59 +294,216 @@ function RetentionCard({ cleanup, scanning, onChange }: { cleanup: CleanupState;
     }
   };
 
-  const days = DAY_CHOICES.includes(policy.idleDays) ? DAY_CHOICES : [...DAY_CHOICES, policy.idleDays].sort((a, b) => a - b);
-  const what = n ? `remove ${plural(n, 'worktree')} (${formatBytes(p!.bytes)})` : 'remove nothing';
-  const line = scanning ? 'Shown once the scan is done.' : !p ? 'Scan to see what it would remove.' : policy.enabled ? `The next pass would ${what}.` : `If turned on, the next pass would ${what}.`;
-  const names = p?.candidates.slice(0, 5).map((c) => c.threadTitle ?? c.id) ?? [];
+  const note = going
+    ? `Stripping ${going.done} of ${going.total}. Each is checked again right before.`
+    : !scan
+      ? 'Scan to see what caches the idle worktrees hold.'
+      : scan.state === 'running'
+        ? 'Shown once the scan is done.'
+        : n
+          ? `${plural(n, 'worktree')} idle at least ${plural(policy.idleDays, 'day')} ${n === 1 ? 'holds' : 'hold'} ${formatBytes(preview!.bytes)} of caches.`
+          : `No worktree idle at least ${plural(policy.idleDays, 'day')} holds caches.`;
   return (
-    <section className={CARD}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-display text-[16px]">Worktree retention</h2>
-          <p className="mt-0.5 text-[12.5px] text-fg-3">Remove idle worktrees on a schedule.</p>
-        </div>
-        <Toggle checked={policy.enabled} onChange={(on) => save({ enabled: on })} disabled={busy} label="Remove idle worktrees on a schedule" />
+    <Card
+      entry="worktree-slim"
+      title="Strip caches now"
+      subtitle={<span role="status">{note}</span>}
+      actions={
+        !going &&
+        n > 0 && (
+          <Button size="sm" variant="danger" icon="trash" onClick={() => (setError(null), setReviewing(true))}>
+            Review and strip
+          </Button>
+        )
+      }
+    >
+      {!going && n > 0 && <p className="text-[12.5px] text-fg-3">{SLIM_NOTE} A worktree in use (a turn, a terminal, an action) is skipped.</p>}
+      {going && <Progress pct={going.total ? Math.round((going.done / going.total) * 100) : 0} />}
+      {last && <SlimRunResult run={last} />}
+      {error && !reviewing && <ErrorNote>{error}</ErrorNote>}
+      <ConfirmDialog
+        open={reviewing}
+        title={`Strip caches from ${plural(n, 'worktree')}?`}
+        confirmLabel={`Strip ${formatBytes(preview?.bytes ?? 0)}`}
+        danger
+        busy={busy}
+        error={error}
+        onConfirm={strip}
+        onCancel={() => setReviewing(false)}
+      >
+        <p>{SLIM_NOTE}</p>
+        <ul className="scroll-thin max-h-[45vh] divide-y divide-[var(--line)] overflow-y-auto rounded-[16px] bg-surface">
+          {preview?.candidates.map((c) => <SlimRow key={c.id} c={c} />)}
+        </ul>
+      </ConfirmDialog>
+    </Card>
+  );
+}
+
+function SlimRow({ c }: { c: SlimCandidate }) {
+  const place = [c.channelName, c.branch].filter(Boolean).join(' · ');
+  return (
+    <li className="flex items-start gap-3 px-4 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium text-fg">{c.threadTitle ?? c.id}</div>
+        {place && <div className="truncate text-[12px] text-fg-3">{place}</div>}
+        <div className="text-[12px] text-fg-2">{c.lastActiveAt ? `Last active ${relTime(c.lastActiveAt)}.` : 'Its thread was deleted.'}</div>
       </div>
-      {/* The idle days only matter with the schedule on, so the picker shows with it (#405). */}
-      {policy.enabled && (
-        <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg-2">
-          After
+      <span className="font-num shrink-0 text-[12.5px] text-fg-2">{formatBytes(c.bytes)}</span>
+    </li>
+  );
+}
+
+/** What a strip did: one line of totals, then each worktree that was skipped or failed, with why. */
+function SlimRunResult({ run }: { run: SlimRun }) {
+  const count = (o: SlimOutcome) => run.items.filter((i) => i.outcome === o).length;
+  const notable = run.items.filter((i) => i.outcome !== 'slimmed');
+  return (
+    <div className="space-y-2">
+      <p className="text-[12.5px] text-fg-2">
+        {run.trigger === 'manual' ? 'Last strip' : 'Last daily strip'} {relTime(run.finishedAt ?? run.startedAt)}: stripped {count('slimmed')} (
+        <span className="font-num">{formatBytes(run.freedBytes)}</span> freed), skipped {count('skipped')}, failed {count('failed')}.{run.error && ` It stopped: ${run.error}`}
+      </p>
+      {notable.length > 0 && (
+        <ul className="divide-y divide-[var(--line)] rounded-[20px] bg-surface">
+          {notable.map((r) => (
+            <SlimResultRow key={r.id} r={r} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SlimResultRow({ r }: { r: SlimResult }) {
+  return (
+    <li className="flex items-start gap-3 px-4 py-3">
+      <StatusDot status={SLIM_DOT[r.outcome]} size={8} className="mt-[6px]" />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="min-w-0 truncate text-[13.5px] font-medium">{r.threadTitle ?? r.id}</span>
+          <Chip tone={r.outcome === 'failed' ? 'needs' : 'outline'}>{SLIM_LABEL[r.outcome]}</Chip>
+        </div>
+        <ul className="mt-1.5 space-y-0.5 text-[12.5px] leading-snug break-words text-fg-2">
+          {r.reasons.map((x) => (
+            <li key={x.code + x.message}>{x.message}</li>
+          ))}
+          {r.errors.map((e) => (
+            <li key={e} className={r.outcome === 'failed' ? 'text-needs' : 'text-fg-3'}>
+              {e}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </li>
+  );
+}
+
+const dayOptions = (current: number, min = 1, max = Infinity) =>
+  (DAY_CHOICES.includes(current) ? DAY_CHOICES : [...DAY_CHOICES, current].sort((a, b) => a - b))
+    .filter((d) => d >= min && d <= max)
+    .map((d) => ({ value: String(d), label: `${plural(d, 'day')} idle`, avatar: false as const }));
+
+/**
+ * This machine's automatic cleanup, off by default: one daily pass strips caches from idle worktrees, another removes
+ * the worktrees that may go. Each has its own threshold, named for what it does. Not synced.
+ */
+function AutoCleanupCard({ cleanup, slim, scanning, onChange }: { cleanup: CleanupState; slim: SlimState; scanning: boolean; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const retention = cleanup.policy;
+  const run = cleanup.runs.retention;
+  const p = cleanup.preview?.retention ?? null;
+  const n = p?.candidates.length ?? 0;
+
+  const save = async (path: string, patch: Partial<RetentionPolicy> | Partial<SlimPolicy>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.put(path, patch);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+      onChange();
+    }
+  };
+
+  const what = n ? `remove ${plural(n, 'worktree')} and free ${formatBytes(p!.bytes)}` : 'remove nothing';
+  const line = scanning ? 'Shown once the scan is done.' : !p ? 'Scan to see what it would remove.' : retention.enabled ? `The next pass would ${what}.` : `If turned on, the next pass would ${what}.`;
+  const names = p?.candidates.slice(0, 5).map((c) => c.threadTitle ?? c.id) ?? [];
+  const here = <Origin of="machine" />;
+  return (
+    <Card entry="worktree-retention" title="Automatic cleanup" subtitle="Daily, on this machine only. Idle means no turn or message in the thread, open threads included.">
+      <SwitchRow
+        title="Strip caches"
+        origin={here}
+        detail={`${SLIM_NOTE} A worktree in use (a turn, a terminal, an action) is skipped.`}
+        checked={slim.policy.enabled}
+        onChange={(on) => void save('/worktrees/slim', { enabled: on })}
+        disabled={busy}
+      />
+      <SettingRow
+        label="Strip caches after"
+        control={
           <Picker
-            label="Days idle"
-            value={String(policy.idleDays)}
-            options={days.map((d) => ({ value: String(d), label: plural(d, 'day'), avatar: false as const }))}
-            onChange={(v) => save({ idleDays: Number(v) })}
+            label="Strip caches after"
+            size="field"
+            className="w-40"
+            value={String(slim.policy.idleDays)}
+            options={dayOptions(slim.policy.idleDays, SLIM_DAYS.min, SLIM_DAYS.max)}
+            onChange={(v) => void save('/worktrees/slim', { idleDays: Number(v) })}
             disabled={busy}
           />
-          without a turn or message
-        </div>
-      )}
-      <p className="text-[12.5px] leading-relaxed text-fg-3">
-        Only this machine: the setting is not synced. It covers worktrees of archived, merged or deleted threads with nothing unsaved, idle at least {plural(policy.idleDays, 'day')}. It runs a
-        minute after Omni starts, then daily.
-      </p>
-      <p className="text-[12.5px] text-fg-2" role="status">
-        {line}
-        {names.length > 0 && ` ${names.join(', ')}${n > names.length ? `, and ${n - names.length} more` : ''}.`}
-      </p>
+        }
+      />
+      <div className="border-t border-line" />
+      <SwitchRow
+        title="Remove worktrees"
+        origin={here}
+        detail="Covers archived, merged or deleted threads with nothing unsaved. Runs a minute after Omni starts, then daily."
+        checked={retention.enabled}
+        onChange={(on) => void save('/worktrees/retention', { enabled: on })}
+        disabled={busy}
+      />
+      <SettingRow
+        label="Remove worktrees after"
+        hint={
+          <span role="status">
+            {line}
+            {names.length > 0 && ` ${names.join(', ')}${n > names.length ? `, and ${n - names.length} more` : ''}.`}
+          </span>
+        }
+        control={
+          <Picker
+            label="Remove worktrees after"
+            size="field"
+            className="w-40"
+            value={String(retention.idleDays)}
+            options={dayOptions(retention.idleDays)}
+            onChange={(v) => void save('/worktrees/retention', { idleDays: Number(v) })}
+            disabled={busy}
+          />
+        }
+      />
       {run?.state === 'running' && <Progress pct={run.total ? Math.round((run.done / run.total) * 100) : 0} />}
       {run && run.state !== 'running' && <RunResult run={run} />}
       {error && <ErrorNote>{error}</ErrorNote>}
-    </section>
+    </Card>
   );
 }
 
 function Summary({ summary }: { summary: InventorySummary }) {
   const tiles = [
-    { label: 'Eligible', dot: 'done', t: summary.eligible },
+    { label: 'Can be removed', dot: 'done', t: summary.eligible },
     { label: 'Kept', dot: 'idle', t: summary.kept },
-    { label: 'Unknown', dot: 'needs', t: summary.unknown },
+    { label: 'Could not check', dot: 'needs', t: summary.unknown },
   ];
   return (
-    <section className="space-y-2">
+    <div className="space-y-2">
       <div className="grid grid-cols-3 gap-2">
         {tiles.map(({ label, dot, t }) => (
-          <div key={label} className="rounded-[20px] bg-surface p-3.5">
+          <div key={label} className="rounded-[16px] bg-bg p-3.5">
             <div className="flex items-center gap-1.5 text-[12px] text-fg-3">
               <StatusDot status={dot} size={7} /> {label}
             </div>
@@ -360,11 +512,11 @@ function Summary({ summary }: { summary: InventorySummary }) {
           </div>
         ))}
       </div>
-      <p className="px-1 text-[12.5px] text-fg-3">
-        {plural(summary.folders, 'folder')} on disk using <span className="font-num">{formatBytes(summary.bytes)}</span>.{' '}
-        {summary.stale > 0 && `${plural(summary.stale, 'stale registration')} ${summary.stale === 1 ? 'uses' : 'use'} no space.`}
+      <p className="text-[12.5px] text-fg-3">
+        {plural(summary.folders, 'folder')} in data/worktrees use <span className="font-num">{formatBytes(summary.bytes)}</span>.{' '}
+        {summary.stale > 0 && `${plural(summary.stale, 'stale registration')} ${summary.stale === 1 ? 'uses' : 'use'} no space.`} {PRUNE_NOTE}
       </p>
-    </section>
+    </div>
   );
 }
 
@@ -425,6 +577,7 @@ function ItemRow({ it }: { it: WorktreeItem }) {
         {place && <div className="mt-0.5 truncate text-[12px] text-fg-3">{place}</div>}
         <ul className="mt-1.5 space-y-0.5 text-[12.5px] leading-snug break-words text-fg-2">
           {it.verdict === 'eligible' && it.eligibleBecause && <li>{ELIGIBLE_LABEL[it.eligibleBecause]}.</li>}
+          {!!it.cacheBytes && it.cacheBytes >= 1024 ** 2 && <li className="text-fg-3">{formatBytes(it.cacheBytes)} of it is build output and installs.</li>}
           {it.reasons.map((r) => (
             <li key={r.code + r.message}>{r.message}</li>
           ))}

@@ -11,6 +11,7 @@ import {
 import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../../ui/Text';
+import { Icon } from '../../ui/Icon';
 
 import {
   advance,
@@ -181,7 +182,7 @@ function OptionRow({
           },
         ]}
       >
-        {on ? <Text style={[styles.tick, { color: colors.onInk }]}>{multi ? '✓' : '•'}</Text> : null}
+        {on ? multi ? <Icon name="check" size={14} color={colors.onInk} /> : <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.onInk }} /> : null}
       </View>
       <View style={styles.optionText}>
         <Text style={[styles.optionLabel, { color: colors.fg }]}>{label}</Text>
@@ -322,15 +323,11 @@ const styles = StyleSheet.create({
     borderRadius: 11,
   },
   square: {
-    borderRadius: 6,
-  },
-  tick: {
-    fontSize: fontSize.meta,
-    fontWeight: weight.bold,
+    borderRadius: radius.xs,
   },
   optionText: {
     flex: 1,
-    gap: 2,
+    gap: space.s1,
   },
   optionLabel: {
     fontSize: fontSize.body,

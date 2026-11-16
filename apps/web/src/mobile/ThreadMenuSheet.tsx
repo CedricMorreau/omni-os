@@ -1,8 +1,9 @@
+import { useMarkDone } from '../done-confirm.tsx';
 import { useMemo, useRef, useState } from 'react';
 import { api, errorText, type BackgroundTask, type Thread } from '../api.ts';
 import { threadMenu, type ThreadActionId } from '@omni/shared/thread-actions.ts';
 import { toDate } from '@omni/shared/format.ts';
-import { Button, ErrorNote, Loader } from '../components/ui.tsx';
+import { Button, ErrorNote, Loader, StatusDot } from '../components/ui.tsx';
 import { duration } from '../format.ts';
 import { runningSubagents, subagentKind } from '../subagents.ts';
 import { canMarkDone } from '../needs-you.ts';
@@ -19,7 +20,7 @@ function MoSubagentRow({ t, last, onJump }: { t: BackgroundTask; last: boolean; 
   const now = useNow(1000);
   return (
     <MoListRow
-      icon={<Loader size={14} className="mx-0.5 text-live-text" />}
+      icon={<span className="mx-0.5 grid size-3.5 place-items-center"><StatusDot status="running" size={8} /></span>}
       label={t.description}
       sub={subagentKind(t)}
       right={duration(Math.max(0, now - toDate(t.started_at).getTime()))}
@@ -39,7 +40,8 @@ const SHEET_TITLE = 'px-5 pt-2.5 pb-2 text-[15px] leading-[1.3] font-medium';
 /** The sheet's one-shot actions: each closes the sheet first (or after) and answers with a toast. */
 function useThreadActions(thread: Thread, onClose: () => void) {
   const shell = useShell();
-  const { setPinned, setDone, reloadChannels } = useApp();
+  const { setPinned, reloadChannels } = useApp();
+  const markDone = useMarkDone();
   const { applyThread } = useThread();
   const [grokBusy, setGrokBusy] = useState(false);
   const [grokError, setGrokError] = useState('');
@@ -60,7 +62,9 @@ function useThreadActions(thread: Thread, onClose: () => void) {
   const done = async () => {
     onClose();
     try {
-      applyThread(await setDone(thread.id, !thread.done_at), true);
+      const next = await markDone(thread, !thread.done_at);
+      if (!next) return;
+      applyThread(next, true);
       shell.toast(thread.done_at ? 'Back in Needs you' : 'Marked done');
     } catch (e) {
       shell.toast(errorText(e));

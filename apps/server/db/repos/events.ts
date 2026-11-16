@@ -23,6 +23,18 @@ export function indexEvent(threadId: string, kind: string, payload: unknown, eve
   if (text) db.prepare('INSERT INTO search_fts (body, thread_id, event_id) VALUES (?, ?, ?)').run(text, threadId, eventId);
 }
 
+/** The assistant text of the most recent run, oldest first: after the last message the agent actually saw, and after `after`. */
+function runTexts(threadId: string, after: number): string[] {
+  const rows = db
+    .prepare(
+      `SELECT payload FROM events WHERE thread_id = ? AND kind = 'assistant_text'
+       AND id > MAX(COALESCE((SELECT MAX(id) FROM events WHERE thread_id = ? AND kind IN ('user', 'crew_report')
+         AND json_extract(payload, '$.dropped') IS NOT 1), 0), ?) ORDER BY id`,
+    )
+    .all(threadId, threadId, after) as { payload: string }[];
+  return rows.map((r) => JSON.parse(r.payload).text as string);
+}
+
 export const events = {
   add(threadId: string, kind: string, payload: unknown, createdAt?: string): EventRow {
     const json = JSON.stringify(payload);
@@ -60,6 +72,23 @@ export const events = {
         .prepare(`SELECT MAX(created_at) AS at FROM events WHERE thread_id = ? AND kind IN ('assistant_text', 'tool_use', 'tool_result', 'result')`)
         .get(threadId) as { at: string | null }
     ).at,
+  /**
+   * The tasks with a stored event since `since` whose newest event is not their end, each with its start's payload
+   * (null when that row is missing). For the sub-agents another machine runs (apps/server/delegating.ts).
+   */
+  openTasksSince: (since: string) =>
+    db
+      .prepare(
+        `WITH latest AS (
+           SELECT thread_id, json_extract(payload, '$.task_id') AS task_id, MAX(id) AS id FROM events INDEXED BY events_task_at
+           WHERE kind = 'task' AND created_at > ? GROUP BY thread_id, task_id)
+         SELECT l.thread_id, l.task_id,
+           (SELECT s.payload FROM events s WHERE s.thread_id = l.thread_id AND s.kind = 'task' AND json_extract(s.payload, '$.task_id') = l.task_id
+              AND json_extract(s.payload, '$.event') = 'started' ORDER BY s.id LIMIT 1) AS started
+         FROM latest l JOIN events e ON e.id = l.id
+         WHERE json_extract(e.payload, '$.event') IS NOT 'ended'`,
+      )
+      .all(since) as { thread_id: string; task_id: string; started: string | null }[],
   uidOf: (id: number) => (db.prepare('SELECT uid FROM events WHERE id = ?').get(id) as { uid: string } | undefined)?.uid ?? null,
   lastAssistantText(threadId: string): string | null {
     const row = db
@@ -69,14 +98,11 @@ export const events = {
   },
   /** All assistant text produced by the most recent run (after the last message the agent actually saw, and after `after`). */
   lastRunText(threadId: string, after = 0): string {
-    const rows = db
-      .prepare(
-        `SELECT payload FROM events WHERE thread_id = ? AND kind = 'assistant_text'
-         AND id > MAX(COALESCE((SELECT MAX(id) FROM events WHERE thread_id = ? AND kind IN ('user', 'crew_report')
-           AND json_extract(payload, '$.dropped') IS NOT 1), 0), ?) ORDER BY id`,
-      )
-      .all(threadId, threadId, after) as { payload: string }[];
-    return rows.map((r) => JSON.parse(r.payload).text as string).join('\n\n');
+    return runTexts(threadId, after).join('\n\n');
+  },
+  /** The last assistant text of the most recent run, the reply a push alert previews. Empty when the run wrote none. */
+  lastRunReply(threadId: string, after = 0): string {
+    return runTexts(threadId, after).at(-1) ?? '';
   },
   /** A thread's question and question_answer events (packages/shared/question.ts), oldest first; with `id`, one question's. */
   questions(threadId: string, id?: string): EventRow[] {

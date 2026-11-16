@@ -27,28 +27,42 @@ import {
 } from '@omni/shared/continue-flow.ts';
 import { api, errorText, useApi, type HarnessWithRunning, type Thread } from '../api.ts';
 import { href, navigate } from '../router.ts';
+import { MachineChip } from './composer/MachineChip.tsx';
 import { EffortPicker, ModelPicker } from './ModelPicker.tsx';
+import { useForkMachine } from './RunOnPicker.tsx';
 import { Button, Chip, ErrorNote, Icon, IconButton, Label, Loading, Modal, Toggle, type ChipTone } from './ui.tsx';
+import { ModalFooter } from './ui/modal.tsx';
+import { MOD_KEY } from './ui/overlay.tsx';
 
 /**
- * One continue sheet's state, for the desktop and the phone: the picked run's preview, asked again whenever the run
- * changes or Ben checks again, and Start. `onStarted` gets the new thread.
+ * One continue sheet's state, for the desktop and the phone: the picked run and machine's preview, asked again whenever
+ * either changes or Ben checks again, and Start. `onStarted` gets the new thread. `machines` is the sheet's Run on:
+ * synced machines only, opening on Settings > Threads' default, with rows null while there is no other machine.
  */
 export function useContinue(source: ContinueSource, offered: HarnessWithRunning[], onStarted: (t: Thread) => void) {
   const [s, dispatch] = useReducer(continueReducer, offered, (o) => initContinue(defaultRun(o, source.harness)));
-  const { run, picked, asked } = s;
+  const machines = useForkMachine();
+  // Null sends no machine: nothing to pick, or Settings' default not known yet. The server applies the default then.
+  const device = machines.device;
   useEffect(() => {
-    if (!run) return;
+    if (machines.settled) dispatch({ type: 'machine', device });
+  }, [machines.settled, device]);
+  const { run, picked, asked } = s;
+  // The first preview waits for the machine, so the sheet does not ask twice as it opens.
+  const ready = machines.settled && s.device === device;
+  const at = s.device;
+  useEffect(() => {
+    if (!run || !ready) return;
     // A later ask replaces this one: its answer, if it comes last, is stale.
     let alive = true;
     api
-      .post<ContinuePreview>(`/threads/${encodeURIComponent(source.id)}/continue/preview`, { ...run, attachments: picked })
-      .then((preview) => alive && dispatch({ type: 'previewed', run, picked, preview }))
-      .catch((e) => alive && dispatch({ type: 'previewFailed', run, picked, error: errorText(e) }));
+      .post<ContinuePreview>(`/threads/${encodeURIComponent(source.id)}/continue/preview`, { ...run, attachments: picked, ...(at === null ? {} : { device: at }) })
+      .then((preview) => alive && dispatch({ type: 'previewed', run, picked, device: at, preview }))
+      .catch((e) => alive && dispatch({ type: 'previewFailed', run, picked, device: at, error: errorText(e) }));
     return () => {
       alive = false;
     };
-  }, [source.id, run, picked, asked]);
+  }, [source.id, run, picked, asked, at, ready]);
 
   const [closing, setClosing] = useState(false);
   const closeTerminal = async () => {
@@ -65,7 +79,7 @@ export function useContinue(source: ContinueSource, offered: HarnessWithRunning[
 
   const start = async () => {
     if (!canStart(s) || !s.run || s.preview.kind !== 'ready') return;
-    const { body, attempt } = startBody(s.run, s.text, s.preview.preview.revision, s.attempt, undefined, s.picked);
+    const { body, attempt } = startBody(s.run, s.text, s.preview.preview.revision, s.attempt, undefined, s.picked, s.device);
     dispatch({ type: 'posting', attempt });
     try {
       const res = await api.post<{ thread: Thread; duplicate: boolean }>(`/threads/${encodeURIComponent(source.id)}/continue`, body);
@@ -74,7 +88,7 @@ export function useContinue(source: ContinueSource, offered: HarnessWithRunning[
       dispatch({ type: 'refused', error: startError(e) });
     }
   };
-  return { s, dispatch, start, recheck: () => dispatch({ type: 'recheck' }), closeTerminal, closing };
+  return { s, dispatch, start, recheck: () => dispatch({ type: 'recheck' }), closeTerminal, closing, machines };
 }
 
 /** Why the source cannot be continued yet, with Retry, and "Close terminal" when an open shell is why. */
@@ -139,7 +153,7 @@ export function ContinueSheet({ source, onClose }: { source: ContinueSource; onC
 }
 
 function ContinueForm({ source, targets, onPickerOpen, onClose }: { source: ContinueSource; targets: ContinueTargets<HarnessWithRunning>; onPickerOpen: () => void; onClose: () => void }) {
-  const { s, dispatch, start, recheck, closeTerminal, closing } = useContinue(source, targets.offered, (t) => {
+  const { s, dispatch, start, recheck, closeTerminal, closing, machines } = useContinue(source, targets.offered, (t) => {
     onClose();
     navigate(href.thread(t.id));
   });
@@ -148,79 +162,87 @@ function ContinueForm({ source, targets, onPickerOpen, onClose }: { source: Cont
   const hint = slashHint(s.text);
   const files = shownPreview(s.preview)?.carryover ?? null;
   return (
-    <div className="grid gap-x-8 gap-y-6 px-6 pt-1 pb-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-      <div className="flex min-w-0 flex-col gap-4">
-        <p className="text-[13px] leading-relaxed text-fg-2">
-          A new thread picks up <span className="text-fg">{source.title || 'this thread'}</span> on the harness you pick, with its own branch and session. The two threads link to each other.
-        </p>
-        <div>
-          <Label hint={run ? undefined : 'No local harness is ready. The list says how to set one up.'}>Continue on</Label>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <ModelPicker
-              harnesses={targets.offered}
-              value={{ harness: run?.harness ?? '', model: run?.model ?? '' }}
-              offerAuto={false}
-              onOpen={onPickerOpen}
-              disabled={s.posting}
-              onChange={(c) => dispatch({ type: 'pick', run: { harness: c.harness, model: c.model, effort: '' } })}
-            />
-            {run && (
-              <EffortPicker
+    <>
+      <div className="grid gap-x-8 gap-y-6 px-6 pt-1 pb-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <p className="text-[13px] leading-relaxed text-fg-2">
+            A new thread picks up <span className="text-fg">{source.title || 'this thread'}</span> on the harness you pick, with its own branch and session. The two threads link to each other.
+          </p>
+          <div>
+            <Label hint={run ? undefined : 'No local harness is ready. The list says how to set one up.'}>Continue on</Label>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ModelPicker
                 harnesses={targets.offered}
-                choice={{ harness: run.harness, model: run.model }}
-                value={run.effort}
+                value={{ harness: run?.harness ?? '', model: run?.model ?? '' }}
+                offerAuto={false}
+                onOpen={onPickerOpen}
                 disabled={s.posting}
-                onChange={(effort) => dispatch({ type: 'pick', run: { ...run, effort } })}
+                onChange={(c) => dispatch({ type: 'pick', run: { harness: c.harness, model: c.model, effort: '' } })}
               />
+              {run && (
+                <EffortPicker
+                  harnesses={targets.offered}
+                  choice={{ harness: run.harness, model: run.model }}
+                  value={run.effort}
+                  disabled={s.posting}
+                  onChange={(effort) => dispatch({ type: 'pick', run: { ...run, effort } })}
+                />
+              )}
+            </div>
+            {targets.refused.length > 0 && (
+              <ul className="mt-2 space-y-1 px-1 text-[12px] leading-snug text-fg-3">
+                {targets.refused.map((r) => (
+                  <li key={r.id}>{r.reason}</li>
+                ))}
+              </ul>
             )}
           </div>
-          {targets.refused.length > 0 && (
-            <ul className="mt-2 space-y-1 px-1 text-[12px] leading-snug text-fg-3">
-              {targets.refused.map((r) => (
-                <li key={r.id}>{r.reason}</li>
-              ))}
-            </ul>
+          {machines.rows && (
+            <div>
+              <Label hint={MACHINE_HINT}>Run on</Label>
+              <MachineChip rows={machines.rows} value={machines.pick} onChange={machines.setPick} disabled={s.posting} />
+            </div>
           )}
-        </div>
-        {files && files.attachments.length > 0 && (
+          {files && files.attachments.length > 0 && (
+            <div>
+              <Label hint={attachmentsSummary(files)}>Attachments</Label>
+              <AttachmentList files={files} disabled={s.posting} onToggle={(id) => dispatch({ type: 'attach', id })} />
+            </div>
+          )}
           <div>
-            <Label hint={attachmentsSummary(files)}>Attachments</Label>
-            <AttachmentList files={files} disabled={s.posting} onToggle={(id) => dispatch({ type: 'attach', id })} />
+            <Label htmlFor="continue-message" hint="It reads this after the carryover, and it is never cut.">
+              Your message
+            </Label>
+            <textarea
+              id="continue-message"
+              autoFocus
+              rows={6}
+              value={s.text}
+              placeholder="What should it do next?"
+              className="field min-h-[132px] resize-y leading-relaxed"
+              onChange={(e) => dispatch({ type: 'text', text: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void start();
+                }
+              }}
+            />
+            {hint && <p className="mt-1.5 px-1 text-[12px] leading-snug text-fg-3">{hint}</p>}
           </div>
-        )}
-        <div>
-          <Label htmlFor="continue-message" hint="It reads this after the carryover, and it is never cut.">
-            Your message
-          </Label>
-          <textarea
-            id="continue-message"
-            autoFocus
-            rows={6}
-            value={s.text}
-            placeholder="What should it do next?"
-            className="field min-h-[132px] resize-y leading-relaxed"
-            onChange={(e) => dispatch({ type: 'text', text: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void start();
-              }
-            }}
-          />
-          {hint && <p className="mt-1.5 px-1 text-[12px] leading-snug text-fg-3">{hint}</p>}
+          {note && <ErrorNote>{note}</ErrorNote>}
         </div>
-        {note && <ErrorNote>{note}</ErrorNote>}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" busy={s.posting} disabled={!canStart(s)} onClick={() => void start()}>
-            Start
-          </Button>
-        </div>
+        {run && <PreviewPane s={s} picked={!!machines.rows} onRecheck={recheck} onCloseTerminal={() => void closeTerminal()} closing={closing} />}
       </div>
-      {run && <PreviewPane s={s} onRecheck={recheck} onCloseTerminal={() => void closeTerminal()} closing={closing} />}
-    </div>
+      <ModalFooter hint={{ keys: [MOD_KEY, '↵'], label: 'start' }}>
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" busy={s.posting} disabled={!canStart(s)} onClick={() => void start()}>
+          Start
+        </Button>
+      </ModalFooter>
+    </>
   );
 }
 
@@ -245,7 +267,10 @@ export function AttachmentList({ files, disabled, onToggle }: { files: Pick<Carr
   );
 }
 
-function PreviewPane({ s, onRecheck, onCloseTerminal, closing }: { s: ContinueState; onRecheck: () => void; onCloseTerminal: () => void; closing: boolean }) {
+/** Under the dialog's machine picker, on the desktop and the phone. */
+export const MACHINE_HINT = 'Settings > Threads picks it unless you change it here. Replies and Stop follow the thread wherever it runs.';
+
+function PreviewPane({ s, picked, onRecheck, onCloseTerminal, closing }: { s: ContinueState; picked: boolean; onRecheck: () => void; onCloseTerminal: () => void; closing: boolean }) {
   const p = shownPreview(s.preview);
   const block = blockOf(s);
   const loading = s.preview.kind === 'loading';
@@ -260,7 +285,7 @@ function PreviewPane({ s, onRecheck, onCloseTerminal, closing }: { s: ContinueSt
       {loading && !p && <Loading label="Building the preview" />}
       {p && (
         <div aria-busy={loading || undefined} className={`flex flex-col gap-3 transition-opacity ${loading ? 'opacity-50' : ''}`}>
-          <p className="px-1 text-[12.5px] leading-snug text-fg-3">{workspaceText(p)}</p>
+          <p className="px-1 text-[12.5px] leading-snug text-fg-3">{workspaceText(p, picked)}</p>
           {previewSections(p.carryover).map((sec) => (
             <SectionView key={sec.id} section={sec} />
           ))}
@@ -279,7 +304,7 @@ function SectionView({ section }: { section: PreviewSection }) {
     <section>
       <div className="mb-1 flex items-baseline gap-1.5 px-1">
         <span className="caption">{section.title}</span>
-        {section.count != null && <span className="font-num text-[11px] text-fg-4">{section.count}</span>}
+        {section.count != null && <span className="font-num text-[11px] text-fg-3">{section.count}</span>}
       </div>
       <div className="divide-y divide-line rounded-[18px] bg-surface">
         {section.rows.map((r) => (

@@ -43,13 +43,14 @@ describe('the question card, pending', () => {
     expect(count(out, 'role="radio"')).toBe(3);
     expect(out).toContain('Other');
     expect(out).toContain('The one the app already runs');
-    // A single choice question starts on its first option.
-    expect(out).toMatch(/role="radio" aria-checked="true"[^>]*>.*?Postgres/);
+    // Nothing is picked yet, so Next waits for a choice.
+    expect(out).not.toContain('aria-checked="true"');
+    expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Next/);
     expect(out).toContain('1 of 2');
     expect(out).toContain('Next');
     expect(out).not.toContain('Send');
     expect(out).toContain('Skip');
-    expect(out).toContain('Needs your input');
+    expect(out).toContain('>Needs you</span>');
     // Only the page shown.
     expect(out).not.toContain('Which locales ship first?');
   });
@@ -80,7 +81,7 @@ describe('the question card, settled', () => {
     expect(out).toContain('SQLite, it is local');
     expect(out).toContain('Dutch, German');
     expect(out).not.toContain('<button');
-    expect(out).not.toContain('Needs your input');
+    expect(out).not.toContain('>Needs you</span>');
   });
 
   it('says skipped and not answered', () => {
@@ -154,7 +155,7 @@ describe('Needs you', () => {
   });
 
   it('lists a thread that waits on an answer, with the question', () => {
-    expect(reasonOf(item(1))).toEqual({ glyph: 'needs', label: 'Waiting on your answer', detail: DB.question });
+    expect(reasonOf(item(1))).toEqual({ glyph: 'needs', mark: 'question', label: 'Waiting on your answer', detail: DB.question });
     expect(reasonOf(item(2)).label).toBe('2 questions wait on your answer');
   });
 

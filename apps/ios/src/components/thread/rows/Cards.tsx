@@ -1,8 +1,10 @@
+import { CrewMark, HarnessLogo, isCrewRole } from '../../../ui/Brand';
 import { cloudStatus, prNumber } from '@omni/shared/cloud-agent.ts';
 import { handoverNote, switchText } from '@omni/shared/run-switch.ts';
 import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../../../ui/Text';
+import { Icon } from '../../../ui/Icon';
 
 import { AttachmentRow } from '../../../attachments/AttachmentRow';
 import { showsBubble } from '../../../context/labels';
@@ -10,7 +12,8 @@ import { duration, plural } from '../../../thread/format';
 import { outcomeText, type ThreadRow } from '../../../thread/rows';
 import { fontSize, minTarget, radius, space, useOmniTheme, weight } from '../../../theme';
 import { ContextChips } from '../../ContextChips';
-import { type DotTone, StatusDot } from '../../StatusDot';
+import { ChannelAvatar, OmniMark } from '../../ChannelAvatar';
+import { glyphFor, StatusDot } from '../../StatusDot';
 import { Markdown } from '../Markdown';
 import { QuestionCard } from '../QuestionCard';
 import { useRowActions } from './actions';
@@ -18,8 +21,6 @@ import { useRowActions } from './actions';
 type Of<K extends ThreadRow['kind']> = { row: Extract<ThreadRow, { kind: K }> };
 
 const MONO = 'Menlo';
-
-const statusTone = (status: string): DotTone => (status === 'failed' ? 'warn' : status === 'running' || status === 'queued' ? 'ok' : 'muted');
 
 function LoadWhole({ label, onPress }: { label: string; onPress: () => void }) {
   const { colors } = useOmniTheme();
@@ -57,7 +58,10 @@ export function PromptRow({ row }: Of<'prompt'>) {
           ) : null}
         </View>
       ) : null}
-      {caption ? <Text style={[styles.caption, { color: colors.fg3 }]}>{caption}</Text> : null}
+      {caption ? <View style={styles.line}>
+        {p.dropped || caption === 'Sent while it ran' ? <Icon name={p.dropped ? 'x' : p.mode === 'interrupt' ? 'stop' : 'send'} size={11} color={colors.fg3} /> : null}
+        <Text style={[styles.caption, { color: colors.fg3 }]}>{caption}</Text>
+      </View> : null}
       {p.clipped ? <LoadWhole label="Load whole message" onPress={() => loadWhole(p.key)} /> : null}
     </View>
   );
@@ -70,6 +74,7 @@ export function ReportRow({ row }: Of<'report'>) {
   return (
     <View style={[styles.card, { backgroundColor: colors.surface }, r.dropped && styles.dim]}>
       <Pressable accessibilityRole="button" onPress={() => openThread(r.thread_id)} style={styles.line}>
+        {isCrewRole(r.role) ? <CrewMark role={r.role} /> : null}
         <Text style={[styles.cardTitle, { color: colors.fg }]}>{`Report from ${r.role || 'the crew'}`}</Text>
         {r.dropped ? <Text style={[styles.caption, { color: colors.fg3 }]}>{r.undelivered ? `Not delivered · ${r.undelivered}` : 'Not delivered'}</Text> : null}
         <View style={styles.grow} />
@@ -94,17 +99,19 @@ export function OutcomeRow({ row }: Of<'outcome'>) {
   const { colors } = useOmniTheme();
   return (
     <View style={styles.line}>
-      <StatusDot tone={statusTone(row.status)} />
+      <StatusDot glyph={glyphFor(row.status)} />
       <Text style={[styles.meta, { color: colors.fg3 }]}>{outcomeText(row, duration(row.tookMs))}</Text>
     </View>
   );
 }
 
-export function ConductorRow() {
+/** The Conductor's name over its answer, with the icon and background saved for it, else the Omni mark (web: ThreadTurn). */
+export function ConductorRow({ row }: Of<'conductor'>) {
   const { colors } = useOmniTheme();
+  const { look } = row;
   return (
     <View style={styles.line}>
-      <StatusDot tone="ok" />
+      {look ? <ChannelAvatar name={look.name} icon={look.icon} avatarBg={look.avatar_bg} conductor size={18} /> : <OmniMark size={14} color={colors.fg3} />}
       <Text style={[styles.meta, { color: colors.fg3 }]}>Conductor</Text>
     </View>
   );
@@ -131,22 +138,26 @@ export function CloudRow({ row }: Of<'cloud'>) {
   return (
     <View style={[styles.card, { backgroundColor: colors.surface }]}>
       <View style={styles.line}>
-        <StatusDot tone={statusTone(st.status)} />
+        <HarnessLogo harness="cursor-cloud" size={15} />
         <Text style={[styles.cardTitle, { color: colors.fg }]}>{p.name || 'Cursor cloud agent'}</Text>
         <View style={styles.grow} />
+        <StatusDot glyph={glyphFor(st.status)} />
         <Text style={[styles.caption, { color: colors.fg3 }]}>{st.label}</Text>
       </View>
       {detail ? (
-        <Text numberOfLines={1} style={[styles.small, { color: colors.fg3, fontFamily: MONO }]}>
-          {detail}
-        </Text>
+        <View style={styles.line}>
+          <Icon name="branch" size={13} color={colors.fg3} />
+          <Text numberOfLines={1} style={[styles.small, styles.grow, { color: colors.fg3, fontFamily: MONO }]}>{detail}</Text>
+        </View>
       ) : null}
       <View style={styles.links}>
-        <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(p.url)} hitSlop={8}>
+        <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(p.url)} hitSlop={8} style={styles.line}>
+          <Icon name="external" size={14} />
           <Text style={[styles.link, { color: colors.fg }]}>Open on cursor.com</Text>
         </Pressable>
         {p.pr_url ? (
-          <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(p.pr_url!)} hitSlop={8}>
+          <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(p.pr_url!)} hitSlop={8} style={styles.line}>
+            <Icon name="pr" size={13} />
             <Text style={[styles.link, { color: colors.fg }]}>{`Pull request ${pr ?? ''}`.trim()}</Text>
           </Pressable>
         ) : null}
@@ -179,7 +190,8 @@ export function DelegationRow({ row }: Of<'delegation'>) {
           onPress={() => openThread(k.id)}
           style={({ pressed }) => [styles.kid, { backgroundColor: pressed ? colors.surface3 : colors.bg }]}
         >
-          <StatusDot tone={statusTone(k.status)} />
+          {isCrewRole(k.role) ? <CrewMark role={k.role} /> : null}
+          <StatusDot glyph={glyphFor(k.status)} />
           <View style={styles.grow}>
             <Text numberOfLines={1} style={[styles.kidTitle, { color: colors.fg }]}>
               {k.title || 'Untitled'}
@@ -205,7 +217,7 @@ export function ArtifactRow({ row }: Of<'artifact'>) {
       style={({ pressed }) => [styles.card, styles.line, { backgroundColor: pressed ? colors.surface3 : colors.surface }]}
     >
       <View style={[styles.fileIcon, { backgroundColor: colors.surface3 }]}>
-        <Text style={[styles.caption, { color: colors.fg2, fontFamily: MONO }]}>{row.a.name.split('.').pop()?.slice(0, 4) ?? ''}</Text>
+        <Icon name={row.a.kind === 'image' || row.a.kind === 'screenshot' ? 'image' : row.a.kind === 'html' || row.a.kind === 'svg' ? 'globe' : 'file'} size={18} color={colors.fg2} />
       </View>
       <View style={styles.grow}>
         <Text numberOfLines={1} style={[styles.kidTitle, { color: colors.fg, fontFamily: MONO }]}>
@@ -231,7 +243,9 @@ export function StepsRow({ row }: Of<'steps'>) {
         {row.live ? `${plural(row.steps, 'step')} so far` : plural(row.steps, 'step')}
         {row.failed > 0 ? <Text style={{ color: colors.fg3 }}>{`  ·  ${row.failed} failed`}</Text> : null}
       </Text>
-      <Text style={[styles.chevron, { color: colors.fg4 }]}>{row.open ? '⌄' : '›'}</Text>
+      <View style={{ transform: [{ rotate: row.open ? '90deg' : '0deg' }] }}>
+        <Icon name="chevronRight" size={12} color={colors.fg4} />
+      </View>
     </Pressable>
   );
 }
@@ -240,10 +254,10 @@ export function NowRow({ row }: Of<'now'>) {
   const { colors } = useOmniTheme();
   return (
     <View style={[styles.card, styles.line, { backgroundColor: colors.surface }]}>
-      <StatusDot tone="ok" />
+      <StatusDot glyph="running" />
       <Text numberOfLines={1} style={[styles.nowText, { color: colors.fg }]}>
         {row.now.verb}
-        {row.now.target ? <Text style={{ fontFamily: MONO, fontSize: 13 }}>{` ${row.now.target}`}</Text> : null}
+        {row.now.target ? <Text style={{ fontFamily: MONO, fontSize: fontSize.ui }}>{` ${row.now.target}`}</Text> : null}
       </Text>
       {row.meta ? <Text style={[styles.caption, { color: colors.fg3 }]}>{row.meta}</Text> : null}
     </View>
@@ -265,8 +279,8 @@ export function PlanRow({ row }: Of<'plan'>) {
         const done = t.status === 'completed';
         return (
           <View key={i} style={styles.line}>
-            <StatusDot tone={running ? 'ok' : 'muted'} />
-            <Text style={[styles.todo, { color: running ? colors.fg : colors.fg3 }, done && styles.struck]}>{(running && t.activeForm) || t.content}</Text>
+            {done ? <Icon name="check" size={13} color={colors.fg3} /> : <StatusDot glyph={running ? 'running' : 'idle'} />}
+            <Text style={[styles.todo, { color: running ? colors.fg : done ? colors.fg3 : colors.fg2 }]}>{(running && t.activeForm) || t.content}</Text>
           </View>
         );
       })}
@@ -289,20 +303,20 @@ export function SwitchRow({ row }: Of<'switch'>) {
 const styles = StyleSheet.create({
   end: { alignItems: 'flex-end', gap: space.s2 },
   bubble: { maxWidth: '86%', borderRadius: radius.xl, paddingHorizontal: space.s8, paddingVertical: space.s6, gap: space.s4 },
-  bubbleText: { fontSize: 15, lineHeight: 22 },
+  bubbleText: { fontSize: fontSize.subhead, lineHeight: 22 },
   dim: { opacity: 0.6 },
   wake: { gap: space.s2 },
   caption: { fontSize: fontSize.meta },
-  small: { fontSize: 12.5, lineHeight: 18 },
-  meta: { fontSize: 12.5 },
+  small: { fontSize: fontSize.small, lineHeight: 18 },
+  meta: { fontSize: fontSize.small },
   card: { borderRadius: radius.xl, paddingHorizontal: space.s6, paddingVertical: space.s6, gap: space.s4 },
-  cardTitle: { fontSize: 13, fontWeight: weight.semibold },
+  cardTitle: { fontSize: fontSize.ui, fontWeight: weight.semibold },
   line: { flexDirection: 'row', alignItems: 'center', gap: space.s4 },
   grow: { flex: 1 },
   loadWhole: { minHeight: 32, justifyContent: 'center' },
-  mono: { fontFamily: MONO, fontSize: 12.5, lineHeight: 19 },
+  mono: { fontFamily: MONO, fontSize: fontSize.small, lineHeight: 19 },
   links: { flexDirection: 'row', gap: space.s8 },
-  link: { fontSize: 13, fontWeight: weight.semibold },
+  link: { fontSize: fontSize.ui, fontWeight: weight.semibold },
   kid: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -312,14 +326,12 @@ const styles = StyleSheet.create({
     paddingVertical: space.s4,
     borderRadius: radius.md,
   },
-  kidTitle: { fontSize: 14 },
+  kidTitle: { fontSize: fontSize.body },
   fileIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  pill: { minHeight: minTarget, flexDirection: 'row', alignItems: 'center', borderRadius: radius.pill, paddingHorizontal: 14 },
+  pill: { minHeight: minTarget, flexDirection: 'row', alignItems: 'center', borderRadius: radius.pill, paddingHorizontal: space.s7 },
   pillText: { flex: 1, fontSize: 13.5 },
-  chevron: { fontSize: 18 },
-  nowText: { flex: 1, fontSize: 14 },
-  todo: { flex: 1, fontSize: 14, lineHeight: 19 },
-  struck: { textDecorationLine: 'line-through' },
+  nowText: { flex: 1, fontSize: fontSize.body },
+  todo: { flex: 1, fontSize: fontSize.body, lineHeight: 19 },
   switch: { alignItems: 'center', gap: space.s2, paddingVertical: space.s2 },
   rule: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginBottom: space.s2 },
 });

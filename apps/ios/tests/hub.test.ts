@@ -1,7 +1,7 @@
 import type { Fetch, SSEConnection, SSESink, SSETransport } from '@omni/client-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createLiveHub, REFRESH_DEBOUNCE_MS } from '../src/live/hub';
+import { createLiveHub, REFRESH_DEBOUNCE_MS, TASKS_RETRY_MS } from '../src/live/hub';
 import type { OmniSession } from '../src/live/session';
 
 const BASE = 'http://omni.test';
@@ -119,6 +119,81 @@ describe('channel list', () => {
     expect(calls.length).toBe(before);
     await settle(1);
     expect(calls.filter((p) => p === '/api/channels')).toHaveLength(2);
+    hub.close();
+  });
+
+  it('ignores the sub-agent progress ticks until the threads hosting sub-agents change', async () => {
+    const t = fakeTransport();
+    const { fetch, calls } = fakeFetch(() => ({ body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    const lists = () => calls.filter((p) => p === '/api/channels').length;
+    const tick = (tasks: unknown[]) => feed?.sink.message(frame({ type: 'tasks', tasks }));
+
+    tick([{ thread_id: 'a', task_id: '1' }]);
+    await settle(REFRESH_DEBOUNCE_MS);
+    const afterFirst = lists();
+    // The same host, a second agent, a lead's member: the list shows none of it.
+    for (let i = 0; i < 10; i++) {
+      tick([{ thread_id: 'a', task_id: '1' }, { thread_id: 'a', task_id: '2' }, { thread_id: 'm', lead_id: 'a', task_id: '3' }]);
+      await settle(1000);
+    }
+    expect(lists()).toBe(afterFirst);
+    tick([{ thread_id: 'b', task_id: '4' }]);
+    await settle(REFRESH_DEBOUNCE_MS);
+    expect(lists()).toBe(afterFirst + 1);
+    hub.close();
+  });
+
+  it('reloads Needs you and the pins once per burst of thread changes, with the list', async () => {
+    const t = fakeTransport();
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/needs-you' ? { body: { items: [] } } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    const count = (path: string) => calls.filter((p) => p === path).length;
+    const before = ['/api/channels', '/api/needs-you', '/api/pinned'].map(count);
+    for (let i = 0; i < 6; i++) feed?.sink.message(frame({ type: 'thread', thread: { id: `t${i}`, updated_at: '' } }));
+    await settle(REFRESH_DEBOUNCE_MS);
+    expect(['/api/channels', '/api/needs-you', '/api/pinned'].map(count)).toEqual(before.map((n) => n + 1));
+    hub.close();
+  });
+
+  it('leaves the stores alone when a reload answers what is on screen', async () => {
+    const t = fakeTransport();
+    const { fetch } = fakeFetch((path) => (path === '/api/needs-you' ? { body: { items: [], unread: 0, blocked: 0 } } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    const sets = { channels: 0, needsYou: 0, activity: 0 };
+    hub.channels.subscribe(() => sets.channels++);
+    hub.needsYou.subscribe(() => sets.needsYou++);
+    hub.activity.subscribe(() => sets.activity++);
+    feed?.sink.message(frame({ type: 'channel', id: 'x' }));
+    feed?.sink.message(frame({ type: 'needs_you', thread_id: 'x' }));
+    await settle(REFRESH_DEBOUNCE_MS);
+    // The list itself lands once (its time moves on); no loading flag before it, and Needs you is unchanged.
+    expect(sets).toEqual({ channels: 1, needsYou: 0, activity: 0 });
+    hub.close();
+  });
+
+  it('shows an icon changed on the computer once the feed says the channel changed', async () => {
+    const t = fakeTransport();
+    let icon: string | null = '🛍️';
+    const { fetch } = fakeFetch((path) => (path === '/api/channels' ? { body: [channel('shop', { icon })] } : {}));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    expect(hub.channels.get().channels?.[0]?.icon).toBe('🛍️');
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    icon = 'svg:<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
+    feed?.sink.message(frame({ type: 'channel', id: 'shop' }));
+    await settle(REFRESH_DEBOUNCE_MS);
+    expect(hub.channels.get().channels?.[0]?.icon).toBe(icon);
     hub.close();
   });
 
@@ -307,6 +382,44 @@ describe('open thread', () => {
     hub.close();
   });
 
+  it('adds a crew thread started after opening, updates it from the feed and shows a new artifact at once', async () => {
+    const t = fakeTransport();
+    const { fetch } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: threadDetail() } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    expect(live.view.get().children).toEqual([]);
+
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    const crew = { id: 'k1', channel_id: 'c', parent_id: 't1', title: 'Crew', status: 'running', created_at: '', updated_at: '' };
+    feed?.sink.message(frame({ type: 'thread', thread: crew }));
+    expect(live.view.get().children.map((c) => [c.id, c.status])).toEqual([['k1', 'running']]);
+    feed?.sink.message(frame({ type: 'thread', thread: { ...crew, title: 'Crew renamed', status: 'done' } }));
+    expect(live.view.get().children.map((c) => [c.title, c.status])).toEqual([['Crew renamed', 'done']]);
+
+    const [stream] = t.threadStreams('t1');
+    stream?.sink.open();
+    const artifact = { id: 7, thread_id: 't1', path: '/x/r.html', name: 'r.html', kind: 'html', size: 1, url: null, description: null, created_at: '', updated_at: '' };
+    stream?.sink.message(frame({ kind: 'artifact', artifact }));
+    expect(live.view.get().artifacts.map((a) => a.id)).toEqual([7]);
+    live.close();
+    hub.close();
+  });
+
+  it('draws the opening message while the turn starts instead of an empty thread and a pending card', async () => {
+    const pending = [{ uuid: 'u1', kind: 'user', text: 'Fix it', mode: 'queue', state: 'sent', request_id: 'r1' }];
+    const detail = threadDetail({ events: [], history: { from: 0, to: null, results_below: 0 }, pending, opening: { text: 'Fix it', uuid: 'u1' } });
+    const { fetch } = fakeFetch((path) => (path.split('?')[0] === '/api/threads/t1' ? { body: detail } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const live = hub.openThread('t1');
+    await settle();
+    expect(live.view.get().rows.map((r) => [r.id, r.kind])).toEqual([[0, 'user']]);
+    expect(live.view.get().pending).toEqual([]);
+    live.close();
+    hub.close();
+  });
+
   it('reports a thread the server does not have as missing', async () => {
     const { fetch } = fakeFetch(() => ({ status: 404, body: { error: 'not found' } }));
     const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
@@ -407,6 +520,76 @@ const inbox = (items: ReturnType<typeof waiting>[]) => ({
   items,
   unread: items.filter((i) => i.result).length,
   blocked: items.filter((i) => i.blockers.length).length,
+});
+
+describe('sub-agents', () => {
+  it('loads the running sub-agents when the hub opens, then follows the feed, changing only when one starts or stops', async () => {
+    const t = fakeTransport();
+    const task = (thread_id: string, task_id: string, over: Record<string, unknown> = {}) => ({ thread_id, task_id, channel_id: 'c', description: 'x', subagent: true, background: true, started_at: '', ...over });
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/tasks' ? { body: [task('t1', 'k1'), task('t1', 'shell', { subagent: false })] } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    expect(calls).toContain('/api/tasks');
+    expect(hub.tasks.get().map((k) => k.task_id)).toEqual(['k1']);
+    const first = hub.tasks.get();
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    feed?.sink.message(frame({ type: 'tasks', tasks: [task('t1', 'k1', { tool_uses: 4 })] }));
+    expect(hub.tasks.get()).toBe(first);
+    feed?.sink.message(frame({ type: 'tasks', tasks: [task('t1', 'k1'), task('t2', 'k2')] }));
+    expect(hub.tasks.get().map((k) => k.thread_id)).toEqual(['t1', 't2']);
+    feed?.sink.message(frame({ type: 'tasks', tasks: [] }));
+    expect(hub.tasks.get()).toEqual([]);
+    hub.close();
+  });
+
+  const subagent = (thread_id: string, task_id: string) => ({ thread_id, task_id, channel_id: 'c', description: 'x', subagent: true, background: true, started_at: '' });
+
+  it('asks again after a failed first load, backing off, until the list loads', async () => {
+    let fail = 2;
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/tasks' ? (fail-- > 0 ? { status: 500, body: { error: 'down' } } : { body: [subagent('t1', 'k1')] }) : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const loads = () => calls.filter((c) => c === '/api/tasks').length;
+    await settle();
+    expect(loads()).toBe(1);
+    expect(hub.tasks.get()).toEqual([]);
+    await settle(TASKS_RETRY_MS);
+    expect(loads()).toBe(2);
+    // The second failure waits twice as long.
+    await settle(TASKS_RETRY_MS);
+    expect(loads()).toBe(2);
+    await settle(TASKS_RETRY_MS);
+    expect(loads()).toBe(3);
+    expect(hub.tasks.get().map((k) => k.task_id)).toEqual(['k1']);
+    // Loaded: no more asking.
+    await settle(TASKS_RETRY_MS * 20);
+    expect(loads()).toBe(3);
+    hub.close();
+  });
+
+  it('asks again as soon as the feed connects when the first load failed, and stops retrying once closed', async () => {
+    let fail = true;
+    const t = fakeTransport();
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/tasks' ? (fail ? { status: 500, body: { error: 'down' } } : { body: [subagent('t2', 'k2')] }) : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    const loads = () => calls.filter((c) => c === '/api/tasks').length;
+    await settle();
+    expect(loads()).toBe(1);
+    fail = false;
+    t.feeds()[0]?.sink.open();
+    await settle();
+    expect(loads()).toBe(2);
+    expect(hub.tasks.get().map((k) => k.task_id)).toEqual(['k2']);
+
+    const second = fakeFetch(() => ({ status: 500, body: { error: 'down' } }));
+    const other = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch: second.fetch });
+    await settle();
+    other.close();
+    const before = second.calls.length;
+    await settle(TASKS_RETRY_MS * 4);
+    expect(second.calls.length).toBe(before);
+    hub.close();
+  });
 });
 
 describe('needs you', () => {

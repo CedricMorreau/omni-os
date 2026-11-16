@@ -24,6 +24,7 @@
     "suggestion": null,
     "next_title": null,
     "next_prompt": null,
+    "open_items": null,
     "archived": 0,
     "folder_id": null,
     "pinned_at": null,
@@ -34,13 +35,23 @@
     "limit_state": null,
     "limit_resets_at": null,
     "limit_elsewhere": 0,
+    "goal_objective": null,
+    "goal_status": null,
+    "goal_checks": 0,
     "continued_from": null,
-    "waiting_on": null,
-    "draft": null,
-    "draft_kind": null,
     "created_at": "2026-01-05T09:00:00.000Z",
     "updated_at": "2026-01-05T09:00:00.000Z",
-    "delegating": false
+    "delegating": false,
+    "ran_on": {
+      "id": "mac-a",
+      "name": "Mac A",
+      "at": "2026-01-05T09:00:00.000Z",
+      "before": []
+    },
+    "run_started_at": "2026-01-05T09:00:00.000Z",
+    "waiting_on": null,
+    "draft": null,
+    "draft_kind": null
   },
   "channel": {
     "id": "shop",
@@ -61,9 +72,16 @@
     "default_harness": null,
     "default_model": null,
     "default_effort": null,
+    "worktree_include": null,
+    "worktree_shared": null,
+    "prompt_open_pr": null,
+    "prompt_fix_conflicts": null,
+    "prompt_fix_checks": null,
+    "design_system_size": 0,
+    "avatar_bg": null,
+    "avatar_bg_manual": 0,
     "links": [],
-    "extra_repos": [],
-    "design_system_size": 0
+    "extra_repos": []
   },
   "events": [
     {
@@ -118,6 +136,7 @@
       "name": "Mac B"
     },
     "running": true,
-    "refused": null
+    "refused": null,
+    "forwards": false
   }
 }

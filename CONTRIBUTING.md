@@ -2,7 +2,7 @@
 
 Omni is one person's daily tool, built in the open so others can fork it. Fixes and generic improvements from forks are welcome as PRs against `ben-askphill/omni-os`. Changes that only make sense for your own setup belong in your `data/` folder instead; if you need to edit a tracked file just for yourself, that is a missing config option, so open an issue ([FORKING.md](FORKING.md)).
 
-Most work here is done by agents running inside Omni. [CLAUDE.md](CLAUDE.md) is their guide and applies to humans too.
+Agents running inside Omni do most of the work here. [CLAUDE.md](CLAUDE.md) is their guide and applies to humans too.
 
 ## Set up
 
@@ -21,12 +21,12 @@ If you already run Omni for real on :4747, do not develop against it. Use the th
 | `npm test` | `turbo boundaries`, then every package's vitest suite |
 | `npm run typecheck` | `tsc` in every package, with `noUnusedLocals` and `noUnusedParameters` on |
 | `npm run unused` | Knip: unused files, dependencies and binaries (`knip.json`). Unused exports are not checked yet |
-| `npm run check` | Typecheck, knip, then `npm test`; the CI workflow runs the same three (`scripts/ci-workflow.yml`, to be moved to `.github/workflows/ci.yml`) |
+| `npm run check` | Typecheck, knip, then `npm test`. Run it before you open a PR |
 | `npx turbo run test --filter=@omni/web` | One package (`server`, `web`, `desktop`, `shared`) |
 | `cd apps/server && npx vitest run tests/<file>.test.ts` | One file |
 | `npx turbo run test --affected` | Only what changed against `main` |
 
-`npm test` runs on macOS and Linux and needs Node 24 and git. It runs two packages at a time, each on half the cores. On a small machine, pass a lower cap: `npx turbo run test --concurrency=1 -- --maxWorkers=2`. Some tests need more and skip without it:
+`npm test` runs on macOS and Linux and needs Node 24 and git. It runs two packages at a time, each on half the cores. On a small machine, pass a lower cap: `npx turbo run test --concurrency=1 -- --maxWorkers=2`. The server suite points `TMPDIR` at one `omni-test-*` folder per run (`apps/server/tests/global-tmpdir.ts`) and removes it afterwards, so leftover mkdtemp folders do not fill a quota'd `/tmp`. Sandbox tests set their own temp `OMNI_DATA_DIR` before `config.ts` loads, so a live install's `omni.config.json` cannot leak into them. Some tests need more and skip without it:
 
 - The desktop app's QA harness (`apps/desktop/scripts/qa.ts`) needs a display to open the app's windows. A Mac build of the desktop app (`npm run build:desktop`) needs macOS.
 - The real-Chrome tests in `apps/server/tests/browser-pick-cdp.test.ts` skip when no Chrome or Chromium is installed.
@@ -49,17 +49,17 @@ node scripts/qa-handoff-smoke.mjs    # proves devices, offline, idle and running
 scripts/qa-handoff-stack.sh down     # stops only what up started, deletes the rig's dir
 ```
 
-`up` runs `scripts/qa-relay.mjs` (an in-memory stand-in for `apps/relay` with the same HTTP and WebSocket protocol and one shared token) and two `qa-stack.sh` servers with no Web UI. Each has its own data dir, secret file store (`OMNI_SECRET_STORE=file`, never a Keychain), `HOME`, sync id, device name (`OMNI_DEVICE_NAME`) and fake Tailscale status (`OMNI_TAILSCALE_BIN`). The relay URL and token are stored as the sync secrets and sync is switched on. The channel `qa-shared`, with the same folder on both, is made on A and syncs to B. Everything lives in `$TMPDIR/omni-qa-handoff`; `QA_HANDOFF_PORT` (47300 to 47397) and `QA_HANDOFF_DIR` move it.
+`up` runs `scripts/qa-relay.mjs` (an in-memory stand-in for `apps/relay` with the same HTTP and WebSocket protocol and one shared token) and two `qa-stack.sh` servers with no Web UI. Each has its own data dir, secret file store (`OMNI_SECRET_STORE=file`, never a Keychain), `HOME`, sync id, device name (`OMNI_DEVICE_NAME`) and fake Tailscale status (`OMNI_TAILSCALE_BIN`). `up` stores the relay URL and token as the sync secrets and switches sync on. It makes the channel `qa-shared`, with the same folder on both, on A, and the channel syncs to B. Everything lives in `$TMPDIR/omni-qa-handoff`; `QA_HANDOFF_PORT` (47300 to 47397) and `QA_HANDOFF_DIR` move it.
 
 - `env A|B` prints the `EXPO_PUBLIC_OMNI_DEV_URL` and `EXPO_PUBLIC_OMNI_DEV_TOKEN` exports for the iOS dev build ([apps/ios/README.md](apps/ios/README.md#development-shortcut)). `status` shows ports and token files.
-- `offline B` makes A's Tailscale report B asleep (`online B` reverses it); it waits until `GET /api/devices` on A shows it, which takes up to 5 seconds because the server caches Tailscale. A handoff or Run on to an offline device is refused with 409.
+- `offline B` makes A's Tailscale report B asleep (`online B` reverses it); it waits until `GET /api/devices` on A shows it, which takes up to 5 seconds because the server caches Tailscale. The server refuses a handoff or Run on to an offline device with 409.
 - `thread A "TOOL:600000 hold"` starts a thread whose fake-claude turn runs for ten minutes, so there is a running thread to hand over. Stop it on whichever server holds it.
 - A failed `up` tears itself down; `QA_HANDOFF_KEEP=1` leaves the rig to read `scripts/qa-handoff-stack.sh logs`.
 
 ## What a PR needs
 
 - **One problem per PR.** Include the server, client, test and doc changes that problem needs, and nothing unrelated.
-- **Every surface.** A feature or fix ships on desktop web, the phone web layout and the desktop app (`apps/desktop`) in the same PR. None of them is a follow-up. If one surface does not need it, say why.
+- **Every surface.** A feature or fix ships on desktop web, the phone web layout and the desktop app (`apps/desktop`) in the same PR. None of them is a follow-up. If one surface does not need it, say why. The `omni` command is not a surface: a feature does not get a command ([ADR 0014](docs/adr/0014-omni-command-line.md)).
 - **Design system.** A UI component the [Omni OS design system](https://claude.ai/design/p/a7120f6b-8577-40e3-9087-e512ce20d673) does not have yet gets added there in the same PR. Reuse what it has first.
 - **Evidence.** Say what you ran and what you saw. A visible change needs before and after screenshots of desktop web, phone web and the desktop app, taken against the throwaway stack and uploaded with `scripts/pr-screenshots.sh` ([how](docs/pr-screenshots.md)). A backend fix needs a test, or the request and response that show it working. Say what you could not check.
 - **Docs.** If the change makes a page in `docs/` wrong, fix that page in the same PR. Where a new doc goes: [docs/README.md](docs/README.md#where-a-new-doc-goes).

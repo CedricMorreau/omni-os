@@ -83,7 +83,6 @@ describe('asking', () => {
     };
     expect(await refused({})).toBe('questions must be a list of 1 to 4 questions');
     expect(await refused({ questions: [Q4, MAIL, Q4, MAIL, Q4] })).toBe('questions must be a list of 1 to 4 questions');
-    expect(await refused({ questions: [{ ...Q4, header: 'Quarter focus' }] })).toBe('questions[0].header is longer than 12 characters');
     expect(await refused({ questions: [{ ...Q4, options: [...Q4.options, { label: 'Other', description: '' }] }] })).toBe(
       'questions[0].options[2] is "Other": leave it out, the card always offers it',
     );
@@ -96,9 +95,14 @@ describe('asking', () => {
     const qid = await ask(id, [Q4, MAIL]);
     expect(h.byKind(id, 'question').map((e) => e.p)).toEqual([{ id: qid, questions: [Q4, { ...MAIL, multiSelect: true }] }]);
     expect(h.thread(id).status).toBe('running');
-    expect(await blockers(id)).toEqual([{ kind: 'question', detail: Q4.question, count: 2 }]);
+    expect(await blockers(id)).toEqual([{ kind: 'question', detail: Q4.question, count: 2, at: expect.any(String) }]);
     expect(await poll(id, qid)).toEqual({ state: 'pending', text: 'The user has not answered yet.' });
     expect((await call('GET', `/threads/${id}/questions/nope`)).status).toBe(404);
+  });
+  it('shortens a header over 12 characters instead of refusing the call', T, async () => {
+    const id = await idle();
+    await ask(id, [{ ...Q4, header: 'Quarter focus' }]);
+    expect(h.byKind(id, 'question')[0].p.questions[0].header).toBe('Quarter foc…');
   });
 });
 
@@ -151,7 +155,7 @@ describe('answering', () => {
   it('sends the answers as a message when no call waits for them, and the thread runs on them', T, async () => {
     const id = await idle();
     const qid = await ask(id, [Q4]);
-    expect(await blockers(id)).toEqual([{ kind: 'question', detail: Q4.question, count: 1 }]);
+    expect(await blockers(id)).toEqual([{ kind: 'question', detail: Q4.question, count: 1, at: expect.any(String) }]);
     expect((await answer(id, qid, [{ selected: [], other: 'Kamera Express first' }])).body).toEqual({ state: 'answered', via: 'message' });
     const said =
       'User has answered your questions: "Which Q4 goal should get the most of your time?"="Kamera Express first". ' +
@@ -193,7 +197,7 @@ describe('ask_user_question from the agent', () => {
     const question = await asked(t.id);
     expect(tool(t.id)?.p.input.questions).toHaveLength(4);
     expect(question.p.questions.map((q: any) => q.header)).toEqual(['Q4 focus', 'Status mail', 'Handover', 'CRO audit']);
-    expect(await blockers(t.id)).toEqual([{ kind: 'question', detail: 'Which Q4 goal should get the most of your time between now and December?', count: 4 }]);
+    expect(await blockers(t.id)).toEqual([{ kind: 'question', detail: 'Which Q4 goal should get the most of your time between now and December?', count: 4, at: expect.any(String) }]);
     expect(h.thread(t.id).status).toBe('running');
 
     // The call polls one request after its question is saved; answering first would send the answer as a message.
@@ -242,7 +246,7 @@ describe('ask_user_question from the agent', () => {
     const question = await asked(t.id);
     await ok('POST', `/threads/${t.id}/stop`);
     await h.untilStatus(t.id, 'stopped');
-    expect(await blockers(t.id)).toEqual([{ kind: 'question', detail: 'Which Q4 goal should get the most of your time between now and December?', count: 1 }]);
+    expect(await blockers(t.id)).toEqual([{ kind: 'question', detail: 'Which Q4 goal should get the most of your time between now and December?', count: 1, at: expect.any(String) }]);
     expect((await answer(t.id, question.p.id, [{ selected: ['Acne POC'], other: null }])).body).toEqual({ state: 'answered', via: 'message' });
     await h.untilResults(t.id, 2);
     const said =

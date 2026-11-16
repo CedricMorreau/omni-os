@@ -15,6 +15,7 @@ Every PR for a feature or fix that changes what the Web UI or the desktop app lo
 - Never screenshot against the live server on :4747 or its `data/`. Start a throwaway server on a spare port with its own data dir and the fake CLIs (`QA_SERVER_PORT=<port> scripts/qa-stack.sh up`, which seeds sample threads), and point the client at it.
 - Web: open the stack's vite (the `web` URL `qa-stack.sh up` prints, `QA_WEB_PORT`, default 4768) in the thread's browser (`omni-browser` MCP) or Playwright: `browser_resize` for phone width, `browser_emulate_media` for dark mode.
 - Desktop app: `apps/desktop/scripts/qa.ts` with `snapshot` steps and `"appearance": "light"` or `"dark"`, described under "QA harness" in [apps/desktop/README.md](../apps/desktop/README.md#qa-harness). It launches the app with Playwright against the stack's server and captures windows without screen recording permission. Pass `--app-url` with a Vite in front of the stack so the app shows your Web UI change, not the server's last build of `apps/web/dist`. That Vite has to listen on 127.0.0.1, where the pairing cookie is set, so start one on a free port: `OMNI_PORT=<server port> npx vite --config apps/web/vite.config.ts --host 127.0.0.1 --port <free port> --strictPort`, then `--app-url http://127.0.0.1:<that port>`.
+- Crop or join images with ImageMagick (`magick`), not Python: Pillow is often not installed.
 - Name files after what they show, like `composer-after-dark.png`. The name becomes the alt text.
 
 ## How to attach
@@ -25,7 +26,7 @@ GitHub has no API for uploading images to a PR, so upload them with:
 scripts/pr-screenshots.sh shots/*.png
 ```
 
-It commits the images to the hidden ref `refs/screenshots/pr-screenshots` under a folder named after the current branch and prints one Markdown image line per file, pinned to that commit. Paste those under a `## Screenshots` heading in the PR body, grouped as before/after, with a line on what to look at. After review fixes, re-run it and replace the old lines with the new ones: the links point at a commit, so the old ones keep showing the old images.
+It commits the images to the hidden ref `refs/screenshots/pr-screenshots` under a folder named after the current branch and prints one Markdown image line per file, pinned to that commit. Paste those under a `## Screenshots` heading in the PR body, grouped as before/after, with a line on what to look at. After review fixes, re-run it and replace the old lines with the new ones. The links point at a commit, so the old ones keep showing the old images.
 
 The ref sits outside `refs/heads` on purpose. Pushing to a branch made GitHub show a "pr-screenshots had recent pushes, Compare & pull request" banner on the repo page after every upload. The old `pr-screenshots` branch stays so images in older PRs keep loading; nothing pushes to it any more.
 

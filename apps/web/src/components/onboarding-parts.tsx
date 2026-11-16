@@ -90,7 +90,7 @@ export function Steps({ step }: { step: number }) {
   return (
     <ol className="flex items-center gap-1.5" aria-label={`Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`}>
       {STEPS.map((s, i) => (
-        <li key={s} title={s} className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-fg' : i < step ? 'w-1.5 bg-fg-2' : 'w-1.5 bg-line-strong'}`} />
+        <li key={s} title={s} className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-fg' : i < step ? 'w-1.5 bg-fg-2' : 'w-1.5 bg-fg-4'}`} />
       ))}
     </ol>
   );
@@ -100,7 +100,7 @@ export function Screen({ caption, title, body, children }: { caption: string; ti
   return (
     <div>
       <div className="caption mb-2">{caption}</div>
-      <h2 id="onboarding-title" className="font-display text-[24px] leading-[1.1]">
+      <h2 id="onboarding-title" className="font-display text-[length:var(--fs-title)] leading-[1.15]">
         {title}
       </h2>
       <p className="mt-2 text-[13px] leading-relaxed text-fg-3">{body}</p>
@@ -137,7 +137,7 @@ export function browserTimezone() {
   }
 }
 
-export function TimezoneInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+export function TimezoneInput({ id, value, onChange, describedBy }: { id: string; value: string; onChange: (v: string) => void; describedBy?: string }) {
   const zones = useMemo(() => {
     try {
       return (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? [];
@@ -147,7 +147,7 @@ export function TimezoneInput({ id, value, onChange }: { id: string; value: stri
   }, []);
   return (
     <>
-      <input id={id} className="field w-full" list={`${id}-zones`} value={value} placeholder="Europe/Amsterdam" spellCheck={false} onChange={(e) => onChange(e.target.value)} />
+      <input id={id} aria-describedby={describedBy} className="field w-full" list={`${id}-zones`} value={value} placeholder="Europe/Amsterdam" spellCheck={false} onChange={(e) => onChange(e.target.value)} />
       <datalist id={`${id}-zones`}>
         {zones.map((z) => (
           <option key={z} value={z} />
@@ -157,13 +157,14 @@ export function TimezoneInput({ id, value, onChange }: { id: string; value: stri
   );
 }
 
-export function PronounsInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+export function PronounsInput({ id, value, onChange, describedBy }: { id: string; value: string; onChange: (v: string) => void; describedBy?: string }) {
   const custom = !PRONOUNS.includes(value);
   const [other, setOther] = useState(custom);
   return (
     <div className="flex gap-2">
       <select
         id={id}
+        aria-describedby={describedBy}
         className="field min-w-0 flex-1"
         value={other ? 'other' : value}
         onChange={(e) => {

@@ -1,0 +1,181 @@
+import type { ReactNode } from 'react';
+import { taskHost } from '../../api.ts';
+import { href, startNewThread, useRoute } from '../../router.ts';
+import { useApp } from '../../store.tsx';
+import type { ListMode } from '../../rail-model.ts';
+import { DEFAULT_FOLDER_NAME, draftKey, freeName, useFolders } from '../../folders.tsx';
+import { Icon, IconButton, Kbd } from '../ui.tsx';
+import { channelFolders, channelThreads } from '../sidebar/channel-lists.ts';
+import { FolderNameField, FolderRow } from '../sidebar/FolderRows.tsx';
+import { InboxView } from '../sidebar/InboxView.tsx';
+import { ChannelThreadEntry, NavLink } from '../sidebar/SidebarRows.tsx';
+import { UsageCard } from '../sidebar/UsageCard.tsx';
+import { useScrollFade } from './useScrollFade.ts';
+import { SettingsNav } from '../SettingsNav.tsx';
+import { sectionShows } from '@omni/shared/settings-catalog.ts';
+import { desktop } from '../../desktop.ts';
+import { UpdateNotice } from '../UpdateNotice.tsx';
+import { DiskNotice } from '../DiskNotice.tsx';
+import { AccountNotice } from '../AccountNotice.tsx';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/**
+ * The list beside the rail, following the page: the selected channel's threads and folders, the Inbox with Search
+ * and New thread above it, or Settings' sections. 264px of surface. Pages with no list (Overview, Pull requests,
+ * Library, Automations, Search) get no panel.
+ */
+export function ListPanel({ mode, onSearch }: { mode: ListMode; onSearch: () => void }) {
+  if (mode.kind === 'none') return null;
+  return (
+    <aside className="flex h-full w-[264px] shrink-0 flex-col border-r border-[var(--line)] bg-surface">
+      {mode.kind === 'channel' ? <ChannelList id={mode.id} /> : mode.kind === 'settings' ? <SettingsList /> : <InboxList onSearch={onSearch} />}
+    </aside>
+  );
+}
+
+/** Settings' sections, in the panel instead of a column of the page, so the rail never shows three columns of navigation. */
+function SettingsList() {
+  const route = useRoute();
+  const section = route.name === 'settings' && route.section && sectionShows(route.section, desktop !== null) ? route.section : 'general';
+  return (
+    <>
+      <PanelHeader title="Settings" />
+      <PanelScroll>
+        <SettingsNav section={section} />
+      </PanelScroll>
+    </>
+  );
+}
+
+/** The panel's title row. On macOS the desktop app drags its window by it (index.css: .rail-panel-top). */
+function PanelHeader({ title, lead, right }: { title: ReactNode; lead?: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="rail-panel-top flex h-[62px] shrink-0 items-end gap-1 px-3 pb-1.5">
+      {lead}
+      <h2 className={`min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] text-fg ${lead ? '' : 'pl-2.5'}`}>{title}</h2>
+      {right}
+    </div>
+  );
+}
+
+/** The panel's scrolling list, fading at an edge while rows hide past it, as the rail does. */
+function PanelScroll({ children }: { children: ReactNode }) {
+  const { ref, fade } = useScrollFade();
+  return (
+    <div ref={ref} className="scroll-thin mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-4" style={{ maskImage: fade, WebkitMaskImage: fade }}>
+      {children}
+    </div>
+  );
+}
+
+function NewThreadButton() {
+  const route = useRoute();
+  const { openThread } = useApp();
+  return (
+    <button
+      type="button"
+      onClick={() => startNewThread(route, openThread)}
+      className="press flex h-9 w-full items-center justify-center gap-2 rounded-full bg-fg text-[13px] font-medium text-on-ink transition-opacity hover:opacity-90"
+    >
+      <Icon name="plus" size={15} strokeWidth={2} /> New thread
+    </button>
+  );
+}
+
+/** The Inbox (its pinned cards, what waits on Ben, Working, Done and the Workspace links), under Search and New thread. */
+function InboxList({ onSearch }: { onSearch: () => void }) {
+  return (
+    <>
+      <PanelHeader title="Inbox" />
+      <div className="space-y-2 px-3 pt-2">
+        <button
+          type="button"
+          onClick={onSearch}
+          className="press flex h-9 w-full items-center gap-2.5 rounded-full bg-bg pr-2 pl-3.5 text-[13px] text-fg-3 shadow-[0_0_0_0.5px_var(--line)] transition-colors hover:text-fg-2"
+        >
+          <Icon name="search" size={15} />
+          <span className="flex-1 text-left">Search or jump to</span>
+          <Kbd className="bg-surface-2">{isMac ? '⌘K' : 'Ctrl K'}</Kbd>
+        </button>
+        <NewThreadButton />
+      </div>
+      <PanelScroll>
+        <InboxView links={false} />
+      </PanelScroll>
+      <div className="px-3 pt-1 pb-3">
+        <UpdateNotice className="mb-2" />
+        <DiskNotice className="mb-2" />
+        <AccountNotice className="mb-2" />
+        <UsageCard />
+      </div>
+    </>
+  );
+}
+
+function ChannelList({ id }: { id: string }) {
+  const route = useRoute();
+  const { channel, openThread, tasks } = useApp();
+  const folders = useFolders();
+  const c = channel(id);
+  const openId = route.name === 'thread' ? route.id : null;
+  const open = c && openThread && openThread.id === openId && openThread.channel_id === c.id ? openThread : null;
+  const threads = c ? channelThreads(c, open, c.id) : [];
+  const folderList = c ? channelFolders(c, open) : [];
+  if (!c) return <PanelHeader title={id === 'conductor' ? 'Conductor' : id} />;
+  const name = c.id === 'conductor' ? 'Conductor' : c.name;
+  const agents = (tid: string) => tasks.filter((k) => taskHost(k) === tid);
+  const tab = route.name === 'channel' && route.id === c.id ? route.tab : null;
+
+  return (
+    <>
+      <PanelHeader
+        title={name}
+        right={
+          c.id !== 'conductor' && (
+            <IconButton icon="folderPlus" label="New folder" size={15} onClick={() => folders.setEditing(draftKey(c.id))} />
+          )
+        }
+      />
+      <div className="px-3 pt-2">
+        <NewThreadButton />
+      </div>
+      <PanelScroll>
+        <div className="space-y-4">
+          {(folderList.length > 0 || folders.editing === draftKey(c.id)) && (
+            <div>
+              <div className="caption px-3 pt-1 pb-2">Folders</div>
+              <div className="space-y-px">
+                {folderList.map((f) => (
+                  <FolderRow key={f.id} f={f} openId={openId} tasks={tasks} />
+                ))}
+                {folders.editing === draftKey(c.id) && (
+                  <FolderNameField
+                    initial={freeName(c.folders ?? [], DEFAULT_FOLDER_NAME)}
+                    onSave={(n) => (folders.setEditing(null), void folders.create(c.id, n))}
+                    onCancel={() => folders.setEditing(null)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+          <div>
+            <div className="caption px-3 pt-1 pb-2">Recent</div>
+            <div className="space-y-px">
+              {threads.length ? (
+                <>
+                  {threads.map((t) => <ChannelThreadEntry key={t.id} t={t} active={t.id === openId} tasks={agents(t.id)} flush />)}
+                  <NavLink to={href.channel(c.id)} active={tab === 'threads' && !openId}>
+                    See all threads
+                  </NavLink>
+                </>
+              ) : (
+                <div className="px-3 text-[12px] text-fg-3">No threads yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </PanelScroll>
+    </>
+  );
+}

@@ -117,7 +117,9 @@ describe('minting a code', () => {
   it('still pairs a browser that submits the install token', async () => {
     const res = await req('POST', '/auth/pair', {}, as(MASTER));
     expect(res.status).toBe(200);
-    expect(res.headers.get('set-cookie')).toContain(MASTER);
+    // A session paired with the token, never the token itself (S11).
+    expect(res.headers.get('set-cookie')).toMatch(/omni_session_\d+=omni_s_/);
+    expect(res.headers.get('set-cookie')).not.toContain(MASTER);
     expect((await req('POST', '/auth/pair', {}, NONE)).status).toBe(401);
   });
 
@@ -326,7 +328,7 @@ describe('a paired app session', () => {
       api: 1,
       auth: { via: 'session', method: 'pairing', sessionId },
       pairing: { app: true, codeTtlSeconds: 300 },
-      push: { registration: true, delivery: false },
+      push: { registration: true, delivery: false, problem: null },
       streams: { sse: true, closeOnRevoke: true },
     });
     const list = (await (await req('GET', '/auth/devices', undefined, as(token))).json()) as { devices: { id: string; current: boolean }[] };

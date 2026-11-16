@@ -1,3 +1,7 @@
+import type { ClaudeArtifactsState } from '@omni/shared/claude-artifacts.ts';
+import type { DiskLevel } from '@omni/shared/disk-space.ts';
+import type { AutoMergeRequest } from '@omni/shared/pr-auto-merge.ts';
+import type { MachineStats } from '@omni/shared/machines.ts';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { Thread as ThreadRow, Channel as ChannelRow, ChannelLink, EventRow, Artifact, Folder, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult } from '@omni/server/db.ts';
 import type { Attachment } from '@omni/server/uploads.ts';
@@ -5,13 +9,16 @@ import type { HarnessInfo, ModelEntry, HarnessId } from '@omni/server/harness/ty
 import type { CommandList as HarnessCommands } from '@omni/server/commands.ts';
 import type { ContextView } from '@omni/server/context.ts';
 import type { ContextUsage } from '@omni/shared/context-meter.ts';
+import type { AccountUsage } from '@omni/shared/account-usage.ts';
 import type { HandoffView, Takeover } from '@omni/shared/handoff.ts';
+import type { RanOnFields } from '@omni/shared/ran-on.ts';
 import type { Opening } from '@omni/shared/opening.ts';
 import type { DeliveryPage, DeliveryView } from '@omni/shared/automation-triggers.ts';
 import type { ArtifactTrigger, PrTrigger, WebhookTrigger } from '@omni/server/automation-events.ts';
 import type { ContinueLink } from '@omni/shared/continue.ts';
 import type { Clipped, HistoryHead } from '@omni/shared/history.ts';
 import { outputQuery, type OutputChunk } from '@omni/shared/tool-output.ts';
+import type { FeedAlert } from '@omni/shared/attention.ts';
 
 export type { EventRow, Artifact, Attachment, HarnessInfo, ModelEntry, HarnessId, Folder, ContextUsage, ContextView, DeliveryState, NeedsYou, NeedsYouItem, NeedsYouBlocker, NeedsYouResult, ArtifactTrigger, WebhookTrigger, DeliveryView, DeliveryPage };
 
@@ -35,11 +42,11 @@ export type Channel = Omit<ChannelRow, 'design_system' | 'default_base' | 'links
  * A thread as the API sends it. `delegating`: a thread it delegated, at any depth, still runs or queues
  * (apps/server/delegating.ts). Read running state through @omni/shared/delegate-count.ts, not `status` alone.
  */
-export type Thread = ThreadRow & { delegating?: boolean };
+export type Thread = ThreadRow & { delegating?: boolean } & RanOnFields;
 
 /** Just enough of a thread to list it under its channel in the sidebar. */
 export type ThreadStub = Pick<Thread, 'id' | 'channel_id' | 'title' | 'status' | 'created_at'> &
-  Partial<Pick<Thread, 'parent_id' | 'source' | 'delegating'>> & { updated_at?: string; folder_id?: string | null; harness?: string; done_at?: string | null; waiting_on?: string | null };
+  Partial<Pick<Thread, 'parent_id' | 'source' | 'delegating' | 'limit_state' | 'setup' | 'model' | 'branch' | 'goal_objective' | 'goal_status' | 'ran_on' | 'run_started_at'>> & { updated_at?: string; folder_id?: string | null; harness?: string; done_at?: string | null; waiting_on?: string | null };
 /** A Conductor job and its cross-channel delegated threads, as the channel API sends them. */
 export interface ConductorHandoffGroup {
   parent: ThreadStub;
@@ -47,8 +54,11 @@ export interface ConductorHandoffGroup {
 }
 /** A sidebar folder with how many threads it holds, how many of them run, and its newest threads. */
 export type FolderWithThreads = Folder & { count: number; running: number; threads: ThreadStub[] };
-/** `active`: the channel's running and queued threads, and any whose sub-agents still run. `recent`: its latest threads of any status. `folders`: its sidebar folders, in order. */
-export type ChannelWithRunning = Channel & { running: number; active?: ThreadStub[]; recent?: ThreadStub[]; folders?: FolderWithThreads[]; handoffs?: ConductorHandoffGroup[] };
+/**
+ * `active`: the channel's running and queued threads, and any whose sub-agents still run. `recent`: its latest threads of any
+ * status. `folders`: its sidebar folders, in order. `teams`: its team leads with their members (parent, children).
+ */
+export type ChannelWithRunning = Channel & { running: number; active?: ThreadStub[]; recent?: ThreadStub[]; folders?: FolderWithThreads[]; handoffs?: ConductorHandoffGroup[]; teams?: ConductorHandoffGroup[] };
 export type ArtifactWithThread = Artifact & { thread_title: string; channel_id: string };
 
 export interface UsageWindow {
@@ -178,6 +188,9 @@ export interface PendingMsg {
   request_id?: string;
   /** `recovered` and `uncertain` (shown with `state: 'held'`) wait on Ben after a restart. */
   delivery?: DeliveryState;
+  /** Sent to the machine that holds the thread, which has not taken it yet (apps/server/run-on.ts): its name, and when. */
+  forwarded_to?: string;
+  sent_at?: string;
 }
 
 export interface CrewRole {
@@ -269,6 +282,8 @@ export interface PRDetail extends PRSummary {
   diff: string;
   /** The Omni thread on its head branch and the thread that delegated it. null for a PR opened outside Omni. */
   thread?: PRThread | null;
+  /** Armed auto-merge, or null when off. */
+  autoMergeRequest?: AutoMergeRequest | null;
 }
 export interface PRThread {
   id: string;
@@ -295,12 +310,43 @@ export type {
   TurnView,
 } from '@omni/shared/changes.ts';
 
+/** What the Automations editor sends (PUT /automations/:id, POST /automations). Empty optional text clears the key. */
+export interface AutomationFields {
+  name: string;
+  enabled: boolean;
+  cron?: string;
+  on?: unknown;
+  timezone?: string;
+  catchup?: boolean;
+  channel: string;
+  /** A sync machine id, `here`, or empty for "Run automations on". */
+  machine?: string;
+  role?: string;
+  harness?: string;
+  model?: string;
+  effort?: string;
+  prompt: string;
+}
+
+/** GET /automations/:id/definition: the YAML as written, and its fields (the prompt with its {{placeholders}}). */
+export interface AutomationDefinition {
+  id: string;
+  file: string;
+  shipped: boolean;
+  personal: boolean;
+  yaml: string;
+  fields: AutomationFields & { machine_id: string | null };
+}
+
 export interface AutomationRun {
   thread_id: string | null;
   trigger: string;
   created_at: string;
+  /** The thread's status; `skipped` for a scheduled run that never started (see skip_reason). */
   status: string | null;
   title: string | null;
+  /** Why a scheduled run was skipped: its precheck failed, or a catch-up was older than catchup_max_age. Older servers leave it out. */
+  skip_reason?: string | null;
 }
 /** A PR change on GitHub, a page a thread published (`artifact_published`), or a signed GitHub webhook (`github_webhook`). */
 export type AutomationTrigger = PrTrigger | ArtifactTrigger | WebhookTrigger;
@@ -318,9 +364,18 @@ export interface Automation {
   timezone: string;
   channel: string;
   role?: string;
+  harness?: string;
   model?: string;
+  effort?: string;
   prompt: string;
   enabled: boolean;
+  catchup?: boolean;
+  /** The synced machine its YAML names, by name or id. Unset, it follows "Run automations on". */
+  machine?: string;
+  /** Where it runs: a machine's sync id (null before any machine claimed automations), and whether that is this one. */
+  runs_on: { owner: string | null; isThisMac: boolean };
+  /** `shipped`: automations/ as it came. `edited`: your copy of a shipped one in data/automations/. `own`: yours alone. */
+  source: 'shipped' | 'edited' | 'own';
   file?: string;
   error?: string;
   next?: string | null;
@@ -401,8 +456,23 @@ export type FeedEvent =
   | { type: 'needs_you'; thread_id: string }
   /** A delivery to this automation was saved or changed state. */
   | { type: 'automation_delivery'; automation: string }
+  | { type: 'automations' }
   /** The update check or Update moved on: refetch GET /api/update. */
   | { type: 'update' }
+  /** A claude.ai Artifacts refresh started or ended, or its schedule changed. Refetch the list once `refreshing` is false. */
+  | { type: 'claude_artifacts'; state: ClaudeArtifactsState }
+  /** Free disk space crossed a warning level: refetch GET /api/disk. */
+  | { type: 'disk'; level: DiskLevel }
+  /** A harness account changed, here or on another machine, or a switch was acknowledged: refetch GET /api/accounts. */
+  | { type: 'accounts' }
+  /** One account's plan usage was read, here or on another machine: the Usage card updates that account's row. */
+  | { type: 'account_usage'; usage: AccountUsage }
+  /** A thread's review notes changed, here or on another Mac: refetch GET /api/threads/:id/review-notes. */
+  | { type: 'review_notes'; thread_id: string }
+  /** A machine's CPU and memory sample, while the machine tiles are watched (apps/server/machine-stats.ts). Id null is this machine with sync off. */
+  | { type: 'machine_stats'; id: string | null; stats: MachineStats }
+  /** A crew report in the Conductor, or a watched PR that needs attention: worth a notification, not in Needs you. */
+  | { type: 'alert'; alert: FeedAlert }
   | { type: 'reconnect' };
 
 /** GET /api/update (apps/server/update.ts): how far this server is behind main, and where Update is. */
@@ -544,6 +614,8 @@ export const openToolTail = (threadId: string, toolUseId: string, onData: (data:
 export interface Async<T> {
   data: T | undefined;
   error: string | null;
+  /** The status of the failed read when the server answered it, so a caller can tell a missing route from an outage. */
+  status?: number | null;
   loading: boolean;
   reload: () => void;
   setData: (fn: T | ((prev: T | undefined) => T)) => void;
@@ -553,6 +625,7 @@ export interface Async<T> {
 export function useApi<T>(path: string | null): Async<T> {
   const [data, setDataState] = useState<T | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(!!path);
   const [tick, setTick] = useState(0);
   const lastPath = useRef<string | null>(null);
@@ -574,8 +647,13 @@ export function useApi<T>(path: string | null): Async<T> {
         if (!alive) return;
         setDataState(d);
         setError(null);
+        setStatus(null);
       })
-      .catch((e) => alive && setError(errorText(e)))
+      .catch((e) => {
+        if (!alive) return;
+        setError(errorText(e));
+        setStatus(e instanceof ApiError ? e.status : null);
+      })
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -586,7 +664,7 @@ export function useApi<T>(path: string | null): Async<T> {
   const setData = useCallback((fn: T | ((prev: T | undefined) => T)) => {
     setDataState((prev) => (typeof fn === 'function' ? (fn as (p: T | undefined) => T)(prev) : fn));
   }, []);
-  return { data, error, loading, reload, setData };
+  return { data, error, status, loading, reload, setData };
 }
 
 // ---------- SSE with reconnect ----------

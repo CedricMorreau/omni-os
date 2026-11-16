@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
-import { api, errorText, openSSE } from '../api.ts';
+import { api, ApiError, errorText, openSSE } from '../api.ts';
 import { AnnotateButton, AnnotateLayer, canAnnotate, useAfterAdd, type AnnotateFrom } from './BrowserAnnotate.tsx';
 import { LiveAnnotateCard, LiveAnnotateOverlay, useLiveAnnotate } from './BrowserAnnotationOverlay.tsx';
-import { Button, Icon, IconButton } from './ui.tsx';
+import { Button, Icon, IconButton, Loader } from './ui.tsx';
 
 export interface BrowserTabInfo {
   id: string;
@@ -122,32 +122,51 @@ export function useChannelBrowser(channelId: string) {
       decoding = false;
       void decode();
     };
-    const h = openSSE(
-      () => `/api${base}/stream`,
-      (d) => {
-        const m = d as { type: string; state?: BrowserState; data?: string; width?: number; height?: number; scrollX?: number; scrollY?: number; error?: string };
-        if (m.type === 'state' && m.state) {
-          setState(m.state);
-          if (!m.state.running) {
-            frame.current = null;
-            setHasFrame(false);
-          }
-        } else if (m.type === 'frame' && m.data) {
-          // Only the newest frame waiting to decode counts.
-          pending = { data: m.data, width: m.width!, height: m.height!, ...(typeof m.scrollX === 'number' && typeof m.scrollY === 'number' && { scroll: { x: m.scrollX, y: m.scrollY } }) };
-          void decode();
-        } else if (m.type === 'error') setError(m.error ?? 'The browser could not start');
-      },
-      {
-        onOpen: () => {
-          setError(null);
-          setOpened((n) => n + 1);
+    // Start Chrome with a deliberate POST (PRD #667: the stream only attaches). A server from before that route has no
+    // /start, and its stream starts Chrome itself.
+    let h: { close(): void } | null = null;
+    let startError: string | null = null;
+    const attach = () => {
+      if (!alive) return;
+      h = openSSE(
+        () => `/api${base}/stream`,
+        (d) => {
+          const m = d as { type: string; state?: BrowserState; data?: string; width?: number; height?: number; scrollX?: number; scrollY?: number; error?: string };
+          if (m.type === 'state' && m.state) {
+            setState(m.state);
+            if (!m.state.running) {
+              frame.current = null;
+              setHasFrame(false);
+            }
+          } else if (m.type === 'frame' && m.data) {
+            // Only the newest frame waiting to decode counts.
+            pending = { data: m.data, width: m.width!, height: m.height!, ...(typeof m.scrollX === 'number' && typeof m.scrollY === 'number' && { scroll: { x: m.scrollX, y: m.scrollY } }) };
+            void decode();
+          } else if (m.type === 'error') setError(m.error ?? 'The browser could not start');
         },
-      },
-    );
+        {
+          onOpen: () => {
+            setError(startError);
+            setOpened((n) => n + 1);
+          },
+        },
+      );
+    };
+    void api
+      .post<BrowserState>(`${base}/start`, {})
+      .then((st) => {
+        if (alive) setState(st);
+      })
+      .catch((e) => {
+        if (alive && !(e instanceof ApiError && e.status === 404)) {
+          startError = errorText(e);
+          setError(startError);
+        }
+      })
+      .finally(attach);
     return () => {
       alive = false;
-      h.close();
+      h?.close();
     };
   }, [base, epoch]);
 
@@ -237,8 +256,8 @@ function usePaint(b: Browser, box: RefObject<HTMLDivElement | null>, canvas: Ref
 
 function Favicon({ tab, loading }: { tab: BrowserTabInfo; loading?: boolean }) {
   const [failed, setFailed] = useState<string | null>(null);
-  if (loading) return <span className="spin h-3 w-3 shrink-0 rounded-full border-[1.5px] border-fg-4 border-t-transparent" />;
-  if (!tab.favicon || failed === tab.favicon) return <Icon name="globe" size={13} className="shrink-0 text-fg-4" />;
+  if (loading) return <Loader size={12} className="shrink-0 text-fg-3" />;
+  if (!tab.favicon || failed === tab.favicon) return <Icon name="globe" size={13} className="shrink-0 text-fg-3" />;
   return <img src={tab.favicon} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setFailed(tab.favicon!)} className="h-4 w-4 shrink-0 rounded-[3px] object-contain" />;
 }
 
@@ -281,7 +300,7 @@ function TabStrip({ b }: { b: Browser }) {
                   e.stopPropagation();
                   void b.action({ action: 'closeTab', id: t.id });
                 }}
-                className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-fg-4 opacity-0 group-hover:opacity-100 group-data-[on=true]:opacity-100 hover:bg-surface-3 hover:text-fg"
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-fg-3 opacity-0 group-hover:opacity-100 group-data-[on=true]:opacity-100 hover:bg-surface-3 hover:text-fg"
               >
                 <Icon name="x" size={11} />
               </button>
@@ -323,7 +342,7 @@ function Toolbar({ b, extra, address, page }: { b: Browser; extra?: ReactNode; a
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center truncate px-4 text-[13px]" aria-hidden>
             <span className="truncate">
               <span className="text-fg">{host}</span>
-              <span className="text-fg-4">{path}</span>
+              <span className="text-fg-3">{path}</span>
             </span>
           </span>
         )}

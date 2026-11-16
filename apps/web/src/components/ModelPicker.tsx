@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HarnessWithRunning } from '../api.ts';
+import type { PickerAccounts } from '../accounts.ts';
 import { Icon, Picker, type PickerOption } from './ui.tsx';
 import { HarnessLogo } from './brand.tsx';
 import { ModelList } from './model-picker/ModelList.tsx';
@@ -39,6 +40,7 @@ export function ModelPicker({
   disabled,
   className = '',
   effort,
+  accounts,
 }: {
   harnesses: HarnessWithRunning[];
   value: ModelChoice;
@@ -59,6 +61,8 @@ export function ModelPicker({
   className?: string;
   /** The effort picked for `value`, "" for the model's default, and where a pick goes. */
   effort?: { value: string; onChange: (v: string) => void };
+  /** Who each harness runs as on the machine the thread runs on (GET /api/accounts). */
+  accounts?: PickerAccounts | null;
 }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [up, setUp] = useState(false);
@@ -152,13 +156,13 @@ export function ModelPicker({
         {effortShown ? (
           <span className="shrink-0 text-fg-3">· {effortShown}</span>
         ) : (
-          current.h && <span className="hidden shrink-0 text-fg-4 sm:inline">· {current.h.name}</span>
+          current.h && <span className="hidden shrink-0 text-fg-3 sm:inline">· {current.h.name}</span>
         )}
-        <Icon name="chevronDown" size={13} className="text-fg-4" />
+        <Icon name="chevronDown" size={13} className="text-fg-3" />
       </button>
       {open && (
         <div className={`pik-card w-[min(340px,calc(100vw-32px))] left-0 ${up ? 'bottom-[calc(100%+8px)]' : 'top-[calc(100%+8px)]'}`} data-up={up || undefined}>
-          <label className="mb-1 flex h-10 items-center gap-2 rounded-2xl bg-surface px-3 text-fg-4">
+          <label className="mb-1 flex h-10 items-center gap-2 rounded-2xl bg-surface px-3 text-fg-3">
             <Icon name="search" size={14} />
             <input
               autoFocus
@@ -169,7 +173,7 @@ export function ModelPicker({
               className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-fg-4"
             />
           </label>
-          <ModelList groups={groups} showAuto={showAuto} auto={auto} value={value} query={q} onPick={pick} />
+          <ModelList groups={groups} showAuto={showAuto} auto={auto} value={value} query={q} onPick={pick} accounts={accounts} />
           {levels && levels.efforts.length > 0 && (
             <div className="mt-1 border-t border-line px-2 pt-2 pb-1">
               <div className="caption mb-1.5 px-1">Effort for {levels.model?.label ?? 'this model'}</div>

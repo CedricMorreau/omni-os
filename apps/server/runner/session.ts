@@ -7,8 +7,9 @@ import { lostTo } from '../ownership.ts';
 import { machineName } from '../sync/guard.ts';
 import { detachThread } from '../browser.ts';
 import { turnFinished } from '../sync/files.ts';
+import { followBranch } from '../branch-follow.ts';
 import { notifyEnded } from '../push-sender.ts';
-import { suggestNextThread, suggestReply } from './aux.ts';
+import { suggestNextThread, suggestOpenItems, suggestReply } from './aux.ts';
 import { finishTurnSnapshot, settleSnapshots } from './snapshots.ts';
 import { pump, reportToParent } from './queue.ts';
 import { toolTails } from '../tool-tail.ts';
@@ -64,7 +65,12 @@ export function requeueHeld(live: Live) {
   if (!live.held.length) return;
   const id = live.threadId;
   const held = live.takeHeld();
-  for (const m of held) track(m, 'waiting');
+  for (const m of held) {
+    // An interrupt has done its job once its turn ends. Waiting for the next process, it is an ordinary message: left
+    // as 'interrupt', the next start would resolve it to stop-startup and drop the message launched ahead of it.
+    if (m.mode === 'interrupt') m.mode = 'steer';
+    track(m, 'waiting');
+  }
   waitingMsgs.set(id, [...held, ...(waitingMsgs.get(id) ?? [])]);
   if (!waiting.includes(id)) waiting.push(id);
 }
@@ -99,9 +105,10 @@ export function teardown(live: Live) {
   endTasks(live);
   toolTails.endThread(live.threadId);
   clearMods(live);
-  if (live.browser && browserHolder.get(live.channelId) === live.threadId) {
-    browserHolder.delete(live.channelId);
-    detachThread(live.channelId, live.threadId);
+  if (live.browser && browserHolder.get(live.channelId) === live.threadId) browserHolder.delete(live.channelId);
+  if (live.browserHold) {
+    detachThread(live.channelId, live.browserHold);
+    live.setBrowserHold(null);
   }
   if (lives.get(live.threadId) === live) lives.delete(live.threadId);
   live.tornDown();
@@ -124,13 +131,14 @@ export function abortStart(live: Live, status: ThreadStatus) {
  */
 export function endTurn(live: Live, status: ThreadStatus, more = false) {
   const id = live.threadId;
-  const runText = events.lastRunText(id, live.closeTurn());
+  const turnFrom = live.closeTurn();
+  const runText = events.lastRunText(id, turnFrom);
   const t = threads.update(id, {
     status: more ? 'queued' : status,
     has_run: 1,
     last_text: runText ? runText.slice(0, 600) : threads.get(id)?.last_text ?? null,
   });
-  if (!more) notifyEnded(id, status);
+  if (!more) notifyEnded(id, status, events.lastRunReply(id, turnFrom));
   applyQueued(id);
   // Shown done at once; the checkout after the turn is saved behind it.
   finishTurnSnapshot(live);
@@ -140,8 +148,11 @@ export function endTurn(live: Live, status: ThreadStatus, more = false) {
   if (status === 'done' && !more && !t?.parent_id && runText && !isShuttingDown()) {
     suggestReply(id, runText);
     suggestNextThread(id, runText);
+    suggestOpenItems(id, runText);
   }
   void turnFinished(id);
+  // The agent may have switched to a branch of its own and opened its PR from it.
+  void followBranch(id).then((moved) => moved && emitThread(id), () => {});
   armIdle(live);
   pump();
 }

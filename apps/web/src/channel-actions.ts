@@ -8,8 +8,6 @@ import {
   type ActionRun,
   type ActionRunState,
   type ChannelAction,
-  type ChannelActionInput,
-  type SetupMode,
   type ThreadActions,
   withRun,
 } from '@omni/shared/channel-actions.ts';
@@ -45,34 +43,33 @@ export function outputCut(run: ActionRun) {
 
 // ---------- the setup action in a new worktree ----------
 
-export type SetupStepId = 'checkout' | 'setup' | 'agent';
+export type SetupStepId = 'clone' | 'checkout' | 'setup' | 'agent';
 
 export interface SetupStep {
   id: SetupStepId;
   label: string;
-  /** The setup step's mode: "Before the agent starts". */
+  /** The setup step's mode ("Before the agent starts"), or where the clone goes. */
   detail: string | null;
   state: 'done' | 'active' | 'todo';
 }
 
 /**
- * The steps of a worktree being prepared: Checkout, the channel's setup action when it has one, then Agent. The setup
- * run appears once the checkout is made, so none means the checkout is still going.
+ * The steps of a worktree being prepared: a clone of the channel's repo while one runs, Checkout, the channel's setup
+ * action when it has one, then Agent. The setup run appears once the checkout is made, so none means the checkout is
+ * still going.
  */
 export function setupSteps(data: ThreadActions | undefined): SetupStep[] {
   const run = data?.setup_run ?? null;
+  const clone = data?.clone ?? null;
   const action = data?.actions.find((a) => a.id === run?.action_id) ?? data?.actions.find((a) => a.setup);
   const name = run?.name ?? action?.name;
   const mode = action?.setup;
-  const active: SetupStepId = !run ? 'checkout' : run.state === 'succeeded' ? 'agent' : 'setup';
-  const ids: SetupStepId[] = name ? ['checkout', 'setup', 'agent'] : ['checkout', 'agent'];
+  const active: SetupStepId = clone ? 'clone' : !run ? 'checkout' : run.state === 'succeeded' ? 'agent' : 'setup';
+  const ids: SetupStepId[] = [...(clone ? ['clone' as const] : []), 'checkout', ...(name ? ['setup' as const] : []), 'agent'];
   const at = ids.indexOf(active);
-  return ids.map((id, i) => ({
-    id,
-    label: id === 'checkout' ? 'Checkout' : id === 'agent' ? 'Agent' : `Setup "${name}"`,
-    detail: id === 'setup' && mode ? SETUP_MODE_LABEL[mode] : null,
-    state: i < at ? 'done' : i === at ? 'active' : 'todo',
-  }));
+  const label: Record<SetupStepId, string> = { clone: `Clone ${clone?.repo}`, checkout: 'Checkout', setup: `Setup "${name}"`, agent: 'Agent' };
+  const detail: Record<SetupStepId, string | null> = { clone: clone ? `into ${clone.into}` : null, checkout: null, setup: mode ? SETUP_MODE_LABEL[mode] : null, agent: null };
+  return ids.map((id, i) => ({ id, label: label[id], detail: detail[id], state: i < at ? 'done' : i === at ? 'active' : 'todo' }));
 }
 
 /** The setup run a ready thread shows on its strip: running alongside the agent, or failed. Run again replaces it. */
@@ -84,48 +81,6 @@ export function stripRun(data: ThreadActions | undefined): ActionRun | null {
 /** The setup card polls the whole time the worktree is prepared, and a ready thread's strip while its run runs. */
 export const setupPolls = (setup: Thread['setup'], data: ThreadActions | undefined) =>
   setup === 'preparing' || (setup === null && stripRun(data)?.state === 'running');
-
-// ---------- the channel settings editor ----------
-
-export type PortMode = 'none' | 'free' | 'fixed';
-
-/** The editor's fields as typed. `port` is the fixed port's text, kept while another mode is picked. */
-export interface ActionDraft {
-  name: string;
-  command: string;
-  secrets: string;
-  portMode: PortMode;
-  port: string;
-  setup: SetupMode | null;
-}
-
-export function draftOf(a?: ChannelAction): ActionDraft {
-  return {
-    name: a?.name ?? '',
-    command: a?.command ?? '',
-    secrets: a?.secrets.join(', ') ?? '',
-    portMode: a?.port == null ? 'none' : a.port === 0 ? 'free' : 'fixed',
-    port: a?.port ? String(a.port) : '',
-    setup: a?.setup ?? null,
-  };
-}
-
-/** Secret names as typed: comma or space separated, upper-cased, each once. */
-export const parseSecrets = (text: string) => [...new Set(text.toUpperCase().split(/[\s,]+/).filter(Boolean))];
-
-/**
- * What POST or PATCH sends, always with `setup`: PATCH replaces the whole action, so leaving it out would clear it.
- * The server checks the rest; this only catches a fixed port with no number, which would read as 0.
- */
-export function actionInput(d: ActionDraft): { input: ChannelActionInput } | { error: string } {
-  let port: number | null = null;
-  if (d.portMode === 'free') port = 0;
-  if (d.portMode === 'fixed') {
-    if (!/^\d+$/.test(d.port.trim()) || Number(d.port) === 0) return { error: 'Give the fixed port a number, like 9292.' };
-    port = Number(d.port);
-  }
-  return { input: { name: d.name.trim(), command: d.command.trim(), secrets: parseSecrets(d.secrets), port, setup: d.setup } };
-}
 
 function useVisible() {
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible');

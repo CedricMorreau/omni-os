@@ -53,7 +53,10 @@ export function readSvgIcon(text: string): string {
 /** An SVG icon as an image URL, for <img src>. */
 export const svgDataUrl = (markup: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
 
-const graphemes = new Intl.Segmenter();
+// Hermes, the iPhone app's engine, has no Intl.Segmenter. The server checked the value when it was saved, so a
+// client without one draws what it is given.
+const graphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter() : null;
+const isOneGrapheme = (s: string) => !graphemes || [...graphemes.segment(s)].length === 1;
 
 /** What a stored icon draws, or null for none (the letter avatar) or a value that is neither. */
 export function parseChannelIcon(value: string | null | undefined): ChannelIcon | null {
@@ -70,7 +73,26 @@ export function parseChannelIcon(value: string | null | undefined): ChannelIcon 
     const name = v.slice(GLYPH_PREFIX.length);
     return (CHANNEL_GLYPHS as readonly string[]).includes(name) ? { kind: 'glyph', name: name as ChannelGlyph } : null;
   }
-  return [...graphemes.segment(v)].length === 1 ? { kind: 'emoji', text: v } : null;
+  return isOneGrapheme(v) ? { kind: 'emoji', text: v } : null;
 }
 
 export const glyphIcon = (name: ChannelGlyph) => `${GLYPH_PREFIX}${name}`;
+
+/** The Conductor's channel, a system channel every install has (apps/server/db/repos/channels.ts). */
+export const CONDUCTOR_CHANNEL = 'conductor';
+
+/**
+ * What a channel's avatar draws: its own icon when it has one, the Omni mark for the Conductor, else its monogram.
+ * The Omni mark is only the Conductor's default: an icon picked in its settings wins on every client.
+ */
+export type ChannelFace = ChannelIcon | { kind: 'omni' } | { kind: 'letters' };
+
+export function channelFace(icon: string | null | undefined, conductor = false): ChannelFace {
+  return parseChannelIcon(icon) ?? (conductor ? { kind: 'omni' } : { kind: 'letters' });
+}
+
+/**
+ * Whether the channel has a look of its own: an icon or a background. Without one, the Conductor shows its bare Omni
+ * mark where other channels show a #, which in places moves with what it is doing.
+ */
+export const hasOwnLook = (c: { icon?: string | null; avatar_bg?: string | null }) => !!c.avatar_bg || !!parseChannelIcon(c.icon);

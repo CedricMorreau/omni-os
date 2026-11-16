@@ -2,7 +2,7 @@
 
 Project context and conventions live in `CLAUDE.md`. Read it first.
 
-- Desktop app: `apps/desktop/` (Electron). It loads the Web UI and runs the bundled server on Electron's own Node. It replaced the SwiftUI Mac app and the Linux launcher (ADR 0010). Desktop-only UI goes through `window.omniDesktop` (`packages/shared/desktop-bridge.ts`, read via `apps/web/src/desktop.ts`), always gated on it being there. It imports `@omni/shared` only. QA harness: `apps/desktop/scripts/qa.ts`. See `apps/desktop/README.md`.
+- Desktop app: `apps/desktop/` (Electron). It loads the Web UI and runs the bundled server on Electron's own Node. It replaced the SwiftUI Mac app and the Linux launcher (ADR 0010). Desktop-only UI goes through `window.omniDesktop` (`packages/shared/desktop-bridge.ts`, read via `apps/web/src/desktop.ts`), always gated on it being there. The page tells it the active layout (`setLayout`) so macOS traffic lights sit in the channel rail when that Beta is on. On macOS the Window menu opens the Activity Monitor, which reads Claude transcripts from `~/.claude/projects` only. It imports `@omni/shared` only. QA harness: `apps/desktop/scripts/qa.ts`. See `apps/desktop/README.md`.
 
 ## Standing rules
 
@@ -12,6 +12,7 @@ Project context and conventions live in `CLAUDE.md`. Read it first.
 - Ship all three in the same PR. None of them is a follow-up. If one surface does not need the change, say why in the PR.
 - Check each surface before calling the work done: desktop browser, 390px phone width and the desktop app's QA harness (`apps/desktop/scripts/qa.ts`). A UI change carries screenshots of all three ([docs/pr-screenshots.md](docs/pr-screenshots.md)).
 - Why: folders once shipped web-only (#177) and never reached the old SwiftUI Mac app, and later the phone Channels screen ignored folder data.
+- The `omni` command (`apps/cli`) is not a surface: a feature does not grow a command. It keeps its six commands, and the MCP tools cover the rest ([ADR 0014](docs/adr/0014-omni-command-line.md)).
 
 ### New UI components go into the design system
 

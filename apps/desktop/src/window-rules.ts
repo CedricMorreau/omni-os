@@ -1,4 +1,5 @@
 // Pure rules for Omni's windows (windows.ts): where a link goes, and where the main window opens again.
+import type { DesktopLayout } from '@omni/shared/desktop-bridge.ts';
 import { safeRoute } from './options.ts';
 
 export type LinkTarget =
@@ -26,6 +27,14 @@ export function linkTarget(url: string, origins: { app: string; server: string }
   if (target.origin === app || target.origin === server) return { kind: 'server', url: target.href };
   if (target.protocol === 'http:' || target.protocol === 'https:' || target.protocol === 'mailto:') return { kind: 'external', url: target.href };
   return { kind: 'none' };
+}
+
+/**
+ * True for a link opened by a plain click (or `window.open` with no size). Cmd- or Ctrl-click and a middle click open
+ * a background tab, Shift-click a new window: those still go to the browser as asked.
+ */
+export function plainClick(disposition: string): boolean {
+  return disposition === 'foreground-tab';
 }
 
 /** A navigation the window may make itself: the Web UI and the server (pairing redirects through /api/auth). */
@@ -84,6 +93,14 @@ const GESTURES = new Set(['mouseDown', 'mouseUp', 'rawKeyDown', 'keyDown', 'char
 /** True for an input event that is Ben acting on the page, not the pointer passing over it. */
 export function isGesture(type: string): boolean {
   return GESTURES.has(type);
+}
+
+/** The least time between two re-pairs of one window, so a server that keeps refusing cannot loop the window. */
+export const PAIR_AGAIN_MS = 10_000;
+
+/** Whether a window may pair again now, given when it last did (null: never). */
+export function mayPairAgain(last: number | null, now: number): boolean {
+  return last === null || now - last >= PAIR_AGAIN_MS || now < last;
 }
 
 /** True when the page's last click or key press was recent enough to open something. */
@@ -149,10 +166,18 @@ export function restoreBounds(saved: Rect, workAreas: readonly Rect[], min: { wi
 /** Below this many CSS pixels the Web UI shows its phone layout (useIsMobile in apps/web/src/store.tsx). */
 export const PHONE_LAYOUT_BELOW = 768;
 
+/** The channel rail's width in CSS pixels in the macOS app, widened there from 72 to fit the lights (apps/web/src/index.css). */
+export const RAIL_WIDTH = 98;
+/** The three macOS traffic lights, edge to edge, in window points (about 60 on macOS 26). */
+const TRAFFIC_LIGHTS_WIDTH = 60;
+
 /**
- * Where the macOS traffic lights go: beside the wordmark in the sidebar's top row, or in the strip index.css puts
- * above the phone layout. The page's width in CSS pixels is the window's divided by the zoom.
+ * Where the macOS traffic lights go: beside the wordmark in the classic sidebar's top row, centred in the channel
+ * rail's top strip 15pt down (the height the Claude desktop app uses), or in the strip index.css puts above the phone
+ * layout. The page's width in CSS pixels is the window's divided by the zoom; the lights themselves never zoom.
  */
-export function trafficLights(contentWidth: number, zoom: number): { x: number; y: number } {
-  return contentWidth / zoom < PHONE_LAYOUT_BELOW ? { x: 12, y: 7 } : { x: 18, y: 29 };
+export function trafficLights(contentWidth: number, zoom: number, layout: DesktopLayout = 'rail'): { x: number; y: number } {
+  if (contentWidth / zoom < PHONE_LAYOUT_BELOW) return { x: 12, y: 7 };
+  if (layout === 'rail') return { x: Math.max(2, Math.round((RAIL_WIDTH * zoom - TRAFFIC_LIGHTS_WIDTH) / 2)), y: 15 };
+  return { x: 18, y: 29 };
 }

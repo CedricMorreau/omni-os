@@ -1,14 +1,19 @@
 // The sidebar Inbox's rows (apps/web/src/components/sidebar/InboxView.tsx) on the phone's Activity tab, on the mobile
 // parts: a thread with its status, a Done row, and a shelf's header. A row's actions are laid over its right end as
 // siblings of its button, so tapping one never opens the thread.
-import { errorText, type Thread, type ThreadStub } from '../api.ts';
+import { errorText, type Thread } from '../api.ts';
 import type { InboxShelf } from '../app/useInbox.ts';
-import { DelegateCount, DelegateCountSpace, delegatesHref, useDelegateSummary } from '../components/DelegateCount.tsx';
+import { AgentRows, FoldTrees, TreeRows, TreeToggle, TreeToggleSpace } from '../components/ThreadTree.tsx';
+import { useMarkDone } from '../done-confirm.tsx';
+import { useJobTree, type TreesFold } from '../thread-tree.ts';
 import { DoneMark, Icon, type IconName } from '../components/ui.tsx';
-import type { InboxThread, RowStatus } from '../inbox.ts';
+import { RunElapsed } from '../components/RunElapsed.tsx';
+import { ranOnLine } from '@omni/shared/ran-on.ts';
+import { blockerMark, threadPhase, type RowStatus } from '@omni/shared/status.ts';
+import type { InboxThread } from '../inbox.ts';
 import { canMarkDone } from '../needs-you.ts';
 import { href } from '../router.ts';
-import { useApp, useNow } from '../store.tsx';
+import { useApp, useNeedOf, useNow } from '../store.tsx';
 import { MoAvatar, MoRound } from './parts.tsx';
 import { shortTime } from './rows.ts';
 import { useShell } from './shell.tsx';
@@ -27,11 +32,14 @@ const actionsWidth = (n: number) => (n ? n * ACTION + (n - 1) * ACTION_GAP : 0);
 /** Mark done, undo and unpin, each answered with a toast, or the server's error, as in Thread options. */
 function useRowActions() {
   const shell = useShell();
-  const { setDone, setPinned } = useApp();
-  const run = (p: Promise<unknown>, ok: string) => void p.then(() => shell.toast(ok), (e: unknown) => shell.toast(errorText(e)));
+  const { setPinned } = useApp();
+  const markDone = useMarkDone();
+  const run = (p: Promise<unknown>, ok: string) =>
+    void p.then((r) => r !== null && shell.toast(ok), (e: unknown) => shell.toast(errorText(e)));
   return {
-    done: (t: InboxThread) => run(setDone(t.id, true), 'Marked done'),
-    undo: (t: InboxThread) => run(setDone(t.id, false), 'Back in the inbox'),
+    // A job with work still going under it asks first; cancelling it says nothing.
+    done: (t: InboxThread) => run(markDone(t, true), 'Marked done'),
+    undo: (t: InboxThread) => run(markDone(t, false), 'Back in the inbox'),
     unpin: (t: InboxThread) => run(setPinned(t, false), 'Unpinned'),
   };
 }
@@ -49,17 +57,21 @@ function RowActions({ actions }: { actions: RowAction[] }) {
   );
 }
 
-/** A thread as the sidebar's Inbox card: its status on the avatar and on the right, the title, the channel and branch. */
+/**
+ * A thread as the sidebar's Inbox card: its status on the avatar and on the right, the title, the channel and the
+ * machine. A job has its tally at the end of the second line and its tree under it. `working`: the row is on the
+ * Working shelf, so what runs under it shows too.
+ */
 export function MoInboxRow({
   t,
   status,
-  delegated,
+  working = false,
   pinned = false,
   last,
 }: {
   t: InboxThread & Partial<Pick<Thread, 'branch' | 'role'>>;
   status: RowStatus | null;
-  delegated: readonly ThreadStub[] | undefined;
+  working?: boolean;
   pinned?: boolean;
   last: boolean;
 }) {
@@ -67,37 +79,62 @@ export function MoInboxRow({
   const { channel } = useApp();
   const now = useNow(60_000);
   const act = useRowActions();
-  const summary = useDelegateSummary(delegated);
+  const { tasks } = useApp();
+  const tree = useJobTree(t, 'inbox');
+  const own = working ? tasks.filter((k) => k.thread_id === t.id && k.subagent) : [];
   const ch = channel(t.channel_id);
   const title = t.title || 'Untitled';
-  // Work in progress recedes, as on the desktop card: what waits on Ben stands out.
-  const receded = status?.glyph === 'running';
+  const phase = threadPhase(t);
+  const blocker = useNeedOf(t.id)?.blockers[0];
+  // The machine it runs on or last ran on, then the run's time; the branch only without a machine.
+  const where = ranOnLine(t, now);
+  const label = where.machine ?? where.branch;
   const actions: RowAction[] = [];
   if (pinned) actions.push({ icon: 'pin', label: `Unpin ${title}`, run: () => act.unpin(t) });
   if (canMarkDone(t.status)) actions.push({ icon: 'check', label: `Mark ${title} done`, run: () => act.done(t) });
   const reserve = actionsWidth(actions.length);
+  const under = !!tree || own.length > 0;
   return (
+    <div>
     <div className="relative">
       <button type="button" onClick={() => shell.open(href.thread(t.id))} className="mo-row flex min-w-0 w-full items-center gap-3 px-1 py-2.5 text-left">
-        <MoAvatar role={t.role} channel={t.channel_id} channelIcon={ch?.icon} state={status?.glyph ?? t.status} />
-        <span className={`-mb-2.5 flex min-w-0 flex-1 flex-col gap-0.5 pb-2.5 ${last ? '' : 'border-b border-line'}`} style={{ paddingRight: reserve }}>
+        <MoAvatar role={t.role} channel={t.channel_id} channelIcon={ch?.icon} avatarBg={ch?.avatar_bg} state={status?.glyph ?? (phase ? 'running' : t.status)} phase={phase} mark={blocker ? blockerMark(blocker) : null} />
+        <span className={`-mb-2.5 flex min-w-0 flex-1 flex-col gap-0.5 pb-2.5 ${last || under ? '' : 'border-b border-line'}`} style={{ paddingRight: reserve }}>
           <span className="flex items-baseline gap-2">
-            <span className={`min-w-0 flex-1 truncate text-[15px] leading-[1.3] ${receded ? 'text-fg-3' : 'text-fg'}`}>{title}</span>
+            <span className="min-w-0 flex-1 truncate text-[15px] leading-[1.3] text-fg">{title}</span>
             <span className="shrink-0 text-[12px] leading-none text-fg-3 tabular-nums">{status ? status.label : shortTime(t.updated_at ?? t.created_at, now)}</span>
           </span>
           <span className="flex items-center gap-2 text-[12.5px] leading-[1.35] text-fg-3">
             {pinned && <Icon name="pin" size={12} className="shrink-0" />}
-            <span className="min-w-0 flex-1 truncate">{[`#${ch?.name ?? t.channel_id}`, t.branch].filter(Boolean).join(' · ')}</span>
-            {summary && <DelegateCountSpace summary={summary} size={13} />}
+            <span className={`min-w-0 truncate ${label ? 'max-w-[45%] shrink-0' : 'flex-1'}`}>#{ch?.name ?? t.channel_id}</span>
+            {label && (
+              <span className="-ml-1 flex min-w-0 flex-1 items-center gap-1" title={where.title || undefined} data-ran-on={where.machine ?? undefined}>
+                <span aria-hidden>·</span>
+                <span className="min-w-0 truncate">{label}</span>
+                {t.run_started_at && <span aria-hidden>·</span>}
+                <RunElapsed since={t.run_started_at} />
+              </span>
+            )}
+            {!label && <RunElapsed since={t.run_started_at} />}
+            {tree && (
+              <TreeToggleSpace tree={tree} className="ml-auto h-7 px-1" />
+            )}
           </span>
         </span>
       </button>
-      {summary && (
-        <span className="absolute bottom-2.5 flex" style={{ right: reserve }}>
-          <DelegateCount summary={summary} size={13} onOpen={() => shell.open(delegatesHref(t.id))} />
+      {tree && (
+        <span className="absolute bottom-1 flex" style={{ right: reserve }}>
+          <TreeToggle tree={tree} title={title} className="h-7 px-1" />
         </span>
       )}
       <RowActions actions={actions} />
+    </div>
+      {under && (
+        <div className={`ml-[22px] pb-1.5 ${last ? '' : 'border-b border-line'}`}>
+          {own.length > 0 && <AgentRows tasks={own} variant="phone" />}
+          {tree && <TreeRows tree={tree} variant="phone" agents={working ? tasks : undefined} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -125,13 +162,16 @@ export function MoDoneRow({ t, last }: { t: InboxThread; last: boolean }) {
 }
 
 /** A shelf's header: its name, how many it holds, and a chevron that turns as it folds. */
-export function MoShelf({ label, shelf }: { label: string; shelf: InboxShelf }) {
+export function MoShelf({ label, shelf, fold }: { label: string; shelf: InboxShelf; fold?: TreesFold }) {
   return (
-    <button type="button" onClick={shelf.toggle} aria-expanded={shelf.open} className="mo-row flex h-11 w-full items-center gap-1.5 px-1 text-left">
-      <span className="text-[12px] leading-[1.3] font-medium text-fg-3">{label}</span>
-      <span className="text-[12px] leading-[1.3] text-fg-4 tabular-nums">{shelf.count}</span>
-      <Icon name="chevronDown" size={14} className={`ml-auto text-fg-4 transition-transform ${shelf.open ? '' : '-rotate-90'}`} />
-    </button>
+    <div className="grid grid-cols-1">
+      <button type="button" onClick={shelf.toggle} aria-expanded={shelf.open} className="mo-row flex h-11 w-full items-center gap-1.5 px-1 text-left [grid-area:1/1]">
+        <span className="text-[12px] leading-[1.3] font-medium text-fg-3">{label}</span>
+        <span className="text-[12px] leading-[1.3] text-fg-3 tabular-nums">{shelf.count}</span>
+        <Icon name="chevronDown" size={14} className={`ml-auto text-fg-3 transition-transform ${shelf.open ? '' : '-rotate-90'}`} />
+      </button>
+      {shelf.open && fold && fold.trees > 0 && <FoldTrees fold={fold} className="mr-6 h-11 w-11 self-center justify-self-end [grid-area:1/1]" size={16} />}
+    </div>
   );
 }
 

@@ -117,7 +117,8 @@ function ServerBody({ server }: { server: PairedServer }) {
       case 'ready':
         return (
           <View>
-            {PUSH_KINDS.map((kind, index) => (
+            {/* A server from before a kind existed does not send it, and would refuse a change to it. */}
+            {PUSH_KINDS.filter((kind) => prefs.values && kind in prefs.values).map((kind, index) => (
               <AlertSwitchRow
                 key={kind}
                 kind={kind}
@@ -135,6 +136,7 @@ function ServerBody({ server }: { server: PairedServer }) {
 
   return (
     <View>
+      {prefs.deliveryNote ? <Text style={[styles.note, { color: colors.fg2 }]}>{prefs.deliveryNote}</Text> : null}
       {renderPrefs()}
       {registration[server.id] === 'failed' ? (
         <Text style={[styles.note, { color: colors.fg2 }]}>{REGISTRATION_FAILED}</Text>

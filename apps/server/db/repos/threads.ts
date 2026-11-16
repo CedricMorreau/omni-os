@@ -1,4 +1,5 @@
 import type { RunName } from '@omni/shared/run-switch.ts';
+import type { Goal, GoalStatus } from '@omni/shared/goal.ts';
 import { db, now, tx } from '../connection.ts';
 import { outbox, record } from '../sync.ts';
 import { assignments } from './assignments.ts';
@@ -45,6 +46,8 @@ export interface Thread {
   /** A follow-up thread proposed once a turn is done, the card under the transcript: its title and first prompt. Local only, not synced. */
   next_title: string | null;
   next_prompt: string | null;
+  /** What the last turn left open for Ben, as JSON (packages/shared/open-items.ts): the card under the transcript. Local only, not synced. */
+  open_items: string | null;
   /** 1 once Ben archived it: hidden from the lists, still found by search and by its link. */
   archived: number;
   /** The sidebar folder it sits in (db/repos/folders.ts), null for ungrouped. Synced with the row. */
@@ -74,6 +77,13 @@ export interface Thread {
   limit_resets_at: string | null;
   /** 1 when the stop is the other Mac's: it shows here, and is resumed or scheduled there. */
   limit_elsewhere: number;
+  /**
+   * Claude Code's `/goal` on this thread's session (packages/shared/goal.ts): the condition, active or complete, and how
+   * many checks found it unmet. Null objective: none. Local only, not synced: the goal lives in this machine's session.
+   */
+  goal_objective: string | null;
+  goal_status: GoalStatus | null;
+  goal_checks: number;
   /** The thread this one continues on another harness (apps/server/continue.ts), null for most. Not a crew parent. Synced. */
   continued_from: string | null;
   /** Who its ticket waits on outside the team (apps/server/tickets.ts), null for most. */
@@ -137,11 +147,44 @@ const storedHandover = (h: PendingHandover | null | undefined): StoredSessionSta
 const readSessions = (s: StoredSessionState['sessions']): Sessions =>
   Object.fromEntries(Object.entries(s ?? {}).flatMap(([h, p]) => (p ? [[h, { id: p.id, seen: idOf(p.seen) }]] : [])));
 const readHandover = (h: StoredSessionState['handover']): PendingHandover | null => (h ? { from: h.from, since: h.since ? idOf(h.since) : 0, ...(h.started && { started: true }), ...(h.fresh && { fresh: true }) } : null);
+/** Drops the goal when the session id changes; SET reads the row's old values. */
+const GOAL_RESET =
+  'goal_objective = CASE WHEN session_id IS ? THEN goal_objective END, goal_status = CASE WHEN session_id IS ? THEN goal_status END, goal_checks = CASE WHEN session_id IS ? THEN goal_checks ELSE 0 END';
 const json = (v: object | null) => (v ? JSON.stringify(v) : null);
+
+/**
+ * Metadata fields a sync change merges one by one, by the time each was last edited, and `exec` and `session` for
+ * the execution and session fields as groups (sync/thread-merge.ts).
+ */
+export type EditedField = 'title' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'exec' | 'session';
+
+/**
+ * Note that these fields of the thread were edited here now, so a sync change with an older edit of one of them
+ * leaves it alone. Call it inside the write's tx. `where` narrows it, e.g. to a row whose done_at is still set.
+ */
+export function stampEdits(id: string, fields: readonly EditedField[], where = '') {
+  if (!fields.length) return;
+  const row = db.prepare(`SELECT field_edits FROM threads WHERE id = ? ${where}`).get(id) as { field_edits: string | null } | undefined;
+  if (!row) return;
+  let edits: Partial<Record<EditedField, string>> = {};
+  try {
+    edits = row.field_edits ? JSON.parse(row.field_edits) : {};
+  } catch {
+    // A broken record starts again from this edit.
+  }
+  const at = now();
+  // An edit here always comes after the last one the field took, as record() does for the row: one from a Mac whose
+  // clock runs ahead would otherwise keep winning over the edit made after it.
+  for (const f of fields) {
+    const last = edits[f];
+    edits[f] = last && at <= last ? new Date(Date.parse(last) + 1).toISOString() : at;
+  }
+  db.prepare('UPDATE threads SET field_edits = ? WHERE id = ?').run(JSON.stringify(edits), id);
+}
 
 /** The columns clients read, without sync's run_machine, the limit stop's id and owner, or the session state. */
 export const THREAD_COLUMNS =
-  'id, channel_id, title, status, role, model, harness, effort, auto_reason, queued_harness, queued_model, queued_effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, archived, folder_id, pinned_at, done_at, setup, setup_error, resume_blocked, limit_state, limit_resets_at, limit_elsewhere, continued_from, waiting_on, draft, draft_kind, created_at, updated_at';
+  'id, channel_id, title, status, role, model, harness, effort, auto_reason, queued_harness, queued_model, queued_effort, session_id, has_run, cwd, branch, parent_id, task_id, source, automation, last_text, suggestion, next_title, next_prompt, open_items, archived, folder_id, pinned_at, done_at, setup, setup_error, resume_blocked, limit_state, limit_resets_at, limit_elsewhere, goal_objective, goal_status, goal_checks, continued_from, waiting_on, draft, draft_kind, created_at, updated_at';
 
 /**
  * The machine whose status write this is: this one while it is running or queued here and sync is set up, else nobody.
@@ -164,6 +207,19 @@ export const threads = {
     db
       .prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE channel_id = ? AND source != 'team' AND archived = ? ORDER BY updated_at DESC LIMIT ?`)
       .all(channelId, archived ? 1 : 0, limit) as unknown as Thread[],
+  /**
+   * One page of a channel's threads, newest first, after `after` (the last row of the page before). The clients page
+   * a channel screen with it (GET /api/channels/:id/threads?paged=1), so threads past the sidebar's preview are there.
+   */
+  byChannelPage: (channelId: string, opts: { limit: number; archived?: boolean; after?: { updated_at: string; id: string } | null }) => {
+    const after = opts.after ?? null;
+    return db
+      .prepare(
+        `SELECT ${THREAD_COLUMNS} FROM threads WHERE channel_id = ? AND source != 'team' AND archived = ?
+         AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?)) ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      )
+      .all(channelId, opts.archived ? 1 : 0, after?.updated_at ?? null, after?.updated_at ?? null, after?.updated_at ?? null, after?.id ?? null, opts.limit) as unknown as Thread[];
+  },
   recent: (limit = 50) =>
     db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE archived = 0 ORDER BY updated_at DESC LIMIT ?`).all(limit) as unknown as Thread[],
   children: (parentId: string) =>
@@ -204,6 +260,25 @@ export const threads = {
         )
         .get(id) as { id: string } | undefined
     )?.id ?? id,
+  /**
+   * Where Ben answers a delegated thread's questions: the top of its delegation chain (root), then the newest thread that
+   * continues it (continue.ts), and so on, since Ben works on in the newest and its crew cards show there. The walk goes
+   * through archived threads (cleanup archives the middle of a chain), preferring a live continuation at each step, and
+   * ends on the last live thread it passed, or the root when none is live. A thread nobody delegated is its own home: its
+   * card shows only on itself.
+   */
+  home(id: string): string {
+    const root = threads.root(id);
+    if (root === id) return id;
+    const next = db.prepare('SELECT id, archived FROM threads WHERE continued_from = ? ORDER BY archived, created_at DESC, rowid DESC LIMIT 1');
+    const seen = new Set<string>([root]);
+    let live = threads.get(root)?.archived ? null : root;
+    for (let at = next.get(root) as { id: string; archived: number } | undefined; at && !seen.has(at.id); at = next.get(at.id) as typeof at) {
+      seen.add(at.id);
+      if (!at.archived) live = at.id;
+    }
+    return live ?? root;
+  },
   /** Threads delegated from Conductor jobs, kept visible beside their parent in the originating channel. */
   conductorHandoffChildren: () =>
     db
@@ -213,6 +288,16 @@ export const threads = {
          WHERE parent.channel_id = 'conductor' AND parent.archived = 0
            AND child.source = 'conductor' AND child.archived = 0
          ORDER BY parent.updated_at DESC, child.created_at ASC`,
+      )
+      .all() as unknown as Thread[],
+  /** Every live team member whose lead is live too, by lead, in the order they were handed out. */
+  teamMembers: () =>
+    db
+      .prepare(
+        `SELECT ${THREAD_COLUMNS.split(', ').map((c) => `m.${c}`).join(', ')}
+         FROM threads m JOIN threads lead ON lead.id = m.parent_id
+         WHERE m.source = 'team' AND m.archived = 0 AND lead.archived = 0
+         ORDER BY lead.updated_at DESC, m.created_at ASC`,
       )
       .all() as unknown as Thread[],
   /** A team lead's members, in the order they were handed out. */
@@ -248,19 +333,22 @@ export const threads = {
       .all() as unknown as Thread[],
   running: () => db.prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE status IN ('running','queued')`).all() as unknown as Thread[],
   /**
-   * The threads with a delegated thread running or queued below them, at any depth (apps/server/delegating.ts). An
-   * archived thread pins nothing. UNION drops an id met again, so a parent_id cycle ends.
+   * The threads with a delegated thread running or queued below them, at any depth (apps/server/delegating.ts), and
+   * the threads in `agentHosts` (whose own sub-agents still run) with every thread above them. A host whose turn was
+   * stopped or failed counts for nothing. An archived thread pins nothing. UNION drops an id met again, so a parent_id
+   * cycle ends.
    */
-  delegating: () =>
+  delegating: (agentHosts: readonly string[] = []) =>
     (
       db
         .prepare(
           `WITH RECURSIVE up(id) AS (
              SELECT parent_id FROM threads WHERE status IN ('running','queued') AND archived = 0 AND parent_id IS NOT NULL
+             UNION SELECT id FROM threads WHERE id IN (SELECT value FROM json_each(?)) AND status NOT IN ('stopped','failed') AND archived = 0
              UNION SELECT t.parent_id FROM threads t JOIN up ON t.id = up.id WHERE t.parent_id IS NOT NULL)
            SELECT id FROM up`,
         )
-        .all() as { id: string }[]
+        .all(JSON.stringify(agentHosts)) as { id: string }[]
     ).map((r) => r.id),
   /** The machine that wrote the thread's running or queued status (sync), or null. For the status merge; ownership reads the assignment. */
   runMachine: (id: string) =>
@@ -278,7 +366,7 @@ export const threads = {
   create(
     t: Omit<
       Thread,
-      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'harness' | 'effort' | 'auto_reason' | 'queued_harness' | 'queued_model' | 'queued_effort' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'resume_blocked' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere' | 'continued_from' | 'waiting_on' | 'draft' | 'draft_kind'
+      'created_at' | 'updated_at' | 'has_run' | 'last_text' | 'suggestion' | 'next_title' | 'next_prompt' | 'open_items' | 'harness' | 'effort' | 'auto_reason' | 'queued_harness' | 'queued_model' | 'queued_effort' | 'archived' | 'folder_id' | 'pinned_at' | 'done_at' | 'setup' | 'setup_error' | 'resume_blocked' | 'limit_state' | 'limit_resets_at' | 'limit_elsewhere' | 'goal_objective' | 'goal_status' | 'goal_checks' | 'continued_from' | 'waiting_on' | 'draft' | 'draft_kind'
     > & {
       has_run?: number; created_at?: string; harness?: string; effort?: string; auto_reason?: string | null; folder_id?: string | null; setup?: ThreadSetup | null;
     },
@@ -315,12 +403,23 @@ export const threads = {
     if ('sessions' in patch) (sets.push('sessions = ?'), vals.push(json(storedSessions(patch.sessions))));
     if ('handover' in patch) (sets.push('handover = ?'), vals.push(json(storedHandover(patch.handover))));
     if (!('updated_at' in patch)) (sets.push('updated_at = ?'), vals.push(now()));
+    // A new session starts without the old one's goal.
+    if (patch.session_id) (sets.push(GOAL_RESET), vals.push(patch.session_id, patch.session_id, patch.session_id));
     // Every status write says who runs the thread, so the row itself tells the other Mac (apps/server/sync/guard.ts).
     if (patch.status) (sets.push('run_machine = ?'), vals.push(runMachine(patch.status)));
     // A run starting, or Ben retrying its setup, is news: a thread marked done comes back to Needs you when it ends.
     if (patch.status === 'running' || patch.status === 'queued' || patch.setup === 'preparing') sets.push('done_at = NULL');
     tx(() => {
+      // Clearing done_at for a run is an edit of it, but only when it was set.
+      if (sets.includes('done_at = NULL')) stampEdits(id, ['done_at'], 'AND done_at IS NOT NULL');
       if (!db.prepare(`UPDATE threads SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id).changes) return;
+      const exec = ['status', 'has_run', 'last_text'].some((k) => k in patch);
+      const session = ['session_id', 'sessions', 'handover'].some((k) => k in patch);
+      stampEdits(id, [
+        ...(['title', 'archived'] as const).filter((k) => k in patch),
+        ...(exec ? (['exec'] as const) : []),
+        ...(session ? (['session'] as const) : []),
+      ]);
       record('thread', id);
       // A turn starting here makes this machine the thread's owner (the same machine again changes nothing).
       if (patch.status && runMachine(patch.status)) assignments.claim(id);
@@ -335,7 +434,7 @@ export const threads = {
     return tx(() => {
       const changed =
         db.prepare(`UPDATE threads SET pinned_at = ? WHERE id = ? AND (pinned_at IS NULL) = ?`).run(pinned ? now() : null, id, pinned ? 1 : 0).changes > 0;
-      if (changed) record('thread', id);
+      if (changed) (stampEdits(id, ['pinned_at']), record('thread', id));
       return changed;
     });
   },
@@ -347,7 +446,7 @@ export const threads = {
     return tx(() => {
       const changed =
         db.prepare(`UPDATE threads SET done_at = ? WHERE id = ? AND (done_at IS NULL) = ?`).run(done ? now() : null, id, done ? 1 : 0).changes > 0;
-      if (changed) record('thread', id);
+      if (changed) (stampEdits(id, ['done_at']), record('thread', id));
       return changed;
     });
   },
@@ -358,6 +457,20 @@ export const threads = {
   setSuggestion(id: string, text: string | null) {
     return db.prepare('UPDATE threads SET suggestion = ? WHERE id = ? AND suggestion IS NOT ?').run(text, id, text).changes > 0;
   },
+  /** Its goal, or null to drop it. Like the suggestion: updated_at stays and sync never hears of it. True when it changed. */
+  setGoal(id: string, g: Goal | null) {
+    const objective = g?.objective ?? null;
+    const status = g?.status ?? null;
+    const checks = g?.checks ?? 0;
+    return (
+      db
+        .prepare(
+          `UPDATE threads SET goal_objective = ?, goal_status = ?, goal_checks = ?
+           WHERE id = ? AND (goal_objective IS NOT ? OR goal_status IS NOT ? OR goal_checks IS NOT ?)`,
+        )
+        .run(objective, status, checks, id, objective, status, checks).changes > 0
+    );
+  },
   /** The proposed follow-up thread, or null to drop it. Like the suggestion: updated_at stays and sync never hears of it. */
   setNextThread(id: string, next: { title: string; prompt: string } | null) {
     const title = next?.title ?? null;
@@ -367,6 +480,10 @@ export const threads = {
         .prepare('UPDATE threads SET next_title = ?, next_prompt = ? WHERE id = ? AND (next_title IS NOT ? OR next_prompt IS NOT ?)')
         .run(title, prompt, id, title, prompt).changes > 0
     );
+  },
+  /** What the last turn left open, as stored JSON, or null to drop it. Like the suggestion: updated_at stays and sync never hears of it. */
+  setOpenItems(id: string, json: string | null) {
+    return db.prepare('UPDATE threads SET open_items = ? WHERE id = ? AND open_items IS NOT ?').run(json, id, json).changes > 0;
   },
   /** A thread's limit stop with the columns clients never read: its id and the Mac that owns it. */
   limit(id: string) {
@@ -427,7 +544,7 @@ export const threads = {
   setChannel(id: string, channelId: string) {
     tx(() => {
       // A folder belongs to one channel, so the thread leaves it.
-      if (db.prepare('UPDATE threads SET channel_id = ?, folder_id = NULL WHERE id = ?').run(channelId, id).changes) record('thread', id);
+      if (db.prepare('UPDATE threads SET channel_id = ?, folder_id = NULL WHERE id = ?').run(channelId, id).changes) (stampEdits(id, ['folder_id']), record('thread', id));
     });
   },
   /**
@@ -444,7 +561,7 @@ export const threads = {
         .prepare(`SELECT id FROM threads WHERE status IN ('running','queued') AND (run_machine IS NULL OR run_machine = ?)`)
         .all(outbox.machineId() ?? '') as { id: string }[];
       const fail = db.prepare(`UPDATE threads SET status = 'failed', run_machine = NULL WHERE id = ?`);
-      for (const { id } of ids) (fail.run(id), record('thread', id));
+      for (const { id } of ids) (fail.run(id), stampEdits(id, ['exec']), record('thread', id));
       return ids.length;
     });
   },

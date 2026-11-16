@@ -10,6 +10,11 @@
     "file": "/tmp/omni-fixtures/automations/broken.yaml",
     "catchup": false,
     "error": "invalid schedule (cron \"61 8 * * *\", timezone \"Europe/Amsterdam\"): CronPattern: Invalid value for minute: 61",
+    "runs_on": {
+      "owner": null,
+      "isThisMac": true
+    },
+    "source": "shipped",
     "runs": [],
     "deliveries": [],
     "deliveries_more": false
@@ -38,6 +43,11 @@
       "secret": "OMNI_WEBHOOK_CI_FIXER",
       "secret_set": true
     },
+    "runs_on": {
+      "owner": null,
+      "isThisMac": true
+    },
+    "source": "shipped",
     "runs": [
       {
         "id": 3,
@@ -46,7 +56,8 @@
         "trigger": "event",
         "created_at": "2026-01-05T09:00:00.000Z",
         "status": "done",
-        "title": "CI fixer · Fix the cart total"
+        "title": "CI fixer · Fix the cart total",
+        "skip_reason": null
       }
     ],
     "deliveries": [
@@ -97,6 +108,11 @@
     "file": "/tmp/omni-fixtures/automations/daily-digest.yaml",
     "catchup": false,
     "next": "2026-01-05T09:00:00.000Z",
+    "runs_on": {
+      "owner": null,
+      "isThisMac": true
+    },
+    "source": "shipped",
     "runs": [
       {
         "id": 1,
@@ -105,7 +121,8 @@
         "trigger": "manual",
         "created_at": "2026-01-05T09:00:00.000Z",
         "status": "done",
-        "title": "Daily digest · 5 Jan"
+        "title": "Daily digest · 5 Jan",
+        "skip_reason": null
       }
     ],
     "deliveries": [],
@@ -137,6 +154,11 @@
       "secret": "OMNI_WEBHOOK_FLAKY_HOOK",
       "secret_set": true
     },
+    "runs_on": {
+      "owner": null,
+      "isThisMac": true
+    },
+    "source": "shipped",
     "runs": [],
     "deliveries": [
       {
@@ -222,6 +244,11 @@
       "updates": false
     },
     "next": null,
+    "runs_on": {
+      "owner": null,
+      "isThisMac": true
+    },
+    "source": "shipped",
     "runs": [
       {
         "id": 2,
@@ -230,7 +257,8 @@
         "trigger": "event",
         "created_at": "2026-01-05T09:00:00.000Z",
         "status": "done",
-        "title": "Page review · launch-plan.html"
+        "title": "Page review · launch-plan.html",
+        "skip_reason": null
       }
     ],
     "deliveries": [
