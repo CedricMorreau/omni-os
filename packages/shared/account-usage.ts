@@ -59,7 +59,16 @@ export interface UsageRow {
   usage: PlanUsage | null;
   /** The harness has more than one account, so this row names its account. */
   several: boolean;
+  /**
+   * One of several accounts on a harness whose readings come in per account (Claude Code with each turn, Codex with each
+   * run and its limit checks), and this one has none of its own yet from any machine. The row says it is waiting for
+   * one instead of a bare "no data". Never set for Cursor, whose dashboard fallback is never filed per account.
+   */
+  waiting: boolean;
 }
+
+/** Harnesses whose readings each get filed under the account they ran as, so a missing one is only not in yet. */
+const FILED_PER_ACCOUNT = new Set(['claude-code', 'codex']);
 
 /** The latest record per account, by when it was read. */
 export function latestUsage(records: readonly AccountUsage[]): Map<string, AccountUsage> {
@@ -91,7 +100,7 @@ export function usageRows(
 ): UsageRow[] {
   const latest = latestUsage(records);
   return harnesses.flatMap((h): UsageRow[] => {
-    const plain = (usage: PlanUsage | null): UsageRow[] => [{ key: h, harness: h, account: null, usage, several: false }];
+    const plain = (usage: PlanUsage | null): UsageRow[] => [{ key: h, harness: h, account: null, usage, several: false, waiting: false }];
     const listed = (view?.machines ?? []).flatMap((m) => m.accounts.filter((a) => a.harness === h).map((a) => ({ machine: m.name, a })));
     if (!view || !listed.length) return plain(legacy[h] ?? null);
 
@@ -119,7 +128,7 @@ export function usageRows(
       // read through another login.
       const stand = legacy[h] && !legacy[h]!.unattributed ? legacy[h]! : null;
       const usage = own ? own.usage : !several && !anyRecord ? stand : null;
-      return { key: k, harness: h, account, usage, several };
+      return { key: k, harness: h, account, usage, several, waiting: several && !own && !usage && FILED_PER_ACCOUNT.has(h) };
     });
   });
 }
