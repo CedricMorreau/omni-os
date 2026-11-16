@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { ApnsRequest, ApnsResponse, ApnsTransport } from '../push-apns.ts';
-import { alertFor, createPushSender, loadPushConfig, noopPushSender, payloadFor, type PushEvent, type PushSenderDeps } from '../push-sender.ts';
+import { alertFor, collapseIdFor, createPushSender, loadPushConfig, noopPushSender, payloadFor, type PushEvent, type PushSenderDeps } from '../push-sender.ts';
 import type { PushTarget } from '../push-preferences.ts';
 
 const PEM = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -12,6 +12,7 @@ const target = (n: number, extra: Partial<PushTarget> = {}): PushTarget => ({
   token: `token${n}`,
   environment: 'production',
   bundleId: null,
+  collapse: false,
   ...extra,
 });
 
@@ -38,6 +39,7 @@ function harness(opts: { targets?: PushTarget[]; reply?: Reply; live?: (id: stri
     live: opts.live ?? (() => true),
     forget: (token) => forgotten.push(token),
     now: () => clock,
+    senderId: () => 'server-1',
     sleep: async (ms) => {
       sleeps.push(ms);
       clock += ms;
@@ -72,6 +74,36 @@ describe('sending an alert', () => {
     expect(Object.keys(payload).sort()).toEqual(['aps', 'omni']);
     expect(payload.aps.alert).toEqual({ title: 'Fix iOS push previews', subtitle: 'Finished', body: 'Done Opened PR #612.' });
     expect(payload.omni).toEqual({ kind: 'finished', threadId: 'thread-9', channelId: 'omni-os' });
+  });
+
+  it('collapses per thread only on devices whose app declared it, and stamps the time and this server', async () => {
+    const h = harness({ targets: [target(1, { collapse: true }), target(2)] });
+    h.sender.send(EVENT);
+    await vi.waitFor(() => expect(h.sent).toHaveLength(2));
+    expect(h.sent.map((r) => [r.token, r.collapseId])).toEqual([
+      ['token1', 'thread-1'],
+      ['token2', undefined],
+    ]);
+    expect(JSON.parse(h.sent[0].body).omni).toEqual({
+      kind: 'needsInput',
+      threadId: 'thread-1',
+      channelId: 'conductor',
+      at: new Date(NOW).toISOString(),
+      sender: 'server-1',
+    });
+  });
+
+  it('leaves the collapse id off a thread id longer than Apple allows', () => {
+    expect(collapseIdFor({ ...EVENT, threadId: 'x'.repeat(65) })).toBeUndefined();
+    expect(collapseIdFor({ ...EVENT, threadId: 'x'.repeat(64) })).toBe('x'.repeat(64));
+  });
+
+  it('labels a pull request alert and previews what the PR needs', () => {
+    expect(alertFor({ kind: 'prAttention', threadId: 't', channelId: 'omni-os', title: 'Ship push', text: '#12 at abc1234. CI failed: CI / build' })).toEqual({
+      title: 'Ship push',
+      subtitle: 'Pull request',
+      body: '#12 at abc1234. CI failed: CI / build',
+    });
   });
 
   it('names the reporting thread in a crew report', () => {

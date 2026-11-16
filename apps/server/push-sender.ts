@@ -4,7 +4,7 @@
 // deleting one of the APNs secrets loads the config again, so no restart is needed.
 import { createPrivateKey, randomUUID } from 'node:crypto';
 import { publishFeed } from './bus.ts';
-import { threads, type ThreadStatus } from './db.ts';
+import { kv, threads, type ThreadStatus } from './db.ts';
 import { sessionIsLive } from './google-auth.ts';
 import { clip, pushPreview, TITLE_MAX } from './push-preview.ts';
 import { classify, http2Transport, providerTokens, type ApnsKey, type ApnsResponse, type ApnsTransport } from './push-apns.ts';
@@ -98,6 +98,8 @@ export interface PushSenderDeps {
   /** Drop the registration for a token Apple says is dead. */
   forget(token: string): unknown;
   now(): number;
+  /** This server's id in every payload (`omni.sender`), so only it settles its alerts (push-settled.ts). */
+  senderId(): string;
   sleep(ms: number): Promise<void>;
   log(line: string): void;
 }
@@ -116,7 +118,18 @@ const ALERTS: Record<AppPushKind, { label: string; title: string; body: string }
   finished: { label: 'Finished', title: 'Thread finished', body: 'Open Omni to see the result.' },
   failed: { label: 'Failed', title: 'Thread failed', body: 'Open Omni to see what happened.' },
   crewReport: { label: 'Crew report', title: 'Crew report', body: 'A crew member reported back in Conductor.' },
+  prAttention: { label: 'Pull request', title: 'Pull request needs attention', body: 'A watched PR has failing checks or new review feedback.' },
 };
+
+/** Apple's limit for `apns-collapse-id`. A thread id is a uuid, well under it. */
+const COLLAPSE_MAX_BYTES = 64;
+
+/**
+ * One alert per thread on the phone, as on the desktop: a newer alert for a thread replaces the one shown, so the newest
+ * says where it stands. Sent only to app builds that declared `collapse`: an older build keys taps by the notification
+ * identifier alone, and collapsed alerts share one, so its second tap on a thread would open nothing.
+ */
+export const collapseIdFor = (event: PushEvent) => (Buffer.byteLength(event.threadId) <= COLLAPSE_MAX_BYTES ? event.threadId : undefined);
 
 const oneLine = (text: string | null | undefined) => text?.replace(/\s+/g, ' ').trim() || null;
 
@@ -130,10 +143,37 @@ export function alertFor(event: PushEvent): { title: string; subtitle?: string; 
   return { title: clip(title, TITLE_MAX), subtitle: clip(from ? `${fixed.label}: ${from}` : fixed.label, TITLE_MAX), body };
 }
 
-export function payloadFor(event: PushEvent): string {
+/**
+ * Where this server's sender id lives. Under `sync.` so it never leaves this machine: each Mac has its own. A data
+ * folder copied to another Mac drops it when sync gives the copy a new machine id (db/sync.ts arm).
+ */
+const SENDER_KEY = 'sync.push_sender';
+
+/** This server's id in its alerts, made once and kept. */
+export function pushSenderId(): string {
+  const had = kv.get<string>(SENDER_KEY);
+  if (had) return had;
+  const id = randomUUID();
+  kv.set(SENDER_KEY, id);
+  return id;
+}
+
+/**
+ * `at` is when the server sent it, by the server's clock, and `sender` which server sent it. The phone hands both back
+ * to POST /api/auth/push-settled on every paired server; only the sender settles the alert, once the thread was read
+ * after `at`. Another server may be behind on sync and take an open question for an answered one.
+ */
+export function payloadFor(event: PushEvent, meta: { at?: string; sender?: string } = {}): string {
   return JSON.stringify({
     aps: { alert: alertFor(event), sound: 'default' },
-    omni: { kind: event.kind, threadId: event.threadId, channelId: event.channelId, ...(event.askerId ? { askerId: event.askerId } : {}) },
+    omni: {
+      kind: event.kind,
+      threadId: event.threadId,
+      channelId: event.channelId,
+      ...(event.askerId ? { askerId: event.askerId } : {}),
+      ...(meta.at ? { at: meta.at } : {}),
+      ...(meta.sender ? { sender: meta.sender } : {}),
+    },
   });
 }
 
@@ -160,7 +200,7 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
   const tokens = providerTokens(deps.config.key, deps.now);
   const run = pool(CONCURRENCY);
 
-  async function deliver(t: PushTarget, body: string, attempt = 1): Promise<void> {
+  async function deliver(t: PushTarget, body: string, collapseId: string | undefined, attempt = 1): Promise<void> {
     if (!deps.live(t.sessionId)) return;
     const expiration = Math.floor(deps.now() / 1000) + ALERT_TTL_S;
     let res: ApnsResponse;
@@ -172,6 +212,7 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
         jwt: tokens.get(),
         body,
         expiration,
+        collapseId,
       });
     } catch {
       res = { status: 0, reason: 'network' };
@@ -180,11 +221,11 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
     if (action === 'delivered') return;
     if (action === 'refresh' && attempt === 1) {
       tokens.refresh();
-      return deliver(t, body, 2);
+      return deliver(t, body, collapseId, 2);
     }
     if (action === 'retry' && attempt < MAX_ATTEMPTS) {
       await deps.sleep(backoffMs(attempt));
-      return deliver(t, body, attempt + 1);
+      return deliver(t, body, collapseId, attempt + 1);
     }
     if (action === 'forget') deps.forget(t.token);
     // The token itself stays out of the log: a status and a reason are enough to act on.
@@ -196,8 +237,9 @@ export function createPushSender(deps: PushSenderDeps): PushSender {
     send(event) {
       const targets = deps.targets(event.kind);
       if (!targets.length) return;
-      const body = payloadFor(event);
-      for (const t of targets) run(() => deliver(t, body)).catch((err: Error) => deps.log(`[push] ${err.message}`));
+      const body = payloadFor(event, { at: new Date(deps.now()).toISOString(), sender: deps.senderId() });
+      const collapseId = collapseIdFor(event);
+      for (const t of targets) run(() => deliver(t, body, t.collapse ? collapseId : undefined)).catch((err: Error) => deps.log(`[push] ${err.message}`));
     },
     close: () => deps.transport.close(),
   };
@@ -256,6 +298,7 @@ async function loadAndInstall(): Promise<void> {
       live: sessionIsLive,
       forget: forgetPushToken,
       now: Date.now,
+      senderId: pushSenderId,
       sleep: (ms) =>
         new Promise((done) => {
           setTimeout(done, ms).unref();
@@ -335,11 +378,13 @@ export function notifyCrewReport(parentId: string, report: Record<string, unknow
 
 /**
  * A watched PR has new failing checks or review feedback, and its thread was woken for it (pr-watch/worker.ts).
- * `summary` is the wake's one line ("#12 at abc1234. CI failed: test"). Feed only: the phone has no kind for it yet.
+ * `summary` is the wake's one line ("#12 at abc1234. CI failed: test"). The phone gets a push; the Web UI and the
+ * desktop app get a feed `alert`. The worker calls this once per wake, so a poll that finds nothing new sends nothing.
  */
 export function notifyPRAttention(threadId: string, summary: string, key: string) {
   const t = threads.get(threadId);
   if (!t) return;
+  emit({ kind: 'prAttention', threadId, channelId: t.channel_id, title: t.title, text: summary });
   publishFeed({
     type: 'alert',
     alert: { id: `pr:${threadId}:${key}`, kind: 'prAttention', thread_id: threadId, channel_id: t.channel_id, title: t.title, body: summary, at: new Date().toISOString() },
