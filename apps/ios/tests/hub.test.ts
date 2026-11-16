@@ -1,7 +1,7 @@
 import type { Fetch, SSEConnection, SSESink, SSETransport } from '@omni/client-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createLiveHub, REFRESH_DEBOUNCE_MS } from '../src/live/hub';
+import { createLiveHub, REFRESH_DEBOUNCE_MS, TASKS_RETRY_MS } from '../src/live/hub';
 import type { OmniSession } from '../src/live/session';
 
 const BASE = 'http://omni.test';
@@ -520,6 +520,76 @@ const inbox = (items: ReturnType<typeof waiting>[]) => ({
   items,
   unread: items.filter((i) => i.result).length,
   blocked: items.filter((i) => i.blockers.length).length,
+});
+
+describe('sub-agents', () => {
+  it('loads the running sub-agents when the hub opens, then follows the feed, changing only when one starts or stops', async () => {
+    const t = fakeTransport();
+    const task = (thread_id: string, task_id: string, over: Record<string, unknown> = {}) => ({ thread_id, task_id, channel_id: 'c', description: 'x', subagent: true, background: true, started_at: '', ...over });
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/tasks' ? { body: [task('t1', 'k1'), task('t1', 'shell', { subagent: false })] } : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    await settle();
+    expect(calls).toContain('/api/tasks');
+    expect(hub.tasks.get().map((k) => k.task_id)).toEqual(['k1']);
+    const first = hub.tasks.get();
+    const [feed] = t.feeds();
+    feed?.sink.open();
+    feed?.sink.message(frame({ type: 'tasks', tasks: [task('t1', 'k1', { tool_uses: 4 })] }));
+    expect(hub.tasks.get()).toBe(first);
+    feed?.sink.message(frame({ type: 'tasks', tasks: [task('t1', 'k1'), task('t2', 'k2')] }));
+    expect(hub.tasks.get().map((k) => k.thread_id)).toEqual(['t1', 't2']);
+    feed?.sink.message(frame({ type: 'tasks', tasks: [] }));
+    expect(hub.tasks.get()).toEqual([]);
+    hub.close();
+  });
+
+  const subagent = (thread_id: string, task_id: string) => ({ thread_id, task_id, channel_id: 'c', description: 'x', subagent: true, background: true, started_at: '' });
+
+  it('asks again after a failed first load, backing off, until the list loads', async () => {
+    let fail = 2;
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/tasks' ? (fail-- > 0 ? { status: 500, body: { error: 'down' } } : { body: [subagent('t1', 'k1')] }) : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch });
+    const loads = () => calls.filter((c) => c === '/api/tasks').length;
+    await settle();
+    expect(loads()).toBe(1);
+    expect(hub.tasks.get()).toEqual([]);
+    await settle(TASKS_RETRY_MS);
+    expect(loads()).toBe(2);
+    // The second failure waits twice as long.
+    await settle(TASKS_RETRY_MS);
+    expect(loads()).toBe(2);
+    await settle(TASKS_RETRY_MS);
+    expect(loads()).toBe(3);
+    expect(hub.tasks.get().map((k) => k.task_id)).toEqual(['k1']);
+    // Loaded: no more asking.
+    await settle(TASKS_RETRY_MS * 20);
+    expect(loads()).toBe(3);
+    hub.close();
+  });
+
+  it('asks again as soon as the feed connects when the first load failed, and stops retrying once closed', async () => {
+    let fail = true;
+    const t = fakeTransport();
+    const { fetch, calls } = fakeFetch((path) => (path === '/api/tasks' ? (fail ? { status: 500, body: { error: 'down' } } : { body: [subagent('t2', 'k2')] }) : { body: [] }));
+    const hub = createLiveHub({ session: session(), transport: t.transport, fetch });
+    const loads = () => calls.filter((c) => c === '/api/tasks').length;
+    await settle();
+    expect(loads()).toBe(1);
+    fail = false;
+    t.feeds()[0]?.sink.open();
+    await settle();
+    expect(loads()).toBe(2);
+    expect(hub.tasks.get().map((k) => k.task_id)).toEqual(['k2']);
+
+    const second = fakeFetch(() => ({ status: 500, body: { error: 'down' } }));
+    const other = createLiveHub({ session: session(), transport: fakeTransport().transport, fetch: second.fetch });
+    await settle();
+    other.close();
+    const before = second.calls.length;
+    await settle(TASKS_RETRY_MS * 4);
+    expect(second.calls.length).toBe(before);
+    hub.close();
+  });
 });
 
 describe('needs you', () => {
